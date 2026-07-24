@@ -1,0 +1,224 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function memberDoc(projectId) {
+      return get(/databases/$(database)/documents/projects/$(projectId)/members/$(request.auth.uid));
+    }
+
+    function isProjectMember(projectId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/projects/$(projectId)/members/$(request.auth.uid));
+    }
+
+    function hasRole(projectId, roles) {
+      return isProjectMember(projectId) && memberDoc(projectId).data.role in roles;
+    }
+
+    // ─── Users ───────────────────────────────────────────
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && request.auth.uid == userId;
+      allow delete: if false;
+    }
+
+    // ─── Project Templates (Phase 1: New Project via template) ──
+    match /projectTemplates/{templateId} {
+      allow read: if isSignedIn();
+      allow write: if false; // seeded via Cloud Functions / admin scripts only
+    }
+
+    // ─── Teams (Team Workspace) ──────────────────────────
+    match /teams/{teamId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn(); // TODO: tighten to team OWNER once team-level roles land
+    }
+
+    // ─── Library System: shared global catalog, not project-scoped ──────
+    // Any signed-in user can read the whole catalog and add items (custom
+    // items included) — this is a simple v1 shared-catalog model, not
+    // access-controlled per organization.
+    match /libraryItems/{itemId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+    }
+
+    // ─── Projects + subcollections ───────────────────────
+    match /projects/{projectId} {
+      allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+      // Direct create allowed for Phase 1 simplicity; the New Project Wizard
+      // Cloud Function also creates the matching /members/{uid} doc atomically.
+      allow create: if isSignedIn();
+      allow update: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+      allow delete: if hasRole(projectId, ['OWNER']);
+
+      // Role-based Access + Permission Control
+      match /members/{memberId} {
+        allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+        allow write: if hasRole(projectId, ['OWNER', 'ADMIN']);
+      }
+
+      // Multi-Building Support
+      match /buildings/{buildingId} {
+        allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+        allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+
+        // Phase 2: Core Modeling Engine — floor plans live under their building
+        match /floors/{floorId} {
+          allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+          allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+
+          match /walls/{wallId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /openings/{openingId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /columns/{columnId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /beams/{beamId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /slabs/{slabId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /ceilings/{ceilingId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /foundations/{foundationId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /footings/{footingId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /roofs/{roofId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /ramps/{rampId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /railings/{railingId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /stairs/{stairId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /balconies/{balconyId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /curtainWalls/{curtainWallId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /skylights/{skylightId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /placedObjects/{placedObjectId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /rooms/{roomId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /dimensions/{dimensionId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /notes/{noteId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /gridLines/{gridLineId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+
+          match /sectionLines/{sectionLineId} {
+            allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+            allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+          }
+        }
+
+        // Phase 4: Drawing Documentation — sheets reference a floor/
+        // elevation/section but live at the building level, since a
+        // sheet outlives any one floor's edit session and can reference
+        // the whole building (an elevation isn't tied to one floor).
+        match /sheets/{sheetId} {
+          allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+          allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+        }
+
+        // Phase 2: Shaft is the one core modeling element that's
+        // inherently cross-floor (elevator/stair/mechanical shaft), so
+        // it lives at the building level too rather than under a floor.
+        match /shafts/{shaftId} {
+          allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+          allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+        }
+
+        // Phase 5 Pass 2: the plot boundary — building-level for the same
+        // reason as Shaft/Sheet (it isn't scoped to one floor).
+        match /siteBoundary/{siteBoundaryId} {
+          allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+          allow write: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+        }
+      }
+
+      // Version History + Version Lock
+      match /versions/{versionId} {
+        allow read: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+        allow create: if hasRole(projectId, ['OWNER', 'ADMIN', 'EDITOR']);
+        allow update, delete: if hasRole(projectId, ['OWNER', 'ADMIN'])
+          && resource.data.isLocked == false;
+      }
+    }
+
+    // ─── Audit Logs (Security: immutable trail) ──────────
+    match /auditLogs/{logId} {
+      allow read: if isSignedIn(); // TODO: restrict to project OWNER/ADMIN once per-log projectId scoping is added to the read rule
+      allow write: if false; // written only by Cloud Functions via Admin SDK
+    }
+  }
+}

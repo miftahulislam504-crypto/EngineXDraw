@@ -35,29 +35,41 @@ export function subscribeToMyProjects(
     collectionGroup(db, 'members'),
     where('userId', '==', userId),
   );
-
-  return onSnapshot(membershipQuery, async (membershipSnap) => {
-    const projectIds = membershipSnap.docs
-      .map((d) => d.ref.parent.parent?.id)
-      .filter((id): id is string => Boolean(id));
-
-    if (projectIds.length === 0) {
-      onChange([]);
-      return;
-    }
-
-    // Firestore 'in' queries cap at 30 ids — fine for Phase 1 scale.
-    const projectsQuery = query(
-      collection(db, 'projects'),
-      where(documentId(), 'in', projectIds.slice(0, 30)),
-    );
-    const projectDocs = await getDocs(projectsQuery);
-    const projects = projectDocs.docs.map(
-      (d) => ({ id: d.id, ...d.data() }) as Project,
-    );
-    projects.sort((a, b) => (a.updatedAt > b.updatedAt ? -1 : 1));
-    onChange(projects);
-  });
+  
+  return onSnapshot(
+    membershipQuery,
+    async (membershipSnap) => {
+        const projectIds = membershipSnap.docs
+          .map((d) => d.ref.parent.parent?.id)
+          .filter((id): id is string => Boolean(id));
+        
+        if (projectIds.length === 0) {
+          onChange([]);
+          return;
+        }
+        
+        try {
+          // Firestore 'in' queries cap at 30 ids — fine for Phase 1 scale.
+          const projectsQuery = query(
+            collection(db, 'projects'),
+            where(documentId(), 'in', projectIds.slice(0, 30)),
+          );
+          const projectDocs = await getDocs(projectsQuery);
+          const projects = projectDocs.docs.map(
+            (d) => ({ id: d.id, ...d.data() }) as Project,
+          );
+          projects.sort((a, b) => (a.updatedAt > b.updatedAt ? -1 : 1));
+          onChange(projects);
+        } catch (err) {
+          console.error('subscribeToMyProjects: failed to fetch project docs', err);
+          onChange([]);
+        }
+      },
+      (err) => {
+        console.error('subscribeToMyProjects: membership query failed', err);
+        onChange([]);
+      },
+  );
 }
 
 // ─── Single-project detail subscriptions ────────────────
@@ -94,10 +106,11 @@ export function subscribeToMembers(
 // ─── Cloud Function callers ──────────────────────────────
 
 export async function createProject(input: NewProjectWizardInput) {
-  const fn = httpsCallable<NewProjectWizardInput, { projectId: string }>(
-    functions,
-    'createProject',
-  );
+  const fn = httpsCallable < NewProjectWizardInput,
+    { projectId: string } > (
+      functions,
+      'createProject',
+    );
   const result = await fn(input);
   return result.data.projectId;
 }

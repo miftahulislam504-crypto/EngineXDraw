@@ -19,6 +19,7 @@ import {
   computeDesignStatistics,
 } from '@archibim/core-engine';
 import { subscribeToBuildings, subscribeToProject } from '@/lib/projects';
+import { useAuthStore } from '@/lib/auth-store';
 import {
   EMPTY_FLOOR_ELEMENTS,
   subscribeToFloorElements,
@@ -41,6 +42,7 @@ import { useI18nStore, formatTemplate } from '@/lib/i18n';
 
 export default function AutomationPage() {
   const params = useParams<{ id: string }>();
+  const { user } = useAuthStore();
   const projectId = params.id;
   const { t } = useI18nStore();
 
@@ -217,7 +219,7 @@ export default function AutomationPage() {
         sectionLines: floors.flatMap((f) => floorElements[f.id]?.sectionLines ?? []),
         shafts: new Array(shaftCount),
       });
-      await createProjectVersion(projectId, revisionLabel.trim(), { ...stats });
+      await createProjectVersion(projectId, revisionLabel.trim(), { ...stats }, user?.uid ?? '');
       setRevisionLabel('');
       return '';
     });

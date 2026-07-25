@@ -1,25 +1,45 @@
 {
-  "name": "archibim-platform",
+  "name": "@archibim/web",
   "version": "0.1.0",
   "private": true,
-  "workspaces": [
-    "apps/*",
-    "packages/*",
-    "functions"
-  ],
   "scripts": {
-    "dev": "turbo run dev",
-    "build": "turbo run build",
-    "lint": "turbo run lint",
-    "type-check": "turbo run type-check",
-    "emulators": "firebase emulators:start",
-    "deploy:functions": "firebase deploy --only functions",
-    "deploy:rules": "firebase deploy --only firestore:rules,storage:rules",
-    "deploy:hosting": "firebase deploy --only hosting"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@archibim/firebase-config": "*",
+    "@archibim/object-model": "*",
+    "@archibim/shared-ui": "*",
+    "@archibim/core-engine": "*",
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.6.1",
+    "clsx": "^2.1.1",
+    "firebase": "^11.0.2",
+    "jspdf": "^2.5.2",
+    "konva": "^10.3.0",
+    "next": "^15.0.3",
+    "otplib": "^12.0.1",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-konva": "^19.2.5",
+    "three": "^0.185.1",
+    "zustand": "^5.0.1"
   },
   "devDependencies": {
-    "turbo": "^2.3.0",
+    "@types/node": "^20.17.6",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/three": "^0.185.0",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^15.0.3",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.15",
     "typescript": "^5.6.3"
-  },
-  "packageManager": "npm@10.8.2"
+  }
 }

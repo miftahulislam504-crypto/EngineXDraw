@@ -5,12 +5,14 @@ import { useRouter } from 'next/navigation';
 import { Button, Input, PageHeader } from '@archibim/shared-ui';
 import type { NewProjectWizardInput } from '@archibim/object-model';
 import { createProject } from '@/lib/projects';
+import { useAuthStore } from '@/lib/auth-store';
 import { useI18nStore } from '@/lib/i18n';
 
 type BuildingDraft = { name: string; numberOfFloors: number; buildingType: string };
 
 export default function NewProjectPage() {
   const router = useRouter();
+  const { user } = useAuthStore();
   const { t } = useI18nStore();
   const STEPS = [t.wizard.stepBasics, t.wizard.stepSite, t.wizard.stepBuildings, t.wizard.stepReview];
   const [step, setStep] = useState(0);
@@ -44,6 +46,7 @@ export default function NewProjectPage() {
   }
 
   async function handleCreate() {
+    if (!user) return;
     setIsSubmitting(true);
     setSubmitError(null);
     try {
@@ -63,9 +66,15 @@ export default function NewProjectPage() {
             buildingType: b.buildingType || undefined,
           })),
       };
-      const projectId = await createProject(input);
+      const projectId = await createProject(
+        input,
+        user.uid,
+        user.displayName ?? '',
+        user.email ?? '',
+      );
       router.replace(`/projects/${projectId}`);
     } catch (err) {
+      console.error('createProject failed:', err);
       setSubmitError(t.wizard.createErrorMessage);
       setIsSubmitting(false);
     }

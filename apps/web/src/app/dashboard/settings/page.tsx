@@ -1,36 +1,57 @@
 'use client';
 
 import { useState } from 'react';
-import { httpsCallable } from 'firebase/functions';
+import { authenticator } from 'otplib';
+import * as QRCode from 'qrcode';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { Button, Input, PageHeader } from '@archibim/shared-ui';
-import { functions } from '@/lib/firebase-client';
+import { db } from '@/lib/firebase-client';
 import { useAuthStore } from '@/lib/auth-store';
 import { useI18nStore } from '@/lib/i18n';
 import { LanguageToggle } from '@/components/LanguageToggle';
 
 type EnrollmentState = 'idle' | 'awaiting-code' | 'enabled';
 
+/**
+ * 2FA enrollment used to run as two Cloud Functions (beginTwoFactorEnrollment /
+ * confirmTwoFactorEnrollment), but the Firebase project is on the Spark
+ * (free) plan, which cannot run Cloud Functions. Both otplib and qrcode
+ * work fine in the browser, so this generates and verifies the TOTP
+ * secret client-side and writes straight to the user's own `users/{uid}`
+ * doc — same pattern as the rest of the app now.
+ */
 export default function SettingsPage() {
   const { user } = useAuthStore();
   const { t } = useI18nStore();
   const [state, setState] = useState<EnrollmentState>('idle');
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
+  const [pendingSecret, setPendingSecret] = useState<string | null>(null);
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
 
   async function startEnrollment() {
+    if (!user) return;
     setIsBusy(true);
     setError(null);
     try {
-      const fn = httpsCallable<unknown, { qrCodeDataUrl: string }>(
-        functions,
-        'beginTwoFactorEnrollment',
+      const secret = authenticator.generateSecret();
+      const otpauthUrl = authenticator.keyuri(
+        user.email ?? user.uid,
+        'ArchiBIM Platform',
+        secret,
       );
-      const result = await fn();
-      setQrCodeDataUrl(result.data.qrCodeDataUrl);
+      const dataUrl = await QRCode.toDataURL(otpauthUrl);
+
+      // Stored under pending2faSecret until confirmed, so a
+      // half-finished enrollment never silently enables 2FA.
+      await setDoc(doc(db, 'users', user.uid), { pending2faSecret: secret }, { merge: true });
+
+      setPendingSecret(secret);
+      setQrCodeDataUrl(dataUrl);
       setState('awaiting-code');
-    } catch {
+    } catch (err) {
+      console.error('startEnrollment failed:', err);
       setError(t.settings.startErrorMessage);
     } finally {
       setIsBusy(false);
@@ -38,13 +59,33 @@ export default function SettingsPage() {
   }
 
   async function confirmEnrollment() {
+    if (!user) return;
     setIsBusy(true);
     setError(null);
     try {
-      const fn = httpsCallable(functions, 'confirmTwoFactorEnrollment');
-      await fn({ code });
+      // Re-read the pending secret from Firestore rather than trusting
+      // only local state, in case the user reloaded mid-enrollment.
+      const userSnap = await getDoc(doc(db, 'users', user.uid));
+      const secret = (userSnap.data()?.pending2faSecret as string | undefined) ?? pendingSecret;
+      if (!secret) {
+        setError(t.settings.incorrectCodeMessage);
+        return;
+      }
+
+      const isValid = authenticator.check(code, secret);
+      if (!isValid) {
+        setError(t.settings.incorrectCodeMessage);
+        return;
+      }
+
+      await setDoc(
+        doc(db, 'users', user.uid),
+        { twoFactorEnabled: true, twoFactorSecret: secret, pending2faSecret: null },
+        { merge: true },
+      );
       setState('enabled');
-    } catch {
+    } catch (err) {
+      console.error('confirmEnrollment failed:', err);
       setError(t.settings.incorrectCodeMessage);
     } finally {
       setIsBusy(false);

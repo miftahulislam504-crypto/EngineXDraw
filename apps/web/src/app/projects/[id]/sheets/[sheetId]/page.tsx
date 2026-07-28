@@ -107,7 +107,7 @@ export default function SheetDetailPage() {
   }
 
   return (
-    <div>
+    <div className="px-8 py-8">
       <PageHeader
         eyebrow={
           <Link href={`/projects/${projectId}/sheets`} className="hover:text-accent-dark">

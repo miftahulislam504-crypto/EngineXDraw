@@ -56,7 +56,7 @@ export default function ProjectDetailPage() {
   }
 
   return (
-    <div>
+    <div className="px-8 py-8">
       <PageHeader
         eyebrow={t.projectDetail.eyebrow}
         title={project.name}
@@ -68,27 +68,6 @@ export default function ProjectDetailPage() {
             </Button>
             <Link href={`/projects/${projectId}/design`}>
               <Button>{t.projectDetail.openInDesignStudio}</Button>
-            </Link>
-            <Link href={`/projects/${projectId}/elevations`}>
-              <Button variant="secondary">{t.projectDetail.viewElevations}</Button>
-            </Link>
-            <Link href={`/projects/${projectId}/sheets`}>
-              <Button variant="secondary">{t.projectDetail.viewSheets}</Button>
-            </Link>
-            <Link href={`/projects/${projectId}/compliance`}>
-              <Button variant="secondary">{t.projectDetail.viewCompliance}</Button>
-            </Link>
-            <Link href={`/projects/${projectId}/environmental`}>
-              <Button variant="secondary">{t.projectDetail.viewEnvironmental}</Button>
-            </Link>
-            <Link href={`/projects/${projectId}/visualization`}>
-              <Button variant="secondary">{t.projectDetail.viewVisualization}</Button>
-            </Link>
-            <Link href={`/projects/${projectId}/automation`}>
-              <Button variant="secondary">{t.projectDetail.viewAutomation}</Button>
-            </Link>
-            <Link href={`/projects/${projectId}/analytics`}>
-              <Button variant="secondary">{t.projectDetail.viewAnalytics}</Button>
             </Link>
           </div>
         }

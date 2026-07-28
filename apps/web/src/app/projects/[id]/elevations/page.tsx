@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
 import { PageHeader } from '@archibim/shared-ui';
 import type { Building, Floor } from '@archibim/object-model';
 import { subscribeToBuildings } from '@/lib/projects';
@@ -64,13 +63,8 @@ export default function ElevationsPage() {
   const hasAnyWalls = floors.some((f) => (floorElements[f.id]?.walls.length ?? 0) > 0);
 
   return (
-    <div>
+    <div className="px-8 py-8">
       <PageHeader
-        eyebrow={
-          <Link href={`/projects/${projectId}`} className="hover:text-accent-dark">
-            {t.designStudio.backToProject}
-          </Link>
-        }
         title={t.elevations.pageTitle}
         action={
           <div className="flex items-center gap-1 rounded-sheet border border-line-strong p-1">

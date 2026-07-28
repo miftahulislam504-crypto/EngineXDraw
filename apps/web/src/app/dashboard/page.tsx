@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { PageHeader, Button, TitleBlockCard } from '@archibim/shared-ui';
+import { PageHeader, TitleBlockCard } from '@archibim/shared-ui';
 import type { Project } from '@archibim/object-model';
 import { useAuthStore } from '@/lib/auth-store';
 import { subscribeToMyProjects } from '@/lib/projects';
@@ -32,15 +32,7 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <PageHeader
-        eyebrow={t.dashboard.eyebrow}
-        title={t.dashboard.title}
-        action={
-          <Link href="/projects/new">
-            <Button>{t.dashboard.newProject}</Button>
-          </Link>
-        }
-      />
+      <PageHeader eyebrow={t.dashboard.eyebrow} title={t.dashboard.title} />
 
       <div className="mt-6">
         {projects === null && (
@@ -50,9 +42,6 @@ export default function DashboardPage() {
         {projects !== null && projects.length === 0 && (
           <div className="rounded-sheet border border-dashed border-line-strong bg-surface p-10 text-center">
             <p className="text-sm text-ink-muted">{t.dashboard.emptyStateMessage}</p>
-            <Link href="/projects/new" className="mt-4 inline-block">
-              <Button>{t.dashboard.newProject}</Button>
-            </Link>
           </div>
         )}
 

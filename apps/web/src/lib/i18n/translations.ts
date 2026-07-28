@@ -34,6 +34,40 @@ export interface Translations {
     next: string;
     loadingFloorsProgress: string; // use {loaded} and {total} as placeholders
   };
+  landing: {
+    brandEyebrow: string;
+    heroTitle: string;
+    heroSubtitle: string;
+    getStarted: string;
+    signInLink: string;
+    alreadyHaveAccount: string;
+    sectionModulesEyebrow: string;
+    sectionModulesTitle: string;
+    moduleDesignTitle: string;
+    moduleDesignBody: string;
+    moduleSheetsTitle: string;
+    moduleSheetsBody: string;
+    moduleComplianceTitle: string;
+    moduleComplianceBody: string;
+    moduleEnvironmentalTitle: string;
+    moduleEnvironmentalBody: string;
+    moduleVisualizationTitle: string;
+    moduleVisualizationBody: string;
+    moduleAutomationTitle: string;
+    moduleAutomationBody: string;
+    moduleAnalyticsTitle: string;
+    moduleAnalyticsBody: string;
+    sectionWorkflowEyebrow: string;
+    sectionWorkflowTitle: string;
+    workflowStep1Title: string;
+    workflowStep1Body: string;
+    workflowStep2Title: string;
+    workflowStep2Body: string;
+    workflowStep3Title: string;
+    workflowStep3Body: string;
+    footerCta: string;
+    footerTagline: string;
+  };
   auth: {
     signIn: string;
     signingIn: string;
@@ -54,6 +88,18 @@ export interface Translations {
     projects: string;
     settings: string;
     signOut: string;
+  };
+  projectShell: {
+    backToProjects: string;
+    navOverview: string;
+    navDesign: string;
+    navSheets: string;
+    navElevations: string;
+    navCompliance: string;
+    navEnvironmental: string;
+    navVisualization: string;
+    navAutomation: string;
+    navAnalytics: string;
   };
   dashboard: {
     eyebrow: string;

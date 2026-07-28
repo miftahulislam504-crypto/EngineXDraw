@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { PageHeader } from '@archibim/shared-ui';
 import type {
   Balcony,
@@ -550,14 +549,9 @@ export default function DesignStudioPage() {
   }
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-full flex-col">
       <div className="border-b border-line bg-surface px-6 py-3">
         <PageHeader
-          eyebrow={
-            <Link href={`/projects/${projectId}`} className="hover:text-accent-dark">
-              {t.designStudio.backToProject}
-            </Link>
-          }
           title={t.designStudio.pageTitle}
           action={
             <div className="flex items-center gap-2">

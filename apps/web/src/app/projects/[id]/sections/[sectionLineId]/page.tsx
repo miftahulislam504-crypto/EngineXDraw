@@ -72,11 +72,11 @@ export default function SectionViewPage() {
   const label = sectionLine ? sectionLine.label ?? getSectionLineAutoLabel(sectionLine, allSectionLines) : '';
 
   return (
-    <div>
+    <div className="px-8 py-8">
       <PageHeader
         eyebrow={
           <Link href={`/projects/${projectId}/design`} className="hover:text-accent-dark">
-            {t.designStudio.backToProject}
+            {t.designStudio.pageTitle}
           </Link>
         }
         title={sectionLine ? formatTemplate(t.sections.pageTitle, { label }) : '…'}

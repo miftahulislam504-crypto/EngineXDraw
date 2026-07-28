@@ -91,15 +91,8 @@ export default function SheetsPage() {
   }
 
   return (
-    <div>
-      <PageHeader
-        eyebrow={
-          <Link href={`/projects/${projectId}`} className="hover:text-accent-dark">
-            {t.designStudio.backToProject}
-          </Link>
-        }
-        title={t.sheetsPage.pageTitle}
-      />
+    <div className="px-8 py-8">
+      <PageHeader title={t.sheetsPage.pageTitle} />
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">

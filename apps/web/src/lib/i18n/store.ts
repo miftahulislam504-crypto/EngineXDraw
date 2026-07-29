@@ -11,7 +11,7 @@ export type { Locale };
 const DICTIONARIES: Record<Locale, Translations> = { en, bn };
 const STORAGE_KEY = 'archibim-locale';
 
-interface I18nState {
+export interface I18nState {
   locale: Locale;
   t: Translations;
   setLocale: (locale: Locale) => void;

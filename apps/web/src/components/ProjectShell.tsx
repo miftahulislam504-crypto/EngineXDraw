@@ -6,7 +6,7 @@ import { usePathname, useParams } from 'next/navigation';
 import clsx from 'clsx';
 import type { Project } from '@archibim/object-model';
 import { useAuthStore } from '@/lib/auth-store';
-import { useI18nStore } from '@/lib/i18n';
+import { useI18nStore, type I18nState } from '@/lib/i18n';
 import { subscribeToProject } from '@/lib/projects';
 import { LanguageToggle } from './LanguageToggle';
 import { NetworkStatusBadge } from './NetworkStatusBadge';
@@ -139,7 +139,7 @@ interface ShellNavProps {
   navItems: { href: string; label: string; exact?: boolean }[];
   pathname: string;
   onSignOut: () => void;
-  t: ReturnType<typeof useI18nStore>['t'];
+  t: I18nState['t'];
   className?: string;
   headerAction?: React.ReactNode;
 }

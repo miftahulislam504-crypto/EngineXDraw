@@ -43,26 +43,26 @@ export function TitleBlockCard({
     >
       {/* Drawing field */}
       <div className="flex h-28 flex-col justify-between p-4">
-        <div className="flex items-start justify-between">
-          <span className="font-mono text-[11px] uppercase tracking-wider text-ink-faint">
+        <div className="flex items-start justify-between gap-2">
+          <span className="shrink-0 font-mono text-[11px] uppercase tracking-wider text-ink-faint">
             No. {projectNo}
           </span>
           <StatusBadge status={status} label={statusLabel} />
         </div>
-        <h3 className="font-display text-lg font-medium leading-snug text-ink group-hover:text-accent-dark">
+        <h3 className="line-clamp-2 font-display text-lg font-medium leading-snug text-ink group-hover:text-accent-dark">
           {name}
         </h3>
       </div>
 
       {/* Title block strip */}
       <div className="grid grid-cols-2 divide-x divide-line border-t border-line font-mono text-[11px] text-ink-muted">
-        <div className="px-3 py-2">
+        <div className="min-w-0 px-3 py-2">
           <div className="text-ink-faint">BUILDINGS</div>
-          <div className="text-ink">{buildingCount}</div>
+          <div className="truncate text-ink">{buildingCount}</div>
         </div>
-        <div className="px-3 py-2">
+        <div className="min-w-0 px-3 py-2">
           <div className="text-ink-faint">UPDATED</div>
-          <div className="text-ink">{updatedLabel}</div>
+          <div className="truncate text-ink">{updatedLabel}</div>
         </div>
       </div>
     </Wrapper>

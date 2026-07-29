@@ -100,6 +100,8 @@ export interface Translations {
     navVisualization: string;
     navAutomation: string;
     navAnalytics: string;
+    openMenu: string;
+    closeMenu: string;
   };
   dashboard: {
     eyebrow: string;

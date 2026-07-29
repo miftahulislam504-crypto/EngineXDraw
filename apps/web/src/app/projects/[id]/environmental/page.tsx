@@ -141,7 +141,7 @@ export default function EnvironmentalAnalysisPage() {
   }
 
   return (
-    <div className="px-8 py-8">
+    <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
       <PageHeader eyebrow={project.projectName} title={t.environmental.pageTitle} />
 
       {buildings.length === 0 ? (

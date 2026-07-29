@@ -85,6 +85,8 @@ export const en: Translations = {
     navVisualization: 'Visualization',
     navAutomation: 'Automation',
     navAnalytics: 'Analytics',
+    openMenu: 'Open menu',
+    closeMenu: 'Close menu',
   },
   dashboard: {
     eyebrow: 'Team Workspace',

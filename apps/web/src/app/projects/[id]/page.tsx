@@ -79,7 +79,7 @@ export default function ProjectDetailPage() {
   }
 
   return (
-    <div className="px-8 py-8">
+    <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
       <PageHeader
         eyebrow={t.projectDetail.eyebrow}
         title={project.projectName}
@@ -100,7 +100,7 @@ export default function ProjectDetailPage() {
           </h2>
           <div className="rounded-sheet border border-line bg-surface p-4">
             {project.siteInfo?.address ? (
-              <dl className="grid grid-cols-2 gap-3 text-sm">
+              <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
                 <Field label={t.projectDetail.address} value={project.siteInfo.address} />
                 <Field
                   label={t.projectDetail.landArea}
@@ -146,7 +146,7 @@ export default function ProjectDetailPage() {
                 required
                 autoFocus
               />
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Input
                   label={t.projectDetail.numberOfFloorsLabel}
                   type="number"
@@ -191,10 +191,10 @@ export default function ProjectDetailPage() {
             {buildings.map((b) => (
               <div
                 key={b.id}
-                className="flex items-center justify-between rounded-sheet border border-line bg-surface px-4 py-3 text-sm"
+                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-sheet border border-line bg-surface px-4 py-3 text-sm"
               >
-                <span className="font-medium text-ink">{b.name}</span>
-                <span className="font-mono text-xs text-ink-muted">
+                <span className="min-w-0 truncate font-medium text-ink">{b.name}</span>
+                <span className="shrink-0 font-mono text-xs text-ink-muted">
                   {b.numberOfFloors} {t.projectDetail.floorLabel}
                   {locale === 'en' && b.numberOfFloors !== 1 ? 's' : ''}
                   {b.buildingType ? ` · ${b.buildingType}` : ''}

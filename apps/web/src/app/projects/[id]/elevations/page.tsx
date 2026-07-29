@@ -63,7 +63,7 @@ export default function ElevationsPage() {
   const hasAnyWalls = floors.some((f) => (floorElements[f.id]?.walls.length ?? 0) > 0);
 
   return (
-    <div className="px-8 py-8">
+    <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
       <PageHeader
         title={t.elevations.pageTitle}
         action={

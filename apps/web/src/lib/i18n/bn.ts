@@ -85,6 +85,8 @@ export const bn: Translations = {
     navVisualization: 'ভিজ্যুয়ালাইজেশন',
     navAutomation: 'অটোমেশন',
     navAnalytics: 'অ্যানালিটিক্স',
+    openMenu: 'মেনু খুলুন',
+    closeMenu: 'মেনু বন্ধ করুন',
   },
   dashboard: {
     eyebrow: 'টিম ওয়ার্কস্পেস',

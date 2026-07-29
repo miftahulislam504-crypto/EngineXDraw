@@ -237,7 +237,7 @@ export default function CompliancePage() {
   };
 
   return (
-    <div className="px-8 py-8">
+    <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
       <PageHeader eyebrow={project.projectName} title={t.compliance.pageTitle} />
 
       {buildings.length === 0 ? (
@@ -326,7 +326,7 @@ export default function CompliancePage() {
                 <p className="mt-1 text-xs text-ink-faint">
                   {siteBoundary ? t.compliance.setbackSourceGeometric : t.compliance.setbackSourceManual}
                 </p>
-                <div className="mt-2 grid grid-cols-3 gap-2">
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <Input
                     label={t.compliance.actualFrontLabel}
                     type="number"

@@ -237,8 +237,8 @@ export default function CompliancePage() {
   };
 
   return (
-    <div>
-      <PageHeader eyebrow={project.name} title={t.compliance.pageTitle} />
+    <div className="px-8 py-8">
+      <PageHeader eyebrow={project.projectName} title={t.compliance.pageTitle} />
 
       {buildings.length === 0 ? (
         <p className="mt-6 text-sm text-ink-muted">{t.compliance.noBuildings}</p>

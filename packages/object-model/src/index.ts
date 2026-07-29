@@ -9,8 +9,6 @@
 
 export type ProjectRole = 'OWNER' | 'ADMIN' | 'EDITOR' | 'VIEWER';
 
-export type ProjectStatus = 'ACTIVE' | 'ARCHIVED';
-
 export const ROLE_HIERARCHY: Record<ProjectRole, number> = {
   OWNER: 4,
   ADMIN: 3,
@@ -117,18 +115,23 @@ export interface Building {
 
 // ─── Core Project ────────────────────────────────────────
 
+export type ProjectStatus = 'active' | 'on_hold' | 'completed';
+
 export interface Project {
   id: string;
-  name: string;
+  /** Hub field name — Hub is the source of truth for all project records. */
+  projectName: string;
+  projectCode?: string;
+  clientName?: string;
+  location?: string;
   description?: string;
   status: ProjectStatus;
   templateId?: string;
   teamId?: string;
   siteInfo?: SiteInfo;
-  archivedAt?: FirestoreTimestampLike | null;
-  lastSyncedAt: FirestoreTimestampLike;
+  lastSyncedAt?: FirestoreTimestampLike;
   createdAt: FirestoreTimestampLike;
-  updatedAt: FirestoreTimestampLike;
+  updatedAt?: FirestoreTimestampLike;
   createdBy: string;
 }
 

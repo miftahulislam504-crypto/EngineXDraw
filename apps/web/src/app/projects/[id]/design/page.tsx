@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { PageHeader } from '@archibim/shared-ui';
+import Link from 'next/link';
+import { Button, PageHeader } from '@archibim/shared-ui';
 import type {
   Balcony,
   Beam,
@@ -134,6 +135,7 @@ export default function DesignStudioPage() {
   const { user } = useAuthStore();
 
   const [buildings, setBuildings] = useState<Building[]>([]);
+  const [hasLoadedBuildings, setHasLoadedBuildings] = useState(false);
   const [buildingId, setBuildingId] = useState<string | null>(null);
   const [floors, setFloors] = useState<Floor[]>([]);
   const [floorId, setFloorId] = useState<string | null>(null);
@@ -174,6 +176,7 @@ export default function DesignStudioPage() {
     return subscribeToBuildings(projectId, (bs) => {
       setBuildings(bs);
       setBuildingId((current) => current ?? bs[0]?.id ?? null);
+      setHasLoadedBuildings(true);
     });
   }, [projectId]);
 
@@ -546,6 +549,20 @@ export default function DesignStudioPage() {
     if (kind === 'shaft') await deleteShaft(projectId, buildingId, id);
     if (kind === 'siteBoundary') await deleteSiteBoundary(projectId, buildingId, id);
     setSelection(null);
+  }
+
+  if (hasLoadedBuildings && buildings.length === 0) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+        <h2 className="font-display text-lg font-medium text-ink">
+          {t.designStudio.noBuildingsTitle}
+        </h2>
+        <p className="max-w-sm text-sm text-ink-muted">{t.designStudio.noBuildingsMessage}</p>
+        <Link href={`/projects/${projectId}`}>
+          <Button>{t.designStudio.goToProjectOverview}</Button>
+        </Link>
+      </div>
+    );
   }
 
   return (

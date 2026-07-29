@@ -7,6 +7,7 @@ export interface TitleBlockCardProps {
   name: string;
   projectNo: string;
   status: ProjectStatus;
+  statusLabel?: string;
   buildingCount: number;
   updatedLabel: string;
   href?: string;
@@ -24,6 +25,7 @@ export function TitleBlockCard({
   name,
   projectNo,
   status,
+  statusLabel,
   buildingCount,
   updatedLabel,
   href,
@@ -45,7 +47,7 @@ export function TitleBlockCard({
           <span className="font-mono text-[11px] uppercase tracking-wider text-ink-faint">
             No. {projectNo}
           </span>
-          <StatusBadge status={status} />
+          <StatusBadge status={status} label={statusLabel} />
         </div>
         <h3 className="font-display text-lg font-medium leading-snug text-ink group-hover:text-accent-dark">
           {name}

@@ -29,15 +29,17 @@ export default function LandingPage() {
     <div className="min-h-screen bg-paper">
       {/* Top bar */}
       <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-          <div className="font-mono text-[11px] uppercase tracking-wider text-accent">
-            {t.landing.brandEyebrow}
+        <div className="relative mx-auto flex max-w-5xl items-center justify-center px-6 py-4">
+          <div className="flex items-center gap-2">
+            <span className="flex h-8 w-8 items-center justify-center rounded-sheet bg-ink font-display text-sm font-semibold text-white">
+              E
+            </span>
+            <span className="font-display text-base font-medium tracking-tight text-ink">
+              EngineX Draw
+            </span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="absolute right-6">
             <LanguageToggle />
-            <Link href="/login" className="font-mono text-[11px] uppercase tracking-wide text-ink-muted hover:text-ink">
-              {t.landing.signInLink}
-            </Link>
           </div>
         </div>
       </header>
@@ -47,21 +49,12 @@ export default function LandingPage() {
         <h1 className="mx-auto max-w-3xl font-display text-4xl font-medium leading-tight text-ink sm:text-5xl">
           {t.landing.heroTitle}
         </h1>
-        <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-ink-muted">
-          {t.landing.heroSubtitle}
-        </p>
         <div className="mt-10 flex flex-col items-center gap-3">
           <Link href="/login">
             <Button size="md" className="px-8 py-3 text-base">
               {t.landing.getStarted}
             </Button>
           </Link>
-          <p className="text-sm text-ink-faint">
-            {t.landing.alreadyHaveAccount}{' '}
-            <Link href="/login" className="font-medium text-accent hover:text-accent-dark">
-              {t.landing.signInLink}
-            </Link>
-          </p>
         </div>
       </section>
 

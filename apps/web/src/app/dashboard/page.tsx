@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { PageHeader, TitleBlockCard } from '@archibim/shared-ui';
-import type { Project } from '@archibim/object-model';
+import type { Project, ProjectStatus } from '@archibim/object-model';
 import { useAuthStore } from '@/lib/auth-store';
 import { subscribeToMyProjects } from '@/lib/projects';
 import { useI18nStore, formatTemplate, type Translations } from '@/lib/i18n';
@@ -17,6 +17,12 @@ function formatRelative(date: Date, t: Translations['dashboard']): string {
   if (diffHr < 24) return formatTemplate(t.hoursAgo, { n: diffHr });
   const diffDay = Math.round(diffHr / 24);
   return formatTemplate(t.daysAgo, { n: diffDay });
+}
+
+function statusLabel(status: ProjectStatus, t: Translations['projectStatus']): string {
+  if (status === 'active') return t.active;
+  if (status === 'on_hold') return t.onHold;
+  return t.completed;
 }
 
 export default function DashboardPage() {
@@ -50,11 +56,15 @@ export default function DashboardPage() {
             {projects.map((project, index) => (
               <Link key={project.id} href={`/projects/${project.id}`}>
                 <TitleBlockCard
-                  name={project.name}
+                  name={project.projectName}
                   projectNo={String(index + 1).padStart(4, '0')}
                   status={project.status}
+                  statusLabel={statusLabel(project.status, t.projectStatus)}
                   buildingCount={0}
-                  updatedLabel={formatRelative(project.updatedAt.toDate(), t.dashboard)}
+                  updatedLabel={formatRelative(
+                    (project.updatedAt ?? project.createdAt).toDate(),
+                    t.dashboard,
+                  )}
                 />
               </Link>
             ))}

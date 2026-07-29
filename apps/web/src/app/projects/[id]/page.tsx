@@ -1,18 +1,23 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { Button, PageHeader, RoleBadge, StatusBadge } from '@archibim/shared-ui';
-import type { Building, Project, ProjectMember } from '@archibim/object-model';
+import { Button, Input, PageHeader, RoleBadge, StatusBadge } from '@archibim/shared-ui';
+import type { Building, Project, ProjectMember, ProjectStatus } from '@archibim/object-model';
 import {
   subscribeToProject,
   subscribeToBuildings,
   subscribeToMembers,
-  archiveProject,
-  restoreProject,
+  createBuilding,
 } from '@/lib/projects';
-import { useI18nStore, formatTemplate } from '@/lib/i18n';
+import { useI18nStore, formatTemplate, type Translations } from '@/lib/i18n';
+
+function statusLabel(status: ProjectStatus, t: Translations['projectStatus']): string {
+  if (status === 'active') return t.active;
+  if (status === 'on_hold') return t.onHold;
+  return t.completed;
+}
 
 export default function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
@@ -22,7 +27,13 @@ export default function ProjectDetailPage() {
   const [project, setProject] = useState<(Project & { id: string }) | null | undefined>(undefined);
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [members, setMembers] = useState<ProjectMember[]>([]);
-  const [isBusy, setIsBusy] = useState(false);
+  const [isAddingBuilding, setIsAddingBuilding] = useState(false);
+  const [isSavingBuilding, setIsSavingBuilding] = useState(false);
+  const [buildingError, setBuildingError] = useState<string | null>(null);
+  const [newBuildingName, setNewBuildingName] = useState('');
+  const [newBuildingFloors, setNewBuildingFloors] = useState('1');
+  const [newBuildingType, setNewBuildingType] = useState('');
+  const [newBuildingArea, setNewBuildingArea] = useState('');
 
   useEffect(() => {
     const unsub1 = subscribeToProject(projectId, setProject);
@@ -42,16 +53,28 @@ export default function ProjectDetailPage() {
     return <p className="text-sm text-danger">{t.projectDetail.notFound}</p>;
   }
 
-  async function handleArchiveToggle() {
-    setIsBusy(true);
+  async function handleAddBuilding(e: FormEvent) {
+    e.preventDefault();
+    if (!newBuildingName.trim()) return;
+    setIsSavingBuilding(true);
+    setBuildingError(null);
     try {
-      if (project!.status === 'ACTIVE') {
-        await archiveProject(projectId);
-      } else {
-        await restoreProject(projectId);
-      }
+      await createBuilding(projectId, {
+        name: newBuildingName.trim(),
+        numberOfFloors: Math.max(1, parseInt(newBuildingFloors, 10) || 1),
+        buildingType: newBuildingType.trim() || undefined,
+        totalAreaSqm: newBuildingArea ? parseFloat(newBuildingArea) : undefined,
+      });
+      setNewBuildingName('');
+      setNewBuildingFloors('1');
+      setNewBuildingType('');
+      setNewBuildingArea('');
+      setIsAddingBuilding(false);
+    } catch (err) {
+      console.error('createBuilding failed:', err);
+      setBuildingError(t.projectDetail.addBuildingError);
     } finally {
-      setIsBusy(false);
+      setIsSavingBuilding(false);
     }
   }
 
@@ -59,13 +82,10 @@ export default function ProjectDetailPage() {
     <div className="px-8 py-8">
       <PageHeader
         eyebrow={t.projectDetail.eyebrow}
-        title={project.name}
+        title={project.projectName}
         action={
           <div className="flex flex-wrap items-center justify-end gap-3">
-            <StatusBadge status={project.status} />
-            <Button variant="secondary" onClick={handleArchiveToggle} disabled={isBusy}>
-              {project.status === 'ACTIVE' ? t.projectDetail.archive : t.projectDetail.restore}
-            </Button>
+            <StatusBadge status={project.status} label={statusLabel(project.status, t.projectStatus)} />
             <Link href={`/projects/${projectId}/design`}>
               <Button>{t.projectDetail.openInDesignStudio}</Button>
             </Link>
@@ -97,9 +117,76 @@ export default function ProjectDetailPage() {
             )}
           </div>
 
-          <h2 className="mb-3 mt-6 font-mono text-[11px] uppercase tracking-wide text-ink-faint">
-            {formatTemplate(t.projectDetail.buildings, { n: buildings.length })}
-          </h2>
+          <div className="mb-3 mt-6 flex items-center justify-between">
+            <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-faint">
+              {formatTemplate(t.projectDetail.buildings, { n: buildings.length })}
+            </h2>
+            {!isAddingBuilding && (
+              <button
+                onClick={() => setIsAddingBuilding(true)}
+                className="font-mono text-[11px] uppercase tracking-wide text-accent hover:text-accent-dark"
+              >
+                {t.projectDetail.addBuilding}
+              </button>
+            )}
+          </div>
+
+          {isAddingBuilding && (
+            <form
+              onSubmit={handleAddBuilding}
+              className="mb-4 flex flex-col gap-3 rounded-sheet border border-line bg-surface p-4"
+            >
+              <h3 className="font-display text-sm font-medium text-ink">
+                {t.projectDetail.addBuildingTitle}
+              </h3>
+              <Input
+                label={t.projectDetail.buildingNameLabel}
+                value={newBuildingName}
+                onChange={(e) => setNewBuildingName(e.target.value)}
+                required
+                autoFocus
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  label={t.projectDetail.numberOfFloorsLabel}
+                  type="number"
+                  min={1}
+                  value={newBuildingFloors}
+                  onChange={(e) => setNewBuildingFloors(e.target.value)}
+                />
+                <Input
+                  label={t.projectDetail.totalAreaLabel}
+                  type="number"
+                  min={0}
+                  value={newBuildingArea}
+                  onChange={(e) => setNewBuildingArea(e.target.value)}
+                />
+              </div>
+              <Input
+                label={t.projectDetail.buildingTypeLabel}
+                value={newBuildingType}
+                onChange={(e) => setNewBuildingType(e.target.value)}
+              />
+              {buildingError && <p className="text-sm text-danger">{buildingError}</p>}
+              <div className="flex gap-2">
+                <Button type="submit" disabled={isSavingBuilding || !newBuildingName.trim()}>
+                  {t.projectDetail.saveBuilding}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setIsAddingBuilding(false);
+                    setBuildingError(null);
+                  }}
+                  disabled={isSavingBuilding}
+                >
+                  {t.projectDetail.cancel}
+                </Button>
+              </div>
+            </form>
+          )}
+
           <div className="flex flex-col gap-2">
             {buildings.map((b) => (
               <div

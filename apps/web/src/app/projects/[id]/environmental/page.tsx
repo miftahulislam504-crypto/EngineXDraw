@@ -141,8 +141,8 @@ export default function EnvironmentalAnalysisPage() {
   }
 
   return (
-    <div>
-      <PageHeader eyebrow={project.name} title={t.environmental.pageTitle} />
+    <div className="px-8 py-8">
+      <PageHeader eyebrow={project.projectName} title={t.environmental.pageTitle} />
 
       {buildings.length === 0 ? (
         <p className="mt-6 text-sm text-ink-muted">{t.environmental.noBuildings}</p>

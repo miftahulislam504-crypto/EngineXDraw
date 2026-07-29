@@ -38,7 +38,7 @@ export default function SettingsPage() {
       const secret = authenticator.generateSecret();
       const otpauthUrl = authenticator.keyuri(
         user.email ?? user.uid,
-        'ArchiBIM Platform',
+        'EngineX Draw',
         secret,
       );
       const dataUrl = await QRCode.toDataURL(otpauthUrl);

@@ -34,8 +34,13 @@ export default function LoginPage() {
       <LanguageToggle className="absolute right-4 top-4" />
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <div className="font-mono text-[11px] uppercase tracking-wider text-accent">
-            ArchiBIM Platform
+          <div className="mb-2 flex items-center justify-center gap-2">
+            <span className="flex h-8 w-8 items-center justify-center rounded-sheet bg-ink font-display text-sm font-semibold text-white">
+              E
+            </span>
+            <span className="font-display text-base font-medium tracking-tight text-ink">
+              EngineX Draw
+            </span>
           </div>
           <h1 className="mt-1 font-display text-2xl font-medium text-ink">
             {t.auth.signIn}

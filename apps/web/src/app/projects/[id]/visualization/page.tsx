@@ -126,8 +126,8 @@ export default function VisualizationPage() {
   }
 
   return (
-    <div>
-      <PageHeader eyebrow={project.name} title={t.visualization.pageTitle} />
+    <div className="px-8 py-8">
+      <PageHeader eyebrow={project.projectName} title={t.visualization.pageTitle} />
 
       {buildings.length === 0 ? (
         <p className="mt-6 text-sm text-ink-muted">{t.visualization.noBuildings}</p>

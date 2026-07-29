@@ -55,7 +55,7 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
             {t.projectShell.backToProjects}
           </Link>
           <div className="mt-1 truncate font-display text-base font-medium text-ink">
-            {project?.name ?? '\u2026'}
+            {project?.projectName ?? '\u2026'}
           </div>
         </div>
 

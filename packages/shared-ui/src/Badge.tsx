@@ -23,11 +23,18 @@ export function RoleBadge({ role }: { role: ProjectRole }) {
 }
 
 const statusStyles: Record<ProjectStatus, string> = {
-  ACTIVE: 'bg-success-soft text-success',
-  ARCHIVED: 'bg-paper text-ink-faint',
+  active: 'bg-success-soft text-success',
+  on_hold: 'bg-signal-soft text-signal',
+  completed: 'bg-paper text-ink-faint',
 };
 
-export function StatusBadge({ status }: { status: ProjectStatus }) {
+const statusDefaultLabels: Record<ProjectStatus, string> = {
+  active: 'ACTIVE',
+  on_hold: 'ON HOLD',
+  completed: 'COMPLETED',
+};
+
+export function StatusBadge({ status, label }: { status: ProjectStatus; label?: string }) {
   return (
     <span
       className={clsx(
@@ -35,7 +42,7 @@ export function StatusBadge({ status }: { status: ProjectStatus }) {
         statusStyles[status],
       )}
     >
-      {status}
+      {label ?? statusDefaultLabels[status]}
     </span>
   );
 }

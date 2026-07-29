@@ -31,7 +31,7 @@ const notoSansBengali = Noto_Sans_Bengali({
 });
 
 export const metadata: Metadata = {
-  title: 'ArchiBIM Platform',
+  title: 'EngineX Draw',
   description: 'Think the building, not the drawing.',
 };
 

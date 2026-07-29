@@ -1,5 +1,5 @@
 import { AuthGuard } from '@/components/AuthGuard';
-import { Sidebar } from '@/components/Sidebar';
+import { DashboardTopbar } from '@/components/DashboardTopbar';
 
 export default function DashboardLayout({
   children,
@@ -8,9 +8,9 @@ export default function DashboardLayout({
 }) {
   return (
     <AuthGuard>
-      <div className="flex">
-        <Sidebar />
-        <main className="flex-1 px-8 py-8">{children}</main>
+      <div className="min-h-screen bg-paper">
+        <DashboardTopbar />
+        <main className="mx-auto max-w-5xl px-6 py-8">{children}</main>
       </div>
     </AuthGuard>
   );

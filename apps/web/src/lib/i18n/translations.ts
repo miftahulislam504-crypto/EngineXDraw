@@ -112,6 +112,11 @@ export interface Translations {
     hoursAgo: string; // use {n} as placeholder
     daysAgo: string; // use {n} as placeholder
   };
+  projectStatus: {
+    active: string;
+    onHold: string;
+    completed: string;
+  };
   wizard: {
     eyebrow: string;
     stepBasics: string;
@@ -160,6 +165,9 @@ export interface Translations {
     usingLibraryItem: string; // use {name} as placeholder
     roomsButton: string;
     libraryButton: string;
+    noBuildingsTitle: string;
+    noBuildingsMessage: string;
+    goToProjectOverview: string;
     explodedView: string;
     explodedViewTooltip: string;
     deleteSelection: string; // use {kind} as placeholder — kind is a translated selectionKinds value
@@ -277,6 +285,15 @@ export interface Translations {
     floorLabel: string; // pluralized with an 's' suffix only when locale is 'en'
     noBuildings: string;
     team: string; // use {n} as placeholder
+    addBuilding: string;
+    addBuildingTitle: string;
+    buildingNameLabel: string;
+    numberOfFloorsLabel: string;
+    buildingTypeLabel: string;
+    totalAreaLabel: string;
+    saveBuilding: string;
+    cancel: string;
+    addBuildingError: string;
   };
   elevations: {
     pageTitle: string;

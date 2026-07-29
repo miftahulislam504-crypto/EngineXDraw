@@ -261,7 +261,7 @@ export default function AutomationPage() {
   function handleExportDoors() {
     exportScheduleToPdf(
       t.automation.doorSchedule,
-      project?.name ?? '',
+      project?.projectName ?? '',
       buildings.find((b) => b.id === buildingId)?.name ?? '',
       doorColumns(),
       doorRows.map((r) => [r.tag, r.widthM.toFixed(2), r.heightM.toFixed(2)]),
@@ -270,7 +270,7 @@ export default function AutomationPage() {
   function handleExportWindows() {
     exportScheduleToPdf(
       t.automation.windowSchedule,
-      project?.name ?? '',
+      project?.projectName ?? '',
       buildings.find((b) => b.id === buildingId)?.name ?? '',
       windowColumns(),
       windowRows.map((r) => [r.tag, r.widthM.toFixed(2), r.heightM.toFixed(2), r.sillHeightM.toFixed(2)]),
@@ -279,7 +279,7 @@ export default function AutomationPage() {
   function handleExportRooms() {
     exportScheduleToPdf(
       t.automation.roomSchedule,
-      project?.name ?? '',
+      project?.projectName ?? '',
       buildings.find((b) => b.id === buildingId)?.name ?? '',
       roomColumns(),
       roomRows.map((r) => [
@@ -319,7 +319,7 @@ export default function AutomationPage() {
       shafts: new Array(shaftCount),
     });
     exportProjectReportToPdf({
-      projectName: project?.name ?? '',
+      projectName: project?.projectName ?? '',
       buildingName: buildings.find((b) => b.id === buildingId)?.name ?? '',
       stats,
       statsLabels: t.analytics.designStatLabels,
@@ -352,8 +352,8 @@ export default function AutomationPage() {
     formatTemplate(t.automation.cleanupMessages[issue.kind as ModelIssueKind], issue.values);
 
   return (
-    <div>
-      <PageHeader eyebrow={project.name} title={t.automation.pageTitle} />
+    <div className="px-8 py-8">
+      <PageHeader eyebrow={project.projectName} title={t.automation.pageTitle} />
 
       {buildings.length === 0 ? (
         <p className="mt-6 text-sm text-ink-muted">{t.automation.noBuildings}</p>

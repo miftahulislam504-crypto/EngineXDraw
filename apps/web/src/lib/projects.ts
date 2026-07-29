@@ -8,23 +8,18 @@ import {
   orderBy,
   doc,
   writeBatch,
-  updateDoc,
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from './firebase-client';
-import type {
-  Building,
-  NewProjectWizardInput,
-  Project,
-  ProjectMember,
-  ProjectRole,
-} from '@archibim/object-model';
+import type { Building, Project, ProjectMember } from '@archibim/object-model';
 
 /**
  * Dashboard / Team Workspace: subscribe to every project the current user
- * created. Same simple pattern as the other CivilOS/ArchiBIM apps (Hub,
- * Estimating, etc.) — a single-collection query on `createdBy`, no
- * collectionGroup/members lookup, no composite index required.
+ * created. Projects are created and managed exclusively in the Hub app —
+ * this reads the same `projects` collection Hub writes to, ordered by
+ * `createdAt` to match Hub's existing composite index
+ * (createdBy ASC, createdAt DESC) so this query doesn't need a separate
+ * index of its own.
  */
 export function subscribeToMyProjects(
   userId: string,
@@ -33,7 +28,7 @@ export function subscribeToMyProjects(
   const projectsQuery = query(
     collection(db, 'projects'),
     where('createdBy', '==', userId),
-    orderBy('updatedAt', 'desc'),
+    orderBy('createdAt', 'desc'),
   );
 
   return onSnapshot(
@@ -80,103 +75,38 @@ export function subscribeToMembers(
   });
 }
 
-// ─── Project mutations (client-side, no Cloud Functions) ──
+// ─── Building creation ──────────────────────────────────
 //
-// The Firebase project is on the Spark (free) plan, which cannot run
-// Cloud Functions. Every write below used to go through an httpsCallable
-// Cloud Function; it's now a direct client-side Firestore write, exactly
-// like the other CivilOS/ArchiBIM apps (Hub, Estimating, etc.) already do.
+// Hub creates the project record itself but doesn't seed any buildings —
+// project setup (buildings, floors) happens here in EnginExDraw, the app
+// that actually draws them.
 
-export async function createProject(
-  input: NewProjectWizardInput,
-  uid: string,
-  ownerName: string,
-  ownerEmail: string,
+export async function createBuilding(
+  projectId: string,
+  input: Pick<Building, 'name' | 'numberOfFloors' | 'buildingType' | 'totalAreaSqm'>,
 ) {
-  const projectRef = doc(collection(db, 'projects'));
+  const buildingRef = doc(collection(db, 'projects', projectId, 'buildings'));
   const batch = writeBatch(db);
 
-  batch.set(projectRef, {
-    name: input.name.trim(),
-    description: input.description ?? null,
-    status: 'ACTIVE',
-    templateId: input.templateId ?? null,
-    teamId: input.teamId ?? null,
-    siteInfo: input.siteInfo ?? null,
-    archivedAt: null,
-    lastSyncedAt: serverTimestamp(),
+  batch.set(buildingRef, {
+    name: input.name,
+    numberOfFloors: input.numberOfFloors ?? 1,
+    buildingType: input.buildingType ?? null,
+    totalAreaSqm: input.totalAreaSqm ?? null,
     createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-    createdBy: uid,
   });
 
-  // Owner membership — still written so the existing Team panel on the
-  // project detail page keeps working; dashboard listing no longer
-  // depends on this.
-  batch.set(doc(projectRef, 'members', uid), {
-    userId: uid,
-    role: 'OWNER',
-    displayName: ownerName || 'Owner',
-    email: ownerEmail || '',
-    joinedAt: serverTimestamp(),
+  // Every building gets a Ground Floor immediately so the Design Studio
+  // always has somewhere to draw without an extra setup step.
+  const floorRef = doc(collection(buildingRef, 'floors'));
+  batch.set(floorRef, {
+    buildingId: buildingRef.id,
+    level: 0,
+    name: 'Ground Floor',
+    floorToFloorHeight: 3.05,
+    createdAt: serverTimestamp(),
   });
-
-  // Multi-Building Support: seed buildings from the wizard, falling back
-  // to a single default building so a project is never created with
-  // nowhere for the Design Studio to draw.
-  const buildingsToCreate =
-    input.buildings && input.buildings.length > 0
-      ? input.buildings
-      : [{ name: 'Main Building', numberOfFloors: 1 }];
-
-  for (const building of buildingsToCreate) {
-    const buildingRef = doc(collection(projectRef, 'buildings'));
-    batch.set(buildingRef, {
-      name: building.name,
-      numberOfFloors: building.numberOfFloors ?? 1,
-      buildingType: building.buildingType ?? null,
-      totalAreaSqm: building.totalAreaSqm ?? null,
-      createdAt: serverTimestamp(),
-    });
-
-    // Give every building a Ground Floor immediately so the Design
-    // Studio always has somewhere to draw without an extra setup step.
-    const floorRef = doc(collection(buildingRef, 'floors'));
-    batch.set(floorRef, {
-      buildingId: buildingRef.id,
-      level: 0,
-      name: 'Ground Floor',
-      floorToFloorHeight: 3.05,
-      createdAt: serverTimestamp(),
-    });
-  }
 
   await batch.commit();
-  return projectRef.id;
-}
-
-export async function archiveProject(projectId: string) {
-  await updateDoc(doc(db, 'projects', projectId), {
-    status: 'ARCHIVED',
-    archivedAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-}
-
-export async function restoreProject(projectId: string) {
-  await updateDoc(doc(db, 'projects', projectId), {
-    status: 'ACTIVE',
-    archivedAt: null,
-    updatedAt: serverTimestamp(),
-  });
-}
-
-export async function updateMemberRole(
-  projectId: string,
-  targetUserId: string,
-  role: ProjectRole,
-) {
-  await updateDoc(doc(db, 'projects', projectId, 'members', targetUserId), {
-    role,
-  });
+  return buildingRef.id;
 }

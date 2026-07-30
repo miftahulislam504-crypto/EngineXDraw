@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo, Fragment } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, Fragment } from 'react';
 import { Stage, Layer, Line, Circle, Rect, Text } from 'react-konva';
 import type Konva from 'konva';
 import type {
@@ -173,8 +173,8 @@ export function FloorPlanCanvas({
   onCreateSectionLine,
   onOpenElevation,
   onMoveWallEndpoint,
-  width = 700,
-  height = 600,
+  width: widthOverride,
+  height: heightOverride,
   readOnly = false,
   onStageReady,
 }: FloorPlanCanvasProps) {
@@ -190,6 +190,35 @@ export function FloorPlanCanvas({
 
   const [snappedCursor, setSnappedCursor] = useState<Point2D | null>(null);
   const [guide, setGuide] = useState<{ from: Point2D; to: Point2D } | null>(null);
+
+  // When width/height aren't explicitly passed in (the normal Design
+  // Studio case), measure the wrapping container instead of falling
+  // back to a fixed pixel size. A fixed size doesn't shrink to fit a
+  // phone screen, which is what was clipping the canvas and leaving
+  // no way to scroll to the rest of it.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [measuredSize, setMeasuredSize] = useState({ width: 700, height: 600 });
+
+  useEffect(() => {
+    if (widthOverride != null && heightOverride != null) return;
+    const el = containerRef.current;
+    if (!el) return;
+
+    const updateSize = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setMeasuredSize({ width: Math.round(rect.width), height: Math.round(rect.height) });
+      }
+    };
+
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [widthOverride, heightOverride]);
+
+  const width = widthOverride ?? measuredSize.width;
+  const height = heightOverride ?? measuredSize.height;
 
   useEffect(() => {
     if (readOnly) setSelection(null);
@@ -228,6 +257,25 @@ export function FloorPlanCanvas({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [setDrawStart, setSelection]);
 
+  // Given a raw pointer position (pixels), returns the snapped point in
+  // meters using the same snap rules the hover preview uses. Both the
+  // preview and the actual click/tap go through this so they always
+  // agree on where a point will land.
+  const snapFromPointer = useCallback(
+    (pos: Point2D) => {
+      const cursorMeters = toMeters(pos);
+      if (SNAP_AWARE_TOOLS.includes(activeTool)) {
+        return resolveSnap(cursorMeters, {
+          walls,
+          gridSize,
+          lastPoint: drawStart ?? undefined,
+        }).point;
+      }
+      return cursorMeters;
+    },
+    [toMeters, activeTool, walls, gridSize, drawStart],
+  );
+
   function handleMouseMove(e: Konva.KonvaEventObject<MouseEvent>) {
     const pos = e.target.getStage()?.getPointerPosition();
     if (!pos) return;
@@ -247,30 +295,40 @@ export function FloorPlanCanvas({
     }
   }
 
-  function handleStageClick() {
-    if (!snappedCursor) return;
+  // Reads the click/tap's own pointer position instead of relying on
+  // `snappedCursor` (which is only populated by mousemove). On touch
+  // devices a tap fires with no preceding move event, so relying on
+  // that state alone placed the object at whatever position the
+  // *previous* interaction last set — one tap behind where the person
+  // actually touched. Falls back to the tracked snappedCursor only if
+  // the stage position is unavailable for some reason.
+  function handleStageClick(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
+    const pos = e.target.getStage()?.getPointerPosition();
+    const point = pos ? snapFromPointer(pos) : snappedCursor;
+    if (!point) return;
+    setSnappedCursor(point);
 
     if (CHAINING_LINE_TOOLS.includes(activeTool)) {
       if (!drawStart) {
-        setDrawStart(snappedCursor);
+        setDrawStart(point);
       } else {
-        if (activeTool === 'wall') onCreateWall(drawStart, snappedCursor);
-        if (activeTool === 'beam') onCreateBeam(drawStart, snappedCursor);
-        if (activeTool === 'railing') onCreateRailing(drawStart, snappedCursor);
-        if (activeTool === 'curtainWall') onCreateCurtainWall(drawStart, snappedCursor);
-        setDrawStart(snappedCursor); // chain into the next segment
+        if (activeTool === 'wall') onCreateWall(drawStart, point);
+        if (activeTool === 'beam') onCreateBeam(drawStart, point);
+        if (activeTool === 'railing') onCreateRailing(drawStart, point);
+        if (activeTool === 'curtainWall') onCreateCurtainWall(drawStart, point);
+        setDrawStart(point); // chain into the next segment
       }
       return;
     }
 
     if (ONESHOT_LINE_TOOLS.includes(activeTool)) {
       if (!drawStart) {
-        setDrawStart(snappedCursor);
+        setDrawStart(point);
       } else {
-        if (activeTool === 'ramp') onCreateRamp(drawStart, snappedCursor);
-        if (activeTool === 'stair') onCreateStair(drawStart, snappedCursor);
-        if (activeTool === 'dimension') onCreateDimension(drawStart, snappedCursor);
-        if (activeTool === 'section') onCreateSectionLine(drawStart, snappedCursor);
+        if (activeTool === 'ramp') onCreateRamp(drawStart, point);
+        if (activeTool === 'stair') onCreateStair(drawStart, point);
+        if (activeTool === 'dimension') onCreateDimension(drawStart, point);
+        if (activeTool === 'section') onCreateSectionLine(drawStart, point);
         setDrawStart(null);
       }
       return;
@@ -278,12 +336,12 @@ export function FloorPlanCanvas({
 
     if (RECTANGLE_TOOLS.includes(activeTool)) {
       if (!drawStart) {
-        setDrawStart(snappedCursor);
+        setDrawStart(point);
       } else {
         onCreateRectangle(
           activeTool as 'slab' | 'ceiling' | 'foundation' | 'roof' | 'balcony' | 'shaft' | 'siteBoundary',
           drawStart,
-          snappedCursor,
+          point,
         );
         setDrawStart(null);
       }
@@ -291,46 +349,46 @@ export function FloorPlanCanvas({
     }
 
     if (activeTool === 'column') {
-      onCreateColumn(snappedCursor);
+      onCreateColumn(point);
       return;
     }
 
     if (activeTool === 'footing') {
-      onCreateFooting(snappedCursor);
+      onCreateFooting(point);
       return;
     }
 
     if (activeTool === 'note') {
-      onCreateNote(snappedCursor);
+      onCreateNote(point);
       return;
     }
 
     if (activeTool === 'gridV') {
-      onCreateGridLine('vertical', snappedCursor.x);
+      onCreateGridLine('vertical', point.x);
       return;
     }
 
     if (activeTool === 'gridH') {
-      onCreateGridLine('horizontal', snappedCursor.y);
+      onCreateGridLine('horizontal', point.y);
       return;
     }
 
     if (activeTool === 'skylight') {
-      const roof = roofs.find((r) => isPointInPolygon(snappedCursor, r.boundary));
-      if (roof) onCreateSkylight(roof.id, snappedCursor);
+      const roof = roofs.find((r) => isPointInPolygon(point, r.boundary));
+      if (roof) onCreateSkylight(roof.id, point);
       return;
     }
 
     if (PLACED_OBJECT_TOOLS.includes(activeTool)) {
       const category = PLACED_OBJECT_CATEGORY_BY_TOOL[activeTool];
-      if (category) onCreatePlacedObject(category, snappedCursor);
+      if (category) onCreatePlacedObject(category, point);
       return;
     }
 
     if (activeTool === 'door' || activeTool === 'window') {
-      const wall = findNearestWall(snappedCursor, walls, DEFAULT_WALL_THICKNESS * 3);
+      const wall = findNearestWall(point, walls, DEFAULT_WALL_THICKNESS * 3);
       if (wall) {
-        const t = nearestParameterOnWall(wall, snappedCursor);
+        const t = nearestParameterOnWall(wall, point);
         onCreateOpening(wall.id, t, activeTool === 'door' ? 'DOOR' : 'WINDOW');
       }
       return;
@@ -398,588 +456,623 @@ export function FloorPlanCanvas({
   }
 
   return (
-    <Stage
-      width={width}
-      height={height}
-      listening={!readOnly}
-      ref={(node) => {
-        if (node) onStageReady?.(node);
-      }}
-      onMouseMove={readOnly ? undefined : handleMouseMove}
-      onClick={readOnly ? undefined : handleStageClick}
-      className={
-        readOnly
-          ? 'rounded-sheet border border-line bg-white'
-          : 'cursor-crosshair rounded-sheet border border-line bg-white'
-      }
-    >
-      <Layer listening={false}>
-        {backgroundGridLines.map((pts, i) => (
-          <Line key={i} points={pts} stroke="#EEF1F6" strokeWidth={1} />
-        ))}
-        <Line points={[0, origin.y, width, origin.y]} stroke="#D8DEE9" strokeWidth={1.5} />
-        <Line points={[origin.x, 0, origin.x, height]} stroke="#D8DEE9" strokeWidth={1.5} />
-      </Layer>
+    <div ref={containerRef} className="h-full w-full min-h-[320px] min-w-0">
+      <Stage
+        width={width}
+        height={height}
+        listening={!readOnly}
+        ref={(node) => {
+          if (node) onStageReady?.(node);
+        }}
+        onMouseMove={readOnly ? undefined : handleMouseMove}
+        onTouchMove={readOnly ? undefined : handleMouseMove}
+        onClick={readOnly ? undefined : handleStageClick}
+        onTap={readOnly ? undefined : handleStageClick}
+        className={
+          readOnly
+            ? 'rounded-sheet border border-line bg-white'
+            : 'cursor-crosshair rounded-sheet border border-line bg-white'
+        }
+      >
+        <Layer listening={false}>
+          {backgroundGridLines.map((pts, i) => (
+            <Line key={i} points={pts} stroke="#EEF1F6" strokeWidth={1} />
+          ))}
+          <Line points={[0, origin.y, width, origin.y]} stroke="#D8DEE9" strokeWidth={1.5} />
+          <Line points={[origin.x, 0, origin.x, height]} stroke="#D8DEE9" strokeWidth={1.5} />
+        </Layer>
 
-      <Layer>
-        {rooms.map((room) => {
-          const flat = rectPolygon(room.boundary);
-          return (
-            <Line
-              key={room.id}
-              points={flat}
-              closed
-              fill="rgba(45,108,223,0.04)"
-              stroke="rgba(45,108,223,0.15)"
-              strokeWidth={1}
-              listening={false}
-            />
-          );
-        })}
-        {rooms.map((room) => {
-          const px = toPixels(room.centroid);
-          return (
-            <Text
-              key={`${room.id}-label`}
-              x={px.x}
-              y={px.y}
-              text={`${room.name}\n${room.areaSqm.toFixed(1)} m²`}
-              fontFamily="monospace"
-              fontSize={11}
-              fill="#5B6478"
-              align="center"
-              offsetX={30}
-              offsetY={10}
-              width={60}
-              listening={false}
-            />
-          );
-        })}
-
-        {/* Horizontal planar elements render first, bottom-to-top by role, so
-            walls/columns always appear on top of them */}
-        {foundations.map((f) => (
-          <Line
-            key={f.id}
-            points={rectPolygon(f.boundary)}
-            closed
-            fill={selection?.kind === 'foundation' && selection.id === f.id ? 'rgba(45,108,223,0.25)' : 'rgba(154,163,178,0.35)'}
-            stroke={selection?.kind === 'foundation' && selection.id === f.id ? '#2D6CDF' : '#9AA3B2'}
-            strokeWidth={1}
-            dash={[4, 3]}
-            onClick={(e) => {
-              if (activeTool === 'select') {
-                e.cancelBubble = true;
-                setSelection({ kind: 'foundation', id: f.id });
-              }
-            }}
-          />
-        ))}
-        {slabs.map((slab) => (
-          <Line
-            key={slab.id}
-            points={rectPolygon(slab.boundary)}
-            closed
-            fill={selection?.kind === 'slab' && selection.id === slab.id ? 'rgba(45,108,223,0.25)' : 'rgba(184,192,209,0.35)'}
-            stroke={selection?.kind === 'slab' && selection.id === slab.id ? '#2D6CDF' : '#B7C0D1'}
-            strokeWidth={1}
-            onClick={(e) => {
-              if (activeTool === 'select') {
-                e.cancelBubble = true;
-                setSelection({ kind: 'slab', id: slab.id });
-              }
-            }}
-          />
-        ))}
-        {roofs.map((r) => (
-          <Line
-            key={r.id}
-            points={rectPolygon(r.boundary)}
-            closed
-            fill={selection?.kind === 'roof' && selection.id === r.id ? 'rgba(45,108,223,0.25)' : 'rgba(139,94,74,0.25)'}
-            stroke={selection?.kind === 'roof' && selection.id === r.id ? '#2D6CDF' : '#8B5E4A'}
-            strokeWidth={1}
-            dash={[8, 3]}
-            onClick={(e) => {
-              if (activeTool === 'select') {
-                e.cancelBubble = true;
-                setSelection({ kind: 'roof', id: r.id });
-              }
-            }}
-          />
-        ))}
-        {visibleShafts.map((shaft) => {
-          const isSelected = selection?.kind === 'shaft' && selection.id === shaft.id;
-          const centroid = shaft.boundary.reduce(
-            (acc, p) => ({ x: acc.x + p.x / shaft.boundary.length, y: acc.y + p.y / shaft.boundary.length }),
-            { x: 0, y: 0 },
-          );
-          const centroidPx = toPixels(centroid);
-          return (
-            <Fragment key={shaft.id}>
+        <Layer>
+          {rooms.map((room) => {
+            const flat = rectPolygon(room.boundary);
+            return (
               <Line
-                points={rectPolygon(shaft.boundary)}
+                key={room.id}
+                points={flat}
                 closed
-                fill={isSelected ? 'rgba(45,108,223,0.2)' : 'rgba(196,105,44,0.15)'}
-                stroke={isSelected ? '#2D6CDF' : '#C4692C'}
-                strokeWidth={1.5}
-                dash={[4, 3]}
-                onClick={(e) => {
-                  if (activeTool === 'select') {
-                    e.cancelBubble = true;
-                    setSelection({ kind: 'shaft', id: shaft.id });
-                  }
-                }}
-              />
-              <Text
-                x={centroidPx.x}
-                y={centroidPx.y}
-                text={`${shaft.label ?? shaft.shaftType}\nL${shaft.startLevel}–L${shaft.endLevel}`}
-                fontFamily="monospace"
-                fontSize={10}
-                fill="#C4692C"
-                align="center"
-                width={90}
-                offsetX={45}
-                offsetY={12}
+                fill="rgba(45,108,223,0.04)"
+                stroke="rgba(45,108,223,0.15)"
+                strokeWidth={1}
                 listening={false}
               />
-            </Fragment>
-          );
-        })}
+            );
+          })}
+          {rooms.map((room) => {
+            const px = toPixels(room.centroid);
+            return (
+              <Text
+                key={`${room.id}-label`}
+                x={px.x}
+                y={px.y}
+                text={`${room.name}\n${room.areaSqm.toFixed(1)} m²`}
+                fontFamily="monospace"
+                fontSize={11}
+                fill="#5B6478"
+                align="center"
+                offsetX={30}
+                offsetY={10}
+                width={60}
+                listening={false}
+              />
+            );
+          })}
 
-        {siteBoundary && (
-          <Fragment key={siteBoundary.id}>
+          {/* Horizontal planar elements render first, bottom-to-top by role, so
+              walls/columns always appear on top of them */}
+          {foundations.map((f) => (
             <Line
-              points={rectPolygon(siteBoundary.boundary)}
-              closed
-              fill="transparent"
-              stroke={selection?.kind === 'siteBoundary' ? '#2D6CDF' : '#4C9A6A'}
-              strokeWidth={2}
-              dash={[8, 5]}
-              onClick={(e) => {
-                if (activeTool === 'select') {
-                  e.cancelBubble = true;
-                  setSelection({ kind: 'siteBoundary', id: siteBoundary.id });
-                }
-              }}
-            />
-            {(() => {
-              const xs = siteBoundary.boundary.map((p) => p.x);
-              const ys = siteBoundary.boundary.map((p) => p.y);
-              const minX = Math.min(...xs);
-              const maxX = Math.max(...xs);
-              const minY = Math.min(...ys);
-              const maxY = Math.max(...ys);
-              const midpointByEdge: Record<string, Point2D> = {
-                top: { x: (minX + maxX) / 2, y: minY },
-                bottom: { x: (minX + maxX) / 2, y: maxY },
-                left: { x: minX, y: (minY + maxY) / 2 },
-                right: { x: maxX, y: (minY + maxY) / 2 },
-              };
-              const labelPx = toPixels(midpointByEdge[siteBoundary.frontEdge]);
-              return (
-                <Text
-                  x={labelPx.x}
-                  y={labelPx.y}
-                  text="▲ ROAD"
-                  fontFamily="monospace"
-                  fontSize={10}
-                  fill="#4C9A6A"
-                  align="center"
-                  width={70}
-                  offsetX={35}
-                  offsetY={6}
-                  listening={false}
-                />
-              );
-            })()}
-          </Fragment>
-        )}
-
-        {ceilings.map((c) => (
-          <Line
-            key={c.id}
-            points={rectPolygon(c.boundary)}
-            closed
-            fill={selection?.kind === 'ceiling' && selection.id === c.id ? 'rgba(45,108,223,0.25)' : 'rgba(237,239,243,0.5)'}
-            stroke={selection?.kind === 'ceiling' && selection.id === c.id ? '#2D6CDF' : '#D8DEE9'}
-            strokeWidth={1}
-            dash={[2, 3]}
-            onClick={(e) => {
-              if (activeTool === 'select') {
-                e.cancelBubble = true;
-                setSelection({ kind: 'ceiling', id: c.id });
-              }
-            }}
-          />
-        ))}
-        {balconies.map((b) => (
-          <Line
-            key={b.id}
-            points={rectPolygon(b.boundary)}
-            closed
-            fill={selection?.kind === 'balcony' && selection.id === b.id ? 'rgba(45,108,223,0.25)' : 'rgba(184,192,209,0.45)'}
-            stroke={selection?.kind === 'balcony' && selection.id === b.id ? '#2D6CDF' : '#8B93A7'}
-            strokeWidth={1.5}
-            onClick={(e) => {
-              if (activeTool === 'select') {
-                e.cancelBubble = true;
-                setSelection({ kind: 'balcony', id: b.id });
-              }
-            }}
-          />
-        ))}
-
-        {/* Line-based elements */}
-        {beams.map((beam) => {
-          const a = toPixels(beam.start);
-          const b = toPixels(beam.end);
-          const isSelected = selection?.kind === 'beam' && selection.id === beam.id;
-          return (
-            <Line
-              key={beam.id}
-              points={[a.x, a.y, b.x, b.y]}
-              stroke={isSelected ? '#2D6CDF' : '#8B93A7'}
-              strokeWidth={Math.max(2, beam.width * pixelsPerMeter * 0.4)}
-              dash={[10, 6]}
-              onClick={(e) => {
-                if (activeTool === 'select') {
-                  e.cancelBubble = true;
-                  setSelection({ kind: 'beam', id: beam.id });
-                }
-              }}
-            />
-          );
-        })}
-        {ramps.map((r) => {
-          const a = toPixels(r.start);
-          const b = toPixels(r.end);
-          const isSelected = selection?.kind === 'ramp' && selection.id === r.id;
-          return (
-            <Line
-              key={r.id}
-              points={[a.x, a.y, b.x, b.y]}
-              stroke={isSelected ? '#2D6CDF' : '#C7CCD6'}
-              strokeWidth={Math.max(4, r.width * pixelsPerMeter * 0.5)}
-              onClick={(e) => {
-                if (activeTool === 'select') {
-                  e.cancelBubble = true;
-                  setSelection({ kind: 'ramp', id: r.id });
-                }
-              }}
-            />
-          );
-        })}
-        {stairs.map((s) => {
-          const a = toPixels(s.start);
-          const b = toPixels(s.end);
-          const isSelected = selection?.kind === 'stair' && selection.id === s.id;
-          return (
-            <Line
-              key={s.id}
-              points={[a.x, a.y, b.x, b.y]}
-              stroke={isSelected ? '#2D6CDF' : '#B7C0D1'}
-              strokeWidth={Math.max(6, s.width * pixelsPerMeter * 0.6)}
-              dash={[3, 4]}
-              onClick={(e) => {
-                if (activeTool === 'select') {
-                  e.cancelBubble = true;
-                  setSelection({ kind: 'stair', id: s.id });
-                }
-              }}
-            />
-          );
-        })}
-        {railings.map((r) => {
-          const a = toPixels(r.start);
-          const b = toPixels(r.end);
-          const isSelected = selection?.kind === 'railing' && selection.id === r.id;
-          return (
-            <Line
-              key={r.id}
-              points={[a.x, a.y, b.x, b.y]}
-              stroke={isSelected ? '#2D6CDF' : '#8B93A7'}
-              strokeWidth={2}
-              dash={[1, 4]}
-              onClick={(e) => {
-                if (activeTool === 'select') {
-                  e.cancelBubble = true;
-                  setSelection({ kind: 'railing', id: r.id });
-                }
-              }}
-            />
-          );
-        })}
-        {curtainWalls.map((cw) => {
-          const a = toPixels(cw.start);
-          const b = toPixels(cw.end);
-          const isSelected = selection?.kind === 'curtainWall' && selection.id === cw.id;
-          return (
-            <Line
-              key={cw.id}
-              points={[a.x, a.y, b.x, b.y]}
-              stroke={isSelected ? '#2D6CDF' : '#7FB3E8'}
-              strokeWidth={Math.max(2, cw.thickness * pixelsPerMeter * 2)}
-              onClick={(e) => {
-                if (activeTool === 'select') {
-                  e.cancelBubble = true;
-                  setSelection({ kind: 'curtainWall', id: cw.id });
-                }
-              }}
-            />
-          );
-        })}
-
-        {miteredPolygons.map((poly) => {
-          const wall = walls.find((w) => w.id === poly.wallId)!;
-          const isSelected = selection?.kind === 'wall' && selection.id === wall.id;
-          return (
-            <Line
-              key={wall.id}
-              points={rectPolygon(poly.points)}
-              closed
-              fill={isSelected ? '#2D6CDF' : '#131B2E'}
-              stroke={isSelected ? '#1E4FB0' : undefined}
-              strokeWidth={isSelected ? 2 : 0}
-              onClick={(e) => {
-                if (activeTool === 'select') {
-                  e.cancelBubble = true;
-                  setSelection({ kind: 'wall', id: wall.id });
-                }
-              }}
-            />
-          );
-        })}
-
-        {columns.map((column) => {
-          const px = toPixels(column.center);
-          const isSelected = selection?.kind === 'column' && selection.id === column.id;
-          const wPx = column.width * pixelsPerMeter;
-          const dPx = (column.shape === 'CIRCULAR' ? column.width : column.depth) * pixelsPerMeter;
-          return column.shape === 'CIRCULAR' ? (
-            <Circle
-              key={column.id}
-              x={px.x}
-              y={px.y}
-              radius={wPx / 2}
-              fill={isSelected ? '#2D6CDF' : '#5B6478'}
-              onClick={(e) => {
-                if (activeTool === 'select') {
-                  e.cancelBubble = true;
-                  setSelection({ kind: 'column', id: column.id });
-                }
-              }}
-            />
-          ) : (
-            <Rect
-              key={column.id}
-              x={px.x - wPx / 2}
-              y={px.y - dPx / 2}
-              width={wPx}
-              height={dPx}
-              fill={isSelected ? '#2D6CDF' : '#5B6478'}
-              onClick={(e) => {
-                if (activeTool === 'select') {
-                  e.cancelBubble = true;
-                  setSelection({ kind: 'column', id: column.id });
-                }
-              }}
-            />
-          );
-        })}
-
-        {footings.map((f) => {
-          const px = toPixels(f.center);
-          const isSelected = selection?.kind === 'footing' && selection.id === f.id;
-          const wPx = f.width * pixelsPerMeter;
-          const dPx = f.depth * pixelsPerMeter;
-          return (
-            <Rect
               key={f.id}
-              x={px.x - wPx / 2}
-              y={px.y - dPx / 2}
-              width={wPx}
-              height={dPx}
-              fill={isSelected ? '#2D6CDF' : 'transparent'}
-              stroke={isSelected ? '#2D6CDF' : '#6B7280'}
-              strokeWidth={2}
+              points={rectPolygon(f.boundary)}
+              closed
+              fill={selection?.kind === 'foundation' && selection.id === f.id ? 'rgba(45,108,223,0.25)' : 'rgba(154,163,178,0.35)'}
+              stroke={selection?.kind === 'foundation' && selection.id === f.id ? '#2D6CDF' : '#9AA3B2'}
+              strokeWidth={1}
               dash={[4, 3]}
               onClick={(e) => {
                 if (activeTool === 'select') {
                   e.cancelBubble = true;
-                  setSelection({ kind: 'footing', id: f.id });
+                  setSelection({ kind: 'foundation', id: f.id });
                 }
               }}
             />
-          );
-        })}
-
-        {openings.map((opening) => {
-          const wall = walls.find((w) => w.id === opening.wallId);
-          if (!wall) return null;
-          const center = pointAtParameter(wall, opening.positionOnWall);
-          const px = toPixels(center);
-          const isDoor = opening.kind === 'DOOR';
-          const isSelected = selection?.kind === 'opening' && selection.id === opening.id;
-          const tag = opening.tag ?? getOpeningAutoTag(opening, openings);
-          return (
-            <Fragment key={opening.id}>
-              <Circle
-                x={px.x}
-                y={px.y}
-                radius={(opening.width * pixelsPerMeter) / 2}
-                fill={isDoor ? '#FDF1E2' : '#E8EFFD'}
-                stroke={isSelected ? '#2D6CDF' : isDoor ? '#E8871E' : '#2D6CDF'}
-                strokeWidth={isSelected ? 3 : 2}
-                onClick={(e) => {
-                  if (activeTool === 'select') {
-                    e.cancelBubble = true;
-                    setSelection({ kind: 'opening', id: opening.id });
-                  }
-                }}
-              />
-              <Text
-                x={px.x}
-                y={px.y}
-                text={`${tag} · ${opening.width.toFixed(2)}m`}
-                fontFamily="monospace"
-                fontSize={10}
-                fill={isDoor ? '#B4620F' : '#2D6CDF'}
-                align="center"
-                width={80}
-                offsetX={40}
-                offsetY={(opening.width * pixelsPerMeter) / 2 + 14}
-                listening={false}
-              />
-            </Fragment>
-          );
-        })}
-
-        {skylights.map((sky) => {
-          const px = toPixels(sky.center);
-          const isSelected = selection?.kind === 'skylight' && selection.id === sky.id;
-          const wPx = sky.width * pixelsPerMeter;
-          const dPx = sky.depth * pixelsPerMeter;
-          return (
-            <Rect
-              key={sky.id}
-              x={px.x - wPx / 2}
-              y={px.y - dPx / 2}
-              width={wPx}
-              height={dPx}
-              fill="rgba(232,239,253,0.8)"
-              stroke={isSelected ? '#2D6CDF' : '#2D6CDF'}
-              strokeWidth={isSelected ? 3 : 1}
+          ))}
+          {slabs.map((slab) => (
+            <Line
+              key={slab.id}
+              points={rectPolygon(slab.boundary)}
+              closed
+              fill={selection?.kind === 'slab' && selection.id === slab.id ? 'rgba(45,108,223,0.25)' : 'rgba(184,192,209,0.35)'}
+              stroke={selection?.kind === 'slab' && selection.id === slab.id ? '#2D6CDF' : '#B7C0D1'}
+              strokeWidth={1}
               onClick={(e) => {
                 if (activeTool === 'select') {
                   e.cancelBubble = true;
-                  setSelection({ kind: 'skylight', id: sky.id });
+                  setSelection({ kind: 'slab', id: slab.id });
                 }
               }}
             />
-          );
-        })}
+          ))}
+          {roofs.map((r) => (
+            <Line
+              key={r.id}
+              points={rectPolygon(r.boundary)}
+              closed
+              fill={selection?.kind === 'roof' && selection.id === r.id ? 'rgba(45,108,223,0.25)' : 'rgba(139,94,74,0.25)'}
+              stroke={selection?.kind === 'roof' && selection.id === r.id ? '#2D6CDF' : '#8B5E4A'}
+              strokeWidth={1}
+              dash={[8, 3]}
+              onClick={(e) => {
+                if (activeTool === 'select') {
+                  e.cancelBubble = true;
+                  setSelection({ kind: 'roof', id: r.id });
+                }
+              }}
+            />
+          ))}
+          {visibleShafts.map((shaft) => {
+            const isSelected = selection?.kind === 'shaft' && selection.id === shaft.id;
+            const centroid = shaft.boundary.reduce(
+              (acc, p) => ({ x: acc.x + p.x / shaft.boundary.length, y: acc.y + p.y / shaft.boundary.length }),
+              { x: 0, y: 0 },
+            );
+            const centroidPx = toPixels(centroid);
+            return (
+              <Fragment key={shaft.id}>
+                <Line
+                  points={rectPolygon(shaft.boundary)}
+                  closed
+                  fill={isSelected ? 'rgba(45,108,223,0.2)' : 'rgba(196,105,44,0.15)'}
+                  stroke={isSelected ? '#2D6CDF' : '#C4692C'}
+                  strokeWidth={1.5}
+                  dash={[4, 3]}
+                  onClick={(e) => {
+                    if (activeTool === 'select') {
+                      e.cancelBubble = true;
+                      setSelection({ kind: 'shaft', id: shaft.id });
+                    }
+                  }}
+                />
+                <Text
+                  x={centroidPx.x}
+                  y={centroidPx.y}
+                  text={`${shaft.label ?? shaft.shaftType}\nL${shaft.startLevel}–L${shaft.endLevel}`}
+                  fontFamily="monospace"
+                  fontSize={10}
+                  fill="#C4692C"
+                  align="center"
+                  width={90}
+                  offsetX={45}
+                  offsetY={12}
+                  listening={false}
+                />
+              </Fragment>
+            );
+          })}
 
-        {placedObjects.map((obj) => {
-          const px = toPixels(obj.center);
-          const isSelected = selection?.kind === 'placedObject' && selection.id === obj.id;
-          const wPx = obj.width * pixelsPerMeter;
-          const dPx = obj.depth * pixelsPerMeter;
-          const categoryColor = PLACED_OBJECT_COLORS[obj.category];
-          return (
-            <Rect
-              key={obj.id}
-              x={px.x}
-              y={px.y}
-              width={wPx}
-              height={dPx}
-              offsetX={wPx / 2}
-              offsetY={dPx / 2}
-              rotation={obj.rotationDeg}
-              fill={isSelected ? 'rgba(45,108,223,0.5)' : categoryColor.fill}
-              stroke={isSelected ? '#2D6CDF' : categoryColor.stroke}
+          {siteBoundary && (
+            <Fragment key={siteBoundary.id}>
+              <Line
+                points={rectPolygon(siteBoundary.boundary)}
+                closed
+                fill="transparent"
+                stroke={selection?.kind === 'siteBoundary' ? '#2D6CDF' : '#4C9A6A'}
+                strokeWidth={2}
+                dash={[8, 5]}
+                onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'siteBoundary', id: siteBoundary.id });
+                  }
+                }}
+              />
+              {(() => {
+                const xs = siteBoundary.boundary.map((p) => p.x);
+                const ys = siteBoundary.boundary.map((p) => p.y);
+                const minX = Math.min(...xs);
+                const maxX = Math.max(...xs);
+                const minY = Math.min(...ys);
+                const maxY = Math.max(...ys);
+                const midpointByEdge: Record<string, Point2D> = {
+                  top: { x: (minX + maxX) / 2, y: minY },
+                  bottom: { x: (minX + maxX) / 2, y: maxY },
+                  left: { x: minX, y: (minY + maxY) / 2 },
+                  right: { x: maxX, y: (minY + maxY) / 2 },
+                };
+                const labelPx = toPixels(midpointByEdge[siteBoundary.frontEdge]);
+                return (
+                  <Text
+                    x={labelPx.x}
+                    y={labelPx.y}
+                    text="▲ ROAD"
+                    fontFamily="monospace"
+                    fontSize={10}
+                    fill="#4C9A6A"
+                    align="center"
+                    width={70}
+                    offsetX={35}
+                    offsetY={6}
+                    listening={false}
+                  />
+                );
+              })()}
+            </Fragment>
+          )}
+
+          {ceilings.map((c) => (
+            <Line
+              key={c.id}
+              points={rectPolygon(c.boundary)}
+              closed
+              fill={selection?.kind === 'ceiling' && selection.id === c.id ? 'rgba(45,108,223,0.25)' : 'rgba(237,239,243,0.5)'}
+              stroke={selection?.kind === 'ceiling' && selection.id === c.id ? '#2D6CDF' : '#D8DEE9'}
+              strokeWidth={1}
+              dash={[2, 3]}
+              onClick={(e) => {
+                if (activeTool === 'select') {
+                  e.cancelBubble = true;
+                  setSelection({ kind: 'ceiling', id: c.id });
+                }
+              }}
+            />
+          ))}
+          {balconies.map((b) => (
+            <Line
+              key={b.id}
+              points={rectPolygon(b.boundary)}
+              closed
+              fill={selection?.kind === 'balcony' && selection.id === b.id ? 'rgba(45,108,223,0.25)' : 'rgba(184,192,209,0.45)'}
+              stroke={selection?.kind === 'balcony' && selection.id === b.id ? '#2D6CDF' : '#8B93A7'}
               strokeWidth={1.5}
               onClick={(e) => {
                 if (activeTool === 'select') {
                   e.cancelBubble = true;
-                  setSelection({ kind: 'placedObject', id: obj.id });
+                  setSelection({ kind: 'balcony', id: b.id });
                 }
               }}
             />
-          );
-        })}
+          ))}
 
-        {/* Dimensions — Phase 4 Annotation System. Drawn in meter-space
-            (start/end/offset) then converted to pixels, so the extension
-            lines and dimension line stay correct regardless of zoom. */}
-        {dimensions.map((dim) => {
-          const dx = dim.end.x - dim.start.x;
-          const dy = dim.end.y - dim.start.y;
-          const len = Math.hypot(dx, dy) || 1e-6;
-          const ux = dx / len;
-          const uy = dy / len;
-          const nx = -uy;
-          const ny = ux;
-          const offsetStart: Point2D = { x: dim.start.x + nx * dim.offset, y: dim.start.y + ny * dim.offset };
-          const offsetEnd: Point2D = { x: dim.end.x + nx * dim.offset, y: dim.end.y + ny * dim.offset };
-          const a = toPixels(offsetStart);
-          const b = toPixels(offsetEnd);
-          const startPx = toPixels(dim.start);
-          const endPx = toPixels(dim.end);
-          const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-          let angleDeg = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
-          if (angleDeg > 90 || angleDeg < -90) angleDeg += 180;
-          const isSelected = selection?.kind === 'dimension' && selection.id === dim.id;
-          const color = isSelected ? '#2D6CDF' : '#8B93A7';
-          return (
-            <Fragment key={dim.id}>
-              <Line points={[startPx.x, startPx.y, a.x, a.y]} stroke={color} strokeWidth={1} opacity={0.6} />
-              <Line points={[endPx.x, endPx.y, b.x, b.y]} stroke={color} strokeWidth={1} opacity={0.6} />
+          {/* Line-based elements */}
+          {beams.map((beam) => {
+            const a = toPixels(beam.start);
+            const b = toPixels(beam.end);
+            const isSelected = selection?.kind === 'beam' && selection.id === beam.id;
+            return (
               <Line
+                key={beam.id}
                 points={[a.x, a.y, b.x, b.y]}
-                stroke={color}
+                stroke={isSelected ? '#2D6CDF' : '#8B93A7'}
+                strokeWidth={Math.max(2, beam.width * pixelsPerMeter * 0.4)}
+                dash={[10, 6]}
+                onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'beam', id: beam.id });
+                  }
+                }}
+              />
+            );
+          })}
+          {ramps.map((r) => {
+            const a = toPixels(r.start);
+            const b = toPixels(r.end);
+            const isSelected = selection?.kind === 'ramp' && selection.id === r.id;
+            return (
+              <Line
+                key={r.id}
+                points={[a.x, a.y, b.x, b.y]}
+                stroke={isSelected ? '#2D6CDF' : '#C7CCD6'}
+                strokeWidth={Math.max(4, r.width * pixelsPerMeter * 0.5)}
+                onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'ramp', id: r.id });
+                  }
+                }}
+              />
+            );
+          })}
+          {stairs.map((s) => {
+            const a = toPixels(s.start);
+            const b = toPixels(s.end);
+            const isSelected = selection?.kind === 'stair' && selection.id === s.id;
+            return (
+              <Line
+                key={s.id}
+                points={[a.x, a.y, b.x, b.y]}
+                stroke={isSelected ? '#2D6CDF' : '#B7C0D1'}
+                strokeWidth={Math.max(6, s.width * pixelsPerMeter * 0.6)}
+                dash={[3, 4]}
+                onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'stair', id: s.id });
+                  }
+                }}
+              />
+            );
+          })}
+          {railings.map((r) => {
+            const a = toPixels(r.start);
+            const b = toPixels(r.end);
+            const isSelected = selection?.kind === 'railing' && selection.id === r.id;
+            return (
+              <Line
+                key={r.id}
+                points={[a.x, a.y, b.x, b.y]}
+                stroke={isSelected ? '#2D6CDF' : '#8B93A7'}
+                strokeWidth={2}
+                dash={[1, 4]}
+                onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'railing', id: r.id });
+                  }
+                }}
+              />
+            );
+          })}
+          {curtainWalls.map((cw) => {
+            const a = toPixels(cw.start);
+            const b = toPixels(cw.end);
+            const isSelected = selection?.kind === 'curtainWall' && selection.id === cw.id;
+            return (
+              <Line
+                key={cw.id}
+                points={[a.x, a.y, b.x, b.y]}
+                stroke={isSelected ? '#2D6CDF' : '#7FB3E8'}
+                strokeWidth={Math.max(2, cw.thickness * pixelsPerMeter * 2)}
+                onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'curtainWall', id: cw.id });
+                  }
+                }}
+              />
+            );
+          })}
+
+          {miteredPolygons.map((poly) => {
+            const wall = walls.find((w) => w.id === poly.wallId)!;
+            const isSelected = selection?.kind === 'wall' && selection.id === wall.id;
+            return (
+              <Line
+                key={wall.id}
+                points={rectPolygon(poly.points)}
+                closed
+                fill={isSelected ? '#2D6CDF' : '#131B2E'}
+                stroke={isSelected ? '#1E4FB0' : undefined}
+                strokeWidth={isSelected ? 2 : 0}
+                onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'wall', id: wall.id });
+                  }
+                }}
+              />
+            );
+          })}
+
+          {columns.map((column) => {
+            const px = toPixels(column.center);
+            const isSelected = selection?.kind === 'column' && selection.id === column.id;
+            const wPx = column.width * pixelsPerMeter;
+            const dPx = (column.shape === 'CIRCULAR' ? column.width : column.depth) * pixelsPerMeter;
+            return column.shape === 'CIRCULAR' ? (
+              <Circle
+                key={column.id}
+                x={px.x}
+                y={px.y}
+                radius={wPx / 2}
+                fill={isSelected ? '#2D6CDF' : '#5B6478'}
+                onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'column', id: column.id });
+                  }
+                }}
+              />
+            ) : (
+              <Rect
+                key={column.id}
+                x={px.x - wPx / 2}
+                y={px.y - dPx / 2}
+                width={wPx}
+                height={dPx}
+                fill={isSelected ? '#2D6CDF' : '#5B6478'}
+                onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'column', id: column.id });
+                  }
+                }}
+              />
+            );
+          })}
+
+          {footings.map((f) => {
+            const px = toPixels(f.center);
+            const isSelected = selection?.kind === 'footing' && selection.id === f.id;
+            const wPx = f.width * pixelsPerMeter;
+            const dPx = f.depth * pixelsPerMeter;
+            return (
+              <Rect
+                key={f.id}
+                x={px.x - wPx / 2}
+                y={px.y - dPx / 2}
+                width={wPx}
+                height={dPx}
+                fill={isSelected ? '#2D6CDF' : 'transparent'}
+                stroke={isSelected ? '#2D6CDF' : '#6B7280'}
+                strokeWidth={2}
+                dash={[4, 3]}
+                onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'footing', id: f.id });
+                  }
+                }}
+              />
+            );
+          })}
+
+          {openings.map((opening) => {
+            const wall = walls.find((w) => w.id === opening.wallId);
+            if (!wall) return null;
+            const center = pointAtParameter(wall, opening.positionOnWall);
+            const px = toPixels(center);
+            const isDoor = opening.kind === 'DOOR';
+            const isSelected = selection?.kind === 'opening' && selection.id === opening.id;
+            const tag = opening.tag ?? getOpeningAutoTag(opening, openings);
+            return (
+              <Fragment key={opening.id}>
+                <Circle
+                  x={px.x}
+                  y={px.y}
+                  radius={(opening.width * pixelsPerMeter) / 2}
+                  fill={isDoor ? '#FDF1E2' : '#E8EFFD'}
+                  stroke={isSelected ? '#2D6CDF' : isDoor ? '#E8871E' : '#2D6CDF'}
+                  strokeWidth={isSelected ? 3 : 2}
+                  onClick={(e) => {
+                    if (activeTool === 'select') {
+                      e.cancelBubble = true;
+                      setSelection({ kind: 'opening', id: opening.id });
+                    }
+                  }}
+                />
+                <Text
+                  x={px.x}
+                  y={px.y}
+                  text={`${tag} · ${opening.width.toFixed(2)}m`}
+                  fontFamily="monospace"
+                  fontSize={10}
+                  fill={isDoor ? '#B4620F' : '#2D6CDF'}
+                  align="center"
+                  width={80}
+                  offsetX={40}
+                  offsetY={(opening.width * pixelsPerMeter) / 2 + 14}
+                  listening={false}
+                />
+              </Fragment>
+            );
+          })}
+
+          {skylights.map((sky) => {
+            const px = toPixels(sky.center);
+            const isSelected = selection?.kind === 'skylight' && selection.id === sky.id;
+            const wPx = sky.width * pixelsPerMeter;
+            const dPx = sky.depth * pixelsPerMeter;
+            return (
+              <Rect
+                key={sky.id}
+                x={px.x - wPx / 2}
+                y={px.y - dPx / 2}
+                width={wPx}
+                height={dPx}
+                fill="rgba(232,239,253,0.8)"
+                stroke={isSelected ? '#2D6CDF' : '#2D6CDF'}
+                strokeWidth={isSelected ? 3 : 1}
+                onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'skylight', id: sky.id });
+                  }
+                }}
+              />
+            );
+          })}
+
+          {placedObjects.map((obj) => {
+            const px = toPixels(obj.center);
+            const isSelected = selection?.kind === 'placedObject' && selection.id === obj.id;
+            const wPx = obj.width * pixelsPerMeter;
+            const dPx = obj.depth * pixelsPerMeter;
+            const categoryColor = PLACED_OBJECT_COLORS[obj.category];
+            return (
+              <Rect
+                key={obj.id}
+                x={px.x}
+                y={px.y}
+                width={wPx}
+                height={dPx}
+                offsetX={wPx / 2}
+                offsetY={dPx / 2}
+                rotation={obj.rotationDeg}
+                fill={isSelected ? 'rgba(45,108,223,0.5)' : categoryColor.fill}
+                stroke={isSelected ? '#2D6CDF' : categoryColor.stroke}
                 strokeWidth={1.5}
                 onClick={(e) => {
                   if (activeTool === 'select') {
                     e.cancelBubble = true;
-                    setSelection({ kind: 'dimension', id: dim.id });
+                    setSelection({ kind: 'placedObject', id: obj.id });
                   }
                 }}
               />
-              <Circle x={a.x} y={a.y} radius={2.5} fill={color} listening={false} />
-              <Circle x={b.x} y={b.y} radius={2.5} fill={color} listening={false} />
-              <Text
-                x={mid.x}
-                y={mid.y}
-                text={dim.label ?? `${len.toFixed(2)} m`}
-                fontFamily="monospace"
-                fontSize={11}
-                fill={color}
-                align="center"
-                width={70}
-                offsetX={35}
-                offsetY={16}
-                rotation={angleDeg}
-                listening={false}
-              />
-            </Fragment>
-          );
-        })}
+            );
+          })}
 
-        {/* Grid lines — Phase 4 Annotation System. Full-span reference
-            lines with a bubble+label at one end, same auto-label-unless-
-            overridden pattern as Dimension/Opening tags. */}
-        {gridLines.map((line) => {
-          const label = line.label ?? getGridLineAutoLabel(line, gridLines);
-          const isSelected = selection?.kind === 'gridLine' && selection.id === line.id;
-          const color = isSelected ? '#2D6CDF' : '#C7739A';
-          if (line.orientation === 'vertical') {
-            const x = toPixels({ x: line.position, y: 0 }).x;
+          {/* Dimensions — Phase 4 Annotation System. Drawn in meter-space
+              (start/end/offset) then converted to pixels, so the extension
+              lines and dimension line stay correct regardless of zoom. */}
+          {dimensions.map((dim) => {
+            const dx = dim.end.x - dim.start.x;
+            const dy = dim.end.y - dim.start.y;
+            const len = Math.hypot(dx, dy) || 1e-6;
+            const ux = dx / len;
+            const uy = dy / len;
+            const nx = -uy;
+            const ny = ux;
+            const offsetStart: Point2D = { x: dim.start.x + nx * dim.offset, y: dim.start.y + ny * dim.offset };
+            const offsetEnd: Point2D = { x: dim.end.x + nx * dim.offset, y: dim.end.y + ny * dim.offset };
+            const a = toPixels(offsetStart);
+            const b = toPixels(offsetEnd);
+            const startPx = toPixels(dim.start);
+            const endPx = toPixels(dim.end);
+            const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+            let angleDeg = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+            if (angleDeg > 90 || angleDeg < -90) angleDeg += 180;
+            const isSelected = selection?.kind === 'dimension' && selection.id === dim.id;
+            const color = isSelected ? '#2D6CDF' : '#8B93A7';
+            return (
+              <Fragment key={dim.id}>
+                <Line points={[startPx.x, startPx.y, a.x, a.y]} stroke={color} strokeWidth={1} opacity={0.6} />
+                <Line points={[endPx.x, endPx.y, b.x, b.y]} stroke={color} strokeWidth={1} opacity={0.6} />
+                <Line
+                  points={[a.x, a.y, b.x, b.y]}
+                  stroke={color}
+                  strokeWidth={1.5}
+                  onClick={(e) => {
+                    if (activeTool === 'select') {
+                      e.cancelBubble = true;
+                      setSelection({ kind: 'dimension', id: dim.id });
+                    }
+                  }}
+                />
+                <Circle x={a.x} y={a.y} radius={2.5} fill={color} listening={false} />
+                <Circle x={b.x} y={b.y} radius={2.5} fill={color} listening={false} />
+                <Text
+                  x={mid.x}
+                  y={mid.y}
+                  text={dim.label ?? `${len.toFixed(2)} m`}
+                  fontFamily="monospace"
+                  fontSize={11}
+                  fill={color}
+                  align="center"
+                  width={70}
+                  offsetX={35}
+                  offsetY={16}
+                  rotation={angleDeg}
+                  listening={false}
+                />
+              </Fragment>
+            );
+          })}
+
+          {/* Grid lines — Phase 4 Annotation System. Full-span reference
+              lines with a bubble+label at one end, same auto-label-unless-
+              overridden pattern as Dimension/Opening tags. */}
+          {gridLines.map((line) => {
+            const label = line.label ?? getGridLineAutoLabel(line, gridLines);
+            const isSelected = selection?.kind === 'gridLine' && selection.id === line.id;
+            const color = isSelected ? '#2D6CDF' : '#C7739A';
+            if (line.orientation === 'vertical') {
+              const x = toPixels({ x: line.position, y: 0 }).x;
+              return (
+                <Fragment key={line.id}>
+                  <Line
+                    points={[x, 0, x, height]}
+                    stroke={color}
+                    strokeWidth={1}
+                    dash={[6, 4]}
+                    onClick={(e) => {
+                      if (activeTool === 'select') {
+                        e.cancelBubble = true;
+                        setSelection({ kind: 'gridLine', id: line.id });
+                      }
+                    }}
+                  />
+                  <Circle x={x} y={16} radius={12} fill="#fff" stroke={color} strokeWidth={1.5} listening={false} />
+                  <Text
+                    x={x}
+                    y={16}
+                    text={label}
+                    fontFamily="monospace"
+                    fontSize={11}
+                    fill={color}
+                    align="center"
+                    width={24}
+                    offsetX={12}
+                    offsetY={6}
+                    listening={false}
+                  />
+                </Fragment>
+              );
+            }
+            const y = toPixels({ x: 0, y: line.position }).y;
             return (
               <Fragment key={line.id}>
                 <Line
-                  points={[x, 0, x, height]}
+                  points={[0, y, width, y]}
                   stroke={color}
                   strokeWidth={1}
                   dash={[6, 4]}
@@ -990,10 +1083,10 @@ export function FloorPlanCanvas({
                     }
                   }}
                 />
-                <Circle x={x} y={16} radius={12} fill="#fff" stroke={color} strokeWidth={1.5} listening={false} />
+                <Circle x={16} y={y} radius={12} fill="#fff" stroke={color} strokeWidth={1.5} listening={false} />
                 <Text
-                  x={x}
-                  y={16}
+                  x={16}
+                  y={y}
                   text={label}
                   fontFamily="monospace"
                   fontSize={11}
@@ -1006,251 +1099,220 @@ export function FloorPlanCanvas({
                 />
               </Fragment>
             );
-          }
-          const y = toPixels({ x: 0, y: line.position }).y;
-          return (
-            <Fragment key={line.id}>
-              <Line
-                points={[0, y, width, y]}
-                stroke={color}
-                strokeWidth={1}
-                dash={[6, 4]}
-                onClick={(e) => {
-                  if (activeTool === 'select') {
-                    e.cancelBubble = true;
-                    setSelection({ kind: 'gridLine', id: line.id });
-                  }
-                }}
-              />
-              <Circle x={16} y={y} radius={12} fill="#fff" stroke={color} strokeWidth={1.5} listening={false} />
-              <Text
-                x={16}
-                y={y}
-                text={label}
-                fontFamily="monospace"
-                fontSize={11}
-                fill={color}
-                align="center"
-                width={24}
-                offsetX={12}
-                offsetY={6}
-                listening={false}
-              />
-            </Fragment>
-          );
-        })}
+          })}
 
-        {/* Notes — Phase 4 Annotation System. Freeform text callouts;
-            the only annotation type with no auto-computed content. */}
-        {notes.map((note) => {
-          const px = toPixels(note.position);
-          const isSelected = selection?.kind === 'note' && selection.id === note.id;
-          return (
-            <Fragment key={note.id}>
-              <Rect
-                x={px.x - 6}
-                y={px.y - 6}
-                width={Math.max(24, note.text.length * 5.5)}
-                height={20}
-                fill="#FEF9E7"
-                stroke={isSelected ? '#2D6CDF' : '#D4B106'}
-                strokeWidth={isSelected ? 2 : 1}
-                cornerRadius={3}
-                onClick={(e) => {
-                  if (activeTool === 'select') {
-                    e.cancelBubble = true;
-                    setSelection({ kind: 'note', id: note.id });
-                  }
-                }}
-              />
-              <Text
-                x={px.x}
-                y={px.y + 4}
-                text={note.text}
-                fontFamily="sans-serif"
-                fontSize={10}
-                fill="#7A6200"
-                listening={false}
-              />
-            </Fragment>
-          );
-        })}
-
-        {/* Section lines — Phase 4 Annotation System (Section Marks) +
-            Phase 4 Drawing Documentation (defines the actual Section cut).
-            Heavier dash pattern than Dimension/Grid so it reads as a
-            distinct, more consequential mark on the plan. */}
-        {sectionLines.map((line) => {
-          const label = line.label ?? getSectionLineAutoLabel(line, sectionLines);
-          const bubbleLabel = label.includes('-') ? label.split('-')[0] : label;
-          const isSelected = selection?.kind === 'sectionLine' && selection.id === line.id;
-          const color = isSelected ? '#2D6CDF' : '#B4620F';
-          const a = toPixels(line.start);
-          const b = toPixels(line.end);
-          const dx = b.x - a.x;
-          const dy = b.y - a.y;
-          const len = Math.hypot(dx, dy) || 1e-6;
-          const ux = dx / len;
-          const uy = dy / len;
-          // Left-hand normal of the a->b direction, in pixel space (screen
-          // y grows downward, so this matches the meter-space left-normal
-          // used when defining the clipping plane for the 3D Section view).
-          const nx = -uy;
-          const ny = ux;
-          const arrowDir = line.viewDirection === 'left' ? 1 : -1;
-          const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-          const arrowTip = { x: mid.x + nx * 18 * arrowDir, y: mid.y + ny * 18 * arrowDir };
-          return (
-            <Fragment key={line.id}>
-              <Line
-                points={[a.x, a.y, b.x, b.y]}
-                stroke={color}
-                strokeWidth={2}
-                dash={[16, 4, 3, 4]}
-                onClick={(e) => {
-                  if (activeTool === 'select') {
-                    e.cancelBubble = true;
-                    setSelection({ kind: 'sectionLine', id: line.id });
-                  }
-                }}
-              />
-              <Line points={[mid.x, mid.y, arrowTip.x, arrowTip.y]} stroke={color} strokeWidth={2} listening={false} />
-              {[a, b].map((pt, i) => (
-                <Fragment key={i}>
-                  <Circle x={pt.x} y={pt.y} radius={11} fill="#fff" stroke={color} strokeWidth={1.5} listening={false} />
-                  <Text
-                    x={pt.x}
-                    y={pt.y}
-                    text={bubbleLabel}
-                    fontFamily="monospace"
-                    fontSize={11}
-                    fill={color}
-                    align="center"
-                    width={22}
-                    offsetX={11}
-                    offsetY={5.5}
-                    listening={false}
-                  />
-                </Fragment>
-              ))}
-            </Fragment>
-          );
-        })}
-
-        {/* Elevation Marks — Phase 4 Annotation System. Auto-derived from
-            the wall bounding box (no separate placed object, same idea
-            as Room Tags/Levels), one per cardinal direction, clickable
-            straight through to that Elevation view. */}
-        {wallBounds &&
-          (['N', 'S', 'E', 'W'] as const).map((dir) => {
-            const margin = 1.2;
-            const point: Point2D =
-              dir === 'N'
-                ? { x: wallBounds.centerX, y: wallBounds.maxY + margin }
-                : dir === 'S'
-                  ? { x: wallBounds.centerX, y: wallBounds.minY - margin }
-                  : dir === 'E'
-                    ? { x: wallBounds.maxX + margin, y: wallBounds.centerY }
-                    : { x: wallBounds.minX - margin, y: wallBounds.centerY };
-            const px = toPixels(point);
+          {/* Notes — Phase 4 Annotation System. Freeform text callouts;
+              the only annotation type with no auto-computed content. */}
+          {notes.map((note) => {
+            const px = toPixels(note.position);
+            const isSelected = selection?.kind === 'note' && selection.id === note.id;
             return (
-              <Fragment key={dir}>
-                <Circle
-                  x={px.x}
-                  y={px.y}
-                  radius={13}
-                  fill="#FFFFFF"
-                  stroke="#3F7A4E"
-                  strokeWidth={1.5}
+              <Fragment key={note.id}>
+                <Rect
+                  x={px.x - 6}
+                  y={px.y - 6}
+                  width={Math.max(24, note.text.length * 5.5)}
+                  height={20}
+                  fill="#FEF9E7"
+                  stroke={isSelected ? '#2D6CDF' : '#D4B106'}
+                  strokeWidth={isSelected ? 2 : 1}
+                  cornerRadius={3}
                   onClick={(e) => {
-                    if (activeTool === 'select' && onOpenElevation) {
+                    if (activeTool === 'select') {
                       e.cancelBubble = true;
-                      onOpenElevation(dir);
+                      setSelection({ kind: 'note', id: note.id });
                     }
                   }}
                 />
                 <Text
                   x={px.x}
-                  y={px.y}
-                  text={dir}
-                  fontFamily="monospace"
-                  fontSize={12}
-                  fill="#3F7A4E"
-                  align="center"
-                  width={26}
-                  offsetX={13}
-                  offsetY={6}
+                  y={px.y + 4}
+                  text={note.text}
+                  fontFamily="sans-serif"
+                  fontSize={10}
+                  fill="#7A6200"
                   listening={false}
                 />
               </Fragment>
             );
           })}
 
-        {/* Draggable endpoint handles for the selected wall — Parametric Editing */}
-        {selection?.kind === 'wall' &&
-          (() => {
-            const wall = walls.find((w) => w.id === selection.id);
-            if (!wall) return null;
-            const startPx = toPixels(wall.start);
-            const endPx = toPixels(wall.end);
+          {/* Section lines — Phase 4 Annotation System (Section Marks) +
+              Phase 4 Drawing Documentation (defines the actual Section cut).
+              Heavier dash pattern than Dimension/Grid so it reads as a
+              distinct, more consequential mark on the plan. */}
+          {sectionLines.map((line) => {
+            const label = line.label ?? getSectionLineAutoLabel(line, sectionLines);
+            const bubbleLabel = label.includes('-') ? label.split('-')[0] : label;
+            const isSelected = selection?.kind === 'sectionLine' && selection.id === line.id;
+            const color = isSelected ? '#2D6CDF' : '#B4620F';
+            const a = toPixels(line.start);
+            const b = toPixels(line.end);
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const len = Math.hypot(dx, dy) || 1e-6;
+            const ux = dx / len;
+            const uy = dy / len;
+            // Left-hand normal of the a->b direction, in pixel space (screen
+            // y grows downward, so this matches the meter-space left-normal
+            // used when defining the clipping plane for the 3D Section view).
+            const nx = -uy;
+            const ny = ux;
+            const arrowDir = line.viewDirection === 'left' ? 1 : -1;
+            const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+            const arrowTip = { x: mid.x + nx * 18 * arrowDir, y: mid.y + ny * 18 * arrowDir };
             return (
-              <>
-                <Circle
-                  x={startPx.x}
-                  y={startPx.y}
-                  radius={6}
-                  fill="#fff"
-                  stroke="#2D6CDF"
+              <Fragment key={line.id}>
+                <Line
+                  points={[a.x, a.y, b.x, b.y]}
+                  stroke={color}
                   strokeWidth={2}
-                  draggable
-                  onDragEnd={(e) => handleEndpointDragEnd(wall.id, 'start', e)}
+                  dash={[16, 4, 3, 4]}
+                  onClick={(e) => {
+                    if (activeTool === 'select') {
+                      e.cancelBubble = true;
+                      setSelection({ kind: 'sectionLine', id: line.id });
+                    }
+                  }}
                 />
-                <Circle
-                  x={endPx.x}
-                  y={endPx.y}
-                  radius={6}
-                  fill="#fff"
-                  stroke="#2D6CDF"
-                  strokeWidth={2}
-                  draggable
-                  onDragEnd={(e) => handleEndpointDragEnd(wall.id, 'end', e)}
-                />
-              </>
+                <Line points={[mid.x, mid.y, arrowTip.x, arrowTip.y]} stroke={color} strokeWidth={2} listening={false} />
+                {[a, b].map((pt, i) => (
+                  <Fragment key={i}>
+                    <Circle x={pt.x} y={pt.y} radius={11} fill="#fff" stroke={color} strokeWidth={1.5} listening={false} />
+                    <Text
+                      x={pt.x}
+                      y={pt.y}
+                      text={bubbleLabel}
+                      fontFamily="monospace"
+                      fontSize={11}
+                      fill={color}
+                      align="center"
+                      width={22}
+                      offsetX={11}
+                      offsetY={5.5}
+                      listening={false}
+                    />
+                  </Fragment>
+                ))}
+              </Fragment>
             );
-          })()}
+          })}
 
-        {SNAP_AWARE_TOOLS.includes(activeTool) && drawStart && snappedCursor && (
-          <Line
-            points={[
-              toPixels(drawStart).x,
-              toPixels(drawStart).y,
-              toPixels(snappedCursor).x,
-              toPixels(snappedCursor).y,
-            ]}
-            stroke="#2D6CDF"
-            strokeWidth={2}
-            dash={[6, 4]}
-          />
-        )}
+          {/* Elevation Marks — Phase 4 Annotation System. Auto-derived from
+              the wall bounding box (no separate placed object, same idea
+              as Room Tags/Levels), one per cardinal direction, clickable
+              straight through to that Elevation view. */}
+          {wallBounds &&
+            (['N', 'S', 'E', 'W'] as const).map((dir) => {
+              const margin = 1.2;
+              const point: Point2D =
+                dir === 'N'
+                  ? { x: wallBounds.centerX, y: wallBounds.maxY + margin }
+                  : dir === 'S'
+                    ? { x: wallBounds.centerX, y: wallBounds.minY - margin }
+                    : dir === 'E'
+                      ? { x: wallBounds.maxX + margin, y: wallBounds.centerY }
+                      : { x: wallBounds.minX - margin, y: wallBounds.centerY };
+              const px = toPixels(point);
+              return (
+                <Fragment key={dir}>
+                  <Circle
+                    x={px.x}
+                    y={px.y}
+                    radius={13}
+                    fill="#FFFFFF"
+                    stroke="#3F7A4E"
+                    strokeWidth={1.5}
+                    onClick={(e) => {
+                      if (activeTool === 'select' && onOpenElevation) {
+                        e.cancelBubble = true;
+                        onOpenElevation(dir);
+                      }
+                    }}
+                  />
+                  <Text
+                    x={px.x}
+                    y={px.y}
+                    text={dir}
+                    fontFamily="monospace"
+                    fontSize={12}
+                    fill="#3F7A4E"
+                    align="center"
+                    width={26}
+                    offsetX={13}
+                    offsetY={6}
+                    listening={false}
+                  />
+                </Fragment>
+              );
+            })}
 
-        {guide && (
-          <Line
-            points={[
-              toPixels(guide.from).x,
-              toPixels(guide.from).y,
-              toPixels(guide.to).x,
-              toPixels(guide.to).y,
-            ]}
-            stroke="#E8871E"
-            strokeWidth={1}
-            dash={[2, 4]}
-          />
-        )}
+          {/* Draggable endpoint handles for the selected wall — Parametric Editing */}
+          {selection?.kind === 'wall' &&
+            (() => {
+              const wall = walls.find((w) => w.id === selection.id);
+              if (!wall) return null;
+              const startPx = toPixels(wall.start);
+              const endPx = toPixels(wall.end);
+              return (
+                <>
+                  <Circle
+                    x={startPx.x}
+                    y={startPx.y}
+                    radius={6}
+                    fill="#fff"
+                    stroke="#2D6CDF"
+                    strokeWidth={2}
+                    draggable
+                    onDragEnd={(e) => handleEndpointDragEnd(wall.id, 'start', e)}
+                  />
+                  <Circle
+                    x={endPx.x}
+                    y={endPx.y}
+                    radius={6}
+                    fill="#fff"
+                    stroke="#2D6CDF"
+                    strokeWidth={2}
+                    draggable
+                    onDragEnd={(e) => handleEndpointDragEnd(wall.id, 'end', e)}
+                  />
+                </>
+              );
+            })()}
 
-        {drawStart && (
-          <Circle x={toPixels(drawStart).x} y={toPixels(drawStart).y} radius={4} fill="#2D6CDF" />
-        )}
-      </Layer>
-    </Stage>
+          {SNAP_AWARE_TOOLS.includes(activeTool) && drawStart && snappedCursor && (
+            <Line
+              points={[
+                toPixels(drawStart).x,
+                toPixels(drawStart).y,
+                toPixels(snappedCursor).x,
+                toPixels(snappedCursor).y,
+              ]}
+              stroke="#2D6CDF"
+              strokeWidth={2}
+              dash={[6, 4]}
+            />
+          )}
+
+          {guide && (
+            <Line
+              points={[
+                toPixels(guide.from).x,
+                toPixels(guide.from).y,
+                toPixels(guide.to).x,
+                toPixels(guide.to).y,
+              ]}
+              stroke="#E8871E"
+              strokeWidth={1}
+              dash={[2, 4]}
+            />
+          )}
+
+          {drawStart && (
+            <Circle x={toPixels(drawStart).x} y={toPixels(drawStart).y} radius={4} fill="#2D6CDF" />
+          )}
+        </Layer>
+      </Stage>
+    </div>
   );
 }

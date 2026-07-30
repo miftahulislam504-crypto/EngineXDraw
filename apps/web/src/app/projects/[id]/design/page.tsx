@@ -567,11 +567,11 @@ export default function DesignStudioPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-line bg-surface px-6 py-3">
+      <div className="border-b border-line bg-surface px-3 py-3 sm:px-6">
         <PageHeader
           title={t.designStudio.pageTitle}
           action={
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {pendingLibraryItem && (
                 <span className="rounded-sheet bg-accent-soft px-2 py-1 font-mono text-[11px] text-accent-dark">
                   {formatTemplate(t.designStudio.usingLibraryItem, { name: pendingLibraryItem.name })}
@@ -586,7 +586,7 @@ export default function DesignStudioPage() {
                   setBuildingId(e.target.value);
                   setFloorId(null);
                 }}
-                className="rounded-sheet border border-line-strong px-2 py-1 text-sm"
+                className="min-w-0 max-w-full rounded-sheet border border-line-strong px-2 py-1 text-sm"
               >
                 {buildings.map((b) => (
                   <option key={b.id} value={b.id}>
@@ -597,7 +597,7 @@ export default function DesignStudioPage() {
               <select
                 value={floorId ?? ''}
                 onChange={(e) => setFloorId(e.target.value)}
-                className="rounded-sheet border border-line-strong px-2 py-1 text-sm"
+                className="min-w-0 max-w-full rounded-sheet border border-line-strong px-2 py-1 text-sm"
               >
                 {floors.map((f) => (
                   <option key={f.id} value={f.id}>
@@ -617,8 +617,8 @@ export default function DesignStudioPage() {
         roomCount={rooms.length}
       />
 
-      <div className="flex flex-1 gap-3 overflow-hidden bg-paper p-3">
-        <div className="relative flex-1">
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto overflow-x-hidden bg-paper p-3 lg:flex-row lg:overflow-hidden">
+        <div className="relative min-h-[420px] flex-1 lg:min-h-0">
           <FloorPlanCanvas
             walls={walls}
             openings={openings}
@@ -787,7 +787,7 @@ export default function DesignStudioPage() {
             />
           )}
         </div>
-        <div className="flex-1">
+        <div className="min-h-[360px] flex-1 lg:min-h-0">
           <Live3DView
             walls={walls}
             openings={openings}

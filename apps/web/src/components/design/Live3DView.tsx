@@ -371,7 +371,7 @@ export function Live3DView({
   placedObjects,
   rooms,
   explodedView = false,
-  height = 600,
+  height,
 }: Live3DViewProps) {
   const center = useMemo(() => {
     if (walls.length === 0) return { x: 0, z: 0 };
@@ -387,7 +387,10 @@ export function Live3DView({
   const lift = explodedView ? EXPLODE_LIFT : 0;
 
   return (
-    <div style={{ height }} className="overflow-hidden rounded-sheet border border-line bg-[#F6F7F9]">
+    <div
+      style={{ height: height ?? '100%' }}
+      className="overflow-hidden rounded-sheet border border-line bg-[#F6F7F9]"
+    >
       <Canvas
         shadows
         camera={{ position: [center.x + 10, 10, center.z + 10], fov: 45 }}

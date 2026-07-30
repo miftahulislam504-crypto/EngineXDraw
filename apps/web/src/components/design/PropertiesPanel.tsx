@@ -219,7 +219,7 @@ export function PropertiesPanel({
   if (nothingFound) return null;
 
   return (
-    <div className="absolute right-4 top-4 z-10 w-64 rounded-sheet border border-line bg-surface p-4 shadow-md">
+    <div className="absolute right-2 top-2 z-10 w-64 max-w-[calc(100%-1rem)] rounded-sheet border border-line bg-surface p-4 shadow-md sm:right-4 sm:top-4">
       <div className="mb-3 flex items-center justify-between">
         <span className="font-mono text-[11px] uppercase tracking-wide text-ink-faint">
           {t.selectionKinds[selection.kind]}

@@ -276,7 +276,7 @@ export function FloorPlanCanvas({
     [toMeters, activeTool, walls, gridSize, drawStart],
   );
 
-  function handleMouseMove(e: Konva.KonvaEventObject<MouseEvent>) {
+  function handleMouseMove(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
     const pos = e.target.getStage()?.getPointerPosition();
     if (!pos) return;
     const cursorMeters = toMeters(pos);

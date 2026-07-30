@@ -84,6 +84,14 @@ interface DesignStudioState {
 
   explodedView: boolean;
   toggleExplodedView: () => void;
+
+  /** Which tool group is expanded in the toolbar's popover (row 2). Null = closed. */
+  openToolGroup: string | null;
+  setOpenToolGroup: (group: string | null) => void;
+
+  /** Mobile/narrow-screen view mode: which of the 2D canvas / 3D view is shown full-size. */
+  mobileViewMode: '2d' | '3d';
+  setMobileViewMode: (mode: '2d' | '3d') => void;
 }
 
 export const useDesignStudioStore = create<DesignStudioState>((set) => ({
@@ -105,4 +113,10 @@ export const useDesignStudioStore = create<DesignStudioState>((set) => ({
 
   explodedView: false,
   toggleExplodedView: () => set((s) => ({ explodedView: !s.explodedView })),
+
+  openToolGroup: null,
+  setOpenToolGroup: (group) => set({ openToolGroup: group }),
+
+  mobileViewMode: '2d',
+  setMobileViewMode: (mode) => set({ mobileViewMode: mode }),
 }));

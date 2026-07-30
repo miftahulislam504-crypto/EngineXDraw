@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import clsx from 'clsx';
 import { Button, PageHeader } from '@archibim/shared-ui';
 import type {
   Balcony,
@@ -168,7 +169,8 @@ export default function DesignStudioPage() {
   const [pendingLibraryItem, setPendingLibraryItem] = useState<LibraryItem | null>(null);
   const [materialPickerWallId, setMaterialPickerWallId] = useState<string | null>(null);
 
-  const { selection, setSelection, explodedView } = useDesignStudioStore();
+  const { selection, setSelection, explodedView, mobileViewMode, setMobileViewMode } =
+    useDesignStudioStore();
   const { t } = useI18nStore();
   const currentFloorLevel = floors.find((f) => f.id === floorId)?.level ?? 0;
 
@@ -605,6 +607,27 @@ export default function DesignStudioPage() {
                   </option>
                 ))}
               </select>
+
+              <div className="flex items-center rounded-sheet border border-line-strong p-0.5 lg:hidden">
+                <button
+                  onClick={() => setMobileViewMode('2d')}
+                  className={clsx(
+                    'rounded-sheet px-2.5 py-1 text-xs font-medium transition-colors',
+                    mobileViewMode === '2d' ? 'bg-ink text-white' : 'text-ink-muted hover:text-ink',
+                  )}
+                >
+                  {t.designStudio.view2D}
+                </button>
+                <button
+                  onClick={() => setMobileViewMode('3d')}
+                  className={clsx(
+                    'rounded-sheet px-2.5 py-1 text-xs font-medium transition-colors',
+                    mobileViewMode === '3d' ? 'bg-ink text-white' : 'text-ink-muted hover:text-ink',
+                  )}
+                >
+                  {t.designStudio.view3D}
+                </button>
+              </div>
             </div>
           }
         />
@@ -618,7 +641,12 @@ export default function DesignStudioPage() {
       />
 
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto overflow-x-hidden bg-paper p-3 lg:flex-row lg:overflow-hidden">
-        <div className="relative min-h-[420px] flex-1 lg:min-h-0">
+        <div
+          className={clsx(
+            'relative min-h-[420px] flex-1 lg:min-h-0 lg:block',
+            mobileViewMode === '2d' ? 'block' : 'hidden',
+          )}
+        >
           <FloorPlanCanvas
             walls={walls}
             openings={openings}
@@ -787,7 +815,12 @@ export default function DesignStudioPage() {
             />
           )}
         </div>
-        <div className="min-h-[360px] flex-1 lg:min-h-0">
+        <div
+          className={clsx(
+            'min-h-[360px] flex-1 lg:min-h-0 lg:block',
+            mobileViewMode === '3d' ? 'block' : 'hidden',
+          )}
+        >
           <Live3DView
             walls={walls}
             openings={openings}

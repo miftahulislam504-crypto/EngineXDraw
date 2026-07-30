@@ -159,6 +159,8 @@ export const en: Translations = {
     explodedViewTooltip: 'Offset each floor vertically in the 3D view',
     deleteSelection: 'Delete ({kind})',
     closeAriaLabel: 'Close',
+    view2D: '2D Plan',
+    view3D: '3D View',
     toolGroups: {
       structure: 'Structure',
       openings: 'Openings',

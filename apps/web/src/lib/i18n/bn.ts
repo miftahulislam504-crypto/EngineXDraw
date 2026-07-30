@@ -159,6 +159,8 @@ export const bn: Translations = {
     explodedViewTooltip: '3D ভিউতে প্রতিটা ফ্লোর উলম্বভাবে আলাদা করে দেখায়',
     deleteSelection: 'মুছে ফেলুন ({kind})',
     closeAriaLabel: 'বন্ধ করুন',
+    view2D: '2D প্ল্যান',
+    view3D: '3D ভিউ',
     toolGroups: {
       structure: 'স্ট্রাকচার',
       openings: 'ওপেনিং',

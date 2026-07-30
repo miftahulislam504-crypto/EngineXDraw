@@ -174,6 +174,8 @@ export interface Translations {
     explodedViewTooltip: string;
     deleteSelection: string; // use {kind} as placeholder — kind is a translated selectionKinds value
     closeAriaLabel: string;
+    view2D: string;
+    view3D: string;
     toolGroups: {
       structure: string;
       openings: string;

@@ -8,7 +8,6 @@ import type {
   SiteBoundaryEdge,
   ComplianceCategory,
   ComplianceCheckType,
-  ModelIssueKind,
   DesignStatistics,
 } from '@archibim/object-model';
 
@@ -176,6 +175,19 @@ export interface Translations {
     closeAriaLabel: string;
     view2D: string;
     view3D: string;
+    resetView: string;
+    resetViewTooltip: string;
+    zoomInTooltip: string;
+    zoomOutTooltip: string;
+    structuralBlock: {
+      columnWithoutFooting: string;
+      floatingBeamEnd: string;
+      unsupportedSlabCorner: string;
+      unsupportedRoofCorner: string;
+      footingHasColumn: string;
+      columnHasDependents: string;
+      wallHasDependents: string;
+    };
     toolGroups: {
       structure: string;
       openings: string;
@@ -424,7 +436,16 @@ export interface Translations {
     cleanupFixAll: string;
     cleanupFixing: string;
     cleanupFixed: string; // use {n}
-    cleanupMessages: Record<ModelIssueKind, string>; // use values from ModelIssue.values
+    cleanupMessages: Record<'ZERO_LENGTH_WALL' | 'ORPHAN_OPENING' | 'DEGENERATE_BOUNDARY', string>; // use values from ModelIssue.values
+
+    structuralTitle: string;
+    structuralDescription: string;
+    structuralNoIssues: string;
+    structuralIssuesFound: string; // use {n}
+    structuralMessages: Record<
+      'COLUMN_WITHOUT_FOOTING' | 'FLOATING_BEAM' | 'UNSUPPORTED_SLAB_CORNER' | 'UNSUPPORTED_ROOF_CORNER',
+      string
+    >;
 
     roomNumberingTitle: string;
     roomNumberingDescription: string;

@@ -161,6 +161,19 @@ export const en: Translations = {
     closeAriaLabel: 'Close',
     view2D: '2D Plan',
     view3D: '3D View',
+    resetView: 'Reset View',
+    resetViewTooltip: 'Reset pan and zoom to the default view',
+    zoomInTooltip: 'Zoom in',
+    zoomOutTooltip: 'Zoom out',
+    structuralBlock: {
+      columnWithoutFooting: "Can't place a column without a footing underneath it. Add a footing at this position first.",
+      floatingBeamEnd: "Can't place a beam that doesn't end on a column or wall at both ends.",
+      unsupportedSlabCorner: "Can't place this slab — every corner needs a column or wall underneath it for support.",
+      unsupportedRoofCorner: "Can't place this roof — every corner needs a column or wall underneath it for support.",
+      footingHasColumn: "Can't delete this footing — a column is resting on it. Delete the column first, or it would be left unsupported.",
+      columnHasDependents: "Can't delete this column — a beam or slab is resting on it. Remove those first, or they'd be left unsupported.",
+      wallHasDependents: "Can't delete this wall — a beam, slab, or roof is resting on it. Remove those first, or they'd be left unsupported.",
+    },
     toolGroups: {
       structure: 'Structure',
       openings: 'Openings',
@@ -583,6 +596,18 @@ export const en: Translations = {
       ZERO_LENGTH_WALL: 'Zero-length wall ({lengthMm}mm) — both endpoints coincide.',
       ORPHAN_OPENING: 'Orphan {openingKind} — its wall no longer exists.',
       DEGENERATE_BOUNDARY: 'Degenerate boundary on this {elementType} (~{areaSqm} sqm).',
+    },
+
+    structuralTitle: 'Structural Coordination',
+    structuralDescription:
+      "Scans every floor for plan-level support issues: a column with no footing underneath it, a beam that doesn't end on a column or wall at both ends, or a slab/roof with a corner not resting on a column or wall. This is a geometric coordination check, not structural engineering validation — load paths and member sizing are the Structural app's job. Design Studio blocks new elements like these from being placed, but this list also includes anything drawn before that check existed, so older projects may show issues here that were fine to create at the time. Nothing here can be auto-fixed — add the missing support manually, then it'll drop off this list.",
+    structuralNoIssues: 'No support issues found.',
+    structuralIssuesFound: '{n} issue(s) found',
+    structuralMessages: {
+      COLUMN_WITHOUT_FOOTING: 'Column with no footing underneath it.',
+      FLOATING_BEAM: "Beam doesn't end on a column or wall at both ends.",
+      UNSUPPORTED_SLAB_CORNER: "Slab has a corner that isn't resting on a column or wall.",
+      UNSUPPORTED_ROOF_CORNER: "Roof has a corner that isn't resting on a column or wall.",
     },
 
     roomNumberingTitle: 'Auto Room Numbering',

@@ -37,6 +37,9 @@ export function Toolbar({ onDeleteSelection, onOpenRooms, onOpenLibrary, roomCou
     toggleExplodedView,
     openToolGroup,
     setOpenToolGroup,
+    pixelsPerMeter,
+    setPixelsPerMeter,
+    resetView,
   } = useDesignStudioStore();
   const { t } = useI18nStore();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -105,6 +108,36 @@ export function Toolbar({ onDeleteSelection, onOpenRooms, onOpenLibrary, roomCou
           title={t.designStudio.explodedViewTooltip}
         >
           {t.designStudio.explodedView}
+        </button>
+
+        <div className="mx-1 h-5 w-px bg-line" />
+
+        <div className="flex items-center gap-0.5 rounded-sheet border border-line-strong px-0.5 py-0.5">
+          <button
+            onClick={() => setPixelsPerMeter(pixelsPerMeter - pixelsPerMeter * 0.15)}
+            title={t.designStudio.zoomOutTooltip}
+            className="rounded-sheet px-2 py-0.5 text-sm font-medium text-ink-muted hover:bg-paper hover:text-ink"
+          >
+            −
+          </button>
+          <span className="min-w-[3ch] text-center font-mono text-[10px] text-ink-faint">
+            {Math.round((pixelsPerMeter / 40) * 100)}%
+          </span>
+          <button
+            onClick={() => setPixelsPerMeter(pixelsPerMeter + pixelsPerMeter * 0.15)}
+            title={t.designStudio.zoomInTooltip}
+            className="rounded-sheet px-2 py-0.5 text-sm font-medium text-ink-muted hover:bg-paper hover:text-ink"
+          >
+            +
+          </button>
+        </div>
+
+        <button
+          onClick={resetView}
+          title={t.designStudio.resetViewTooltip}
+          className="rounded-sheet px-2.5 py-1 text-xs font-medium text-ink-muted hover:bg-paper hover:text-ink"
+        >
+          {t.designStudio.resetView}
         </button>
 
         {selection && (

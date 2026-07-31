@@ -5,10 +5,12 @@ import { db } from './firebase-client';
 import type { FloorElements } from './floors';
 import {
   findModelIssues,
+  findStructuralCoordinationIssues,
   autoNumberRooms,
   generateWallDimensions,
   planAutoSheetSet,
   type PlannedSheet,
+  type StructuralCoordinationIssue,
 } from '@archibim/core-engine';
 import type { Floor, ModelIssue, ModelIssueElementType, Room, Sheet } from '@archibim/object-model';
 
@@ -59,6 +61,47 @@ export function scanForModelIssues(
         foundations: els.foundations,
         roofs: els.roofs,
         balconies: els.balconies,
+      }),
+    );
+  }
+  return all;
+}
+
+/**
+ * Scans every given floor's already-loaded elements for Structural
+ * Coordination issues (column without footing, floating beam,
+ * unsupported slab/roof corner) — see findStructuralCoordinationIssues's
+ * doc comment for what this does and doesn't check.
+ *
+ * Unlike Design Studio's create/delete-time hard gate (which only ever
+ * looks at the one element being placed or removed), this scans every
+ * element on every given floor, including ones drawn long before the
+ * gate existed. That's a deliberate, informational-only exception:
+ * there is no "created before/after this feature shipped" timestamp
+ * anywhere in the data model to filter by, so scanning only new
+ * elements isn't technically possible without adding one. Since this
+ * function only ever returns warnings — there's no bulk-fix/delete
+ * action wired to it, unlike scanForModelIssues's applyModelCleanupFixes
+ * — a pre-existing project surfacing warnings here carries no risk of
+ * something being silently deleted; it just tells the person what,
+ * geometrically, still needs a support added.
+ */
+export function scanForStructuralCoordinationIssues(
+  floors: Floor[],
+  floorElementsByFloorId: Record<string, FloorElements>,
+): StructuralCoordinationIssue[] {
+  const all: StructuralCoordinationIssue[] = [];
+  for (const floor of floors) {
+    const els = floorElementsByFloorId[floor.id];
+    if (!els) continue;
+    all.push(
+      ...findStructuralCoordinationIssues(floor.id, {
+        columns: els.columns,
+        footings: els.footings,
+        beams: els.beams,
+        walls: els.walls,
+        slabs: els.slabs,
+        roofs: els.roofs,
       }),
     );
   }

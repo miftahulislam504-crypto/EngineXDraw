@@ -82,6 +82,11 @@ interface DesignStudioState {
   pixelsPerMeter: number; // canvas zoom
   setPixelsPerMeter: (value: number) => void;
 
+  /** Canvas pan offset in pixels, added on top of the centered origin. */
+  panOffset: Point2D;
+  setPanOffset: (offset: Point2D) => void;
+  resetView: () => void;
+
   explodedView: boolean;
   toggleExplodedView: () => void;
 
@@ -110,6 +115,10 @@ export const useDesignStudioStore = create<DesignStudioState>((set) => ({
   gridSize: 0.5,
   pixelsPerMeter: 40,
   setPixelsPerMeter: (value) => set({ pixelsPerMeter: Math.min(120, Math.max(10, value)) }),
+
+  panOffset: { x: 0, y: 0 },
+  setPanOffset: (offset) => set({ panOffset: offset }),
+  resetView: () => set({ panOffset: { x: 0, y: 0 }, pixelsPerMeter: 40 }),
 
   explodedView: false,
   toggleExplodedView: () => set((s) => ({ explodedView: !s.explodedView })),

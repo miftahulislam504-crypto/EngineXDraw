@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef, Fragment } from 'react';
+import clsx from 'clsx';
 import { Stage, Layer, Line, Circle, Rect, Text } from 'react-konva';
 import type Konva from 'konva';
 import type {
@@ -186,6 +187,9 @@ export function FloorPlanCanvas({
     setSelection,
     gridSize,
     pixelsPerMeter,
+    setPixelsPerMeter,
+    panOffset,
+    setPanOffset,
   } = useDesignStudioStore();
 
   const [snappedCursor, setSnappedCursor] = useState<Point2D | null>(null);
@@ -228,7 +232,10 @@ export function FloorPlanCanvas({
     // every selection change.
   }, [readOnly, setSelection]);
 
-  const origin = { x: width * ORIGIN_RATIO, y: height * ORIGIN_RATIO };
+  const origin = {
+    x: width * ORIGIN_RATIO + panOffset.x,
+    y: height * ORIGIN_RATIO + panOffset.y,
+  };
 
   const toPixels = useCallback(
     (p: Point2D): Point2D => ({
@@ -244,6 +251,83 @@ export function FloorPlanCanvas({
       y: -(p.y - origin.y) / pixelsPerMeter,
     }),
     [origin.x, origin.y, pixelsPerMeter],
+  );
+
+  // Pan (click-drag on empty canvas) is only active for the Select tool,
+  // since every drawing tool needs its own clicks to place points instead
+  // of moving the view. Tracked in refs (not state) so mousemove during a
+  // pan doesn't re-render on every pixel and doesn't fight with the
+  // snapped-cursor preview logic below.
+  const isPanningRef = useRef(false);
+  const panStartRef = useRef<Point2D | null>(null);
+  const panOffsetStartRef = useRef<Point2D>({ x: 0, y: 0 });
+  const hasPannedRef = useRef(false);
+  const pinchDistRef = useRef<number | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
+
+  const handleStageMouseDown = useCallback(
+    (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+      if (activeTool !== 'select') return;
+      // Only start a pan if the empty stage/background was hit, not a
+      // shape (wall, endpoint handle, placed object, etc.) — those need
+      // their own click/drag behavior to keep working.
+      const target = e.target;
+      const isBackground = target === target.getStage() || target.name() === 'canvas-background';
+      if (!isBackground) return;
+      const pos = target.getStage()?.getPointerPosition();
+      if (!pos) return;
+      isPanningRef.current = true;
+      panStartRef.current = pos;
+      panOffsetStartRef.current = panOffset;
+      hasPannedRef.current = false;
+      setIsPanning(true);
+    },
+    [activeTool, panOffset],
+  );
+
+  const handleStageMouseUp = useCallback(() => {
+    isPanningRef.current = false;
+    panStartRef.current = null;
+    pinchDistRef.current = null;
+    setIsPanning(false);
+  }, []);
+
+  // Zooms so that the given pixel point stays under the same meter
+  // coordinate before and after — shared by wheel-zoom (desktop) and
+  // pinch-zoom (touch).
+  const zoomAroundPoint = useCallback(
+    (pixelPoint: Point2D, newScale: number) => {
+      const clamped = Math.min(120, Math.max(10, newScale));
+      const meterUnderPoint = {
+        x: (pixelPoint.x - origin.x) / pixelsPerMeter,
+        y: -(pixelPoint.y - origin.y) / pixelsPerMeter,
+      };
+      const newOriginX = pixelPoint.x - meterUnderPoint.x * clamped;
+      const newOriginY = pixelPoint.y + meterUnderPoint.y * clamped;
+      setPixelsPerMeter(clamped);
+      setPanOffset({
+        x: newOriginX - width * ORIGIN_RATIO,
+        y: newOriginY - height * ORIGIN_RATIO,
+      });
+    },
+    [origin.x, origin.y, pixelsPerMeter, width, height, setPixelsPerMeter, setPanOffset],
+  );
+
+  // Zooms in/out around the cursor position rather than the canvas
+  // center, so whatever the person is pointing at stays under their
+  // cursor instead of the view jumping.
+  const handleWheel = useCallback(
+    (e: Konva.KonvaEventObject<WheelEvent>) => {
+      e.evt.preventDefault();
+      const stage = e.target.getStage();
+      const pointer = stage?.getPointerPosition();
+      if (!pointer) return;
+      const direction = e.evt.deltaY > 0 ? -1 : 1;
+      const newScale = pixelsPerMeter + direction * pixelsPerMeter * 0.08;
+      if (newScale === pixelsPerMeter) return;
+      zoomAroundPoint(pointer, newScale);
+    },
+    [pixelsPerMeter, zoomAroundPoint],
   );
 
   useEffect(() => {
@@ -277,8 +361,43 @@ export function FloorPlanCanvas({
   );
 
   function handleMouseMove(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
+    // Two-finger touch = pinch-to-zoom, checked before anything else so
+    // it takes priority over the single-finger pan/draw logic below.
+    const nativeEvt = e.evt as TouchEvent;
+    if (nativeEvt.touches && nativeEvt.touches.length === 2) {
+      const stage = e.target.getStage();
+      const rect = stage?.container().getBoundingClientRect();
+      if (stage && rect) {
+        const [t1, t2] = [nativeEvt.touches[0], nativeEvt.touches[1]];
+        const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        const midpoint = {
+          x: (t1.clientX + t2.clientX) / 2 - rect.left,
+          y: (t1.clientY + t2.clientY) / 2 - rect.top,
+        };
+        if (pinchDistRef.current != null) {
+          const scaleFactor = dist / pinchDistRef.current;
+          zoomAroundPoint(midpoint, pixelsPerMeter * scaleFactor);
+        }
+        pinchDistRef.current = dist;
+      }
+      return;
+    }
+    pinchDistRef.current = null;
+
     const pos = e.target.getStage()?.getPointerPosition();
     if (!pos) return;
+
+    if (isPanningRef.current && panStartRef.current) {
+      const dx = pos.x - panStartRef.current.x;
+      const dy = pos.y - panStartRef.current.y;
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) hasPannedRef.current = true;
+      setPanOffset({
+        x: panOffsetStartRef.current.x + dx,
+        y: panOffsetStartRef.current.y + dy,
+      });
+      return;
+    }
+
     const cursorMeters = toMeters(pos);
 
     if (SNAP_AWARE_TOOLS.includes(activeTool)) {
@@ -303,6 +422,10 @@ export function FloorPlanCanvas({
   // actually touched. Falls back to the tracked snappedCursor only if
   // the stage position is unavailable for some reason.
   function handleStageClick(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
+    if (hasPannedRef.current) {
+      hasPannedRef.current = false;
+      return;
+    }
     const pos = e.target.getStage()?.getPointerPosition();
     const point = pos ? snapFromPointer(pos) : snappedCursor;
     if (!point) return;
@@ -466,12 +589,21 @@ export function FloorPlanCanvas({
         }}
         onMouseMove={readOnly ? undefined : handleMouseMove}
         onTouchMove={readOnly ? undefined : handleMouseMove}
+        onMouseDown={readOnly ? undefined : handleStageMouseDown}
+        onTouchStart={readOnly ? undefined : handleStageMouseDown}
+        onMouseUp={readOnly ? undefined : handleStageMouseUp}
+        onTouchEnd={readOnly ? undefined : handleStageMouseUp}
+        onMouseLeave={readOnly ? undefined : handleStageMouseUp}
+        onWheel={readOnly ? undefined : handleWheel}
         onClick={readOnly ? undefined : handleStageClick}
         onTap={readOnly ? undefined : handleStageClick}
         className={
           readOnly
             ? 'rounded-sheet border border-line bg-white'
-            : 'cursor-crosshair rounded-sheet border border-line bg-white'
+            : clsx(
+                'rounded-sheet border border-line bg-white',
+                isPanning ? 'cursor-grabbing' : activeTool === 'select' ? 'cursor-grab' : 'cursor-crosshair',
+              )
         }
       >
         <Layer listening={false}>

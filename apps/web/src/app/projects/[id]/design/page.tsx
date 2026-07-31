@@ -70,7 +70,14 @@ import {
   DEFAULT_SKYLIGHT_DEPTH,
   PLACED_OBJECT_DEFAULTS,
 } from '@archibim/object-model';
-import { joinCoincidentEndpoints } from '@archibim/core-engine';
+import {
+  joinCoincidentEndpoints,
+  isColumnSupportedByFooting,
+  isBeamSupported,
+  isBoundarySupported,
+  snapToNearestFooting,
+  snapToNearestColumn,
+} from '@archibim/core-engine';
 import { subscribeToBuildings } from '@/lib/projects';
 import { useAuthStore } from '@/lib/auth-store';
 import {
@@ -168,6 +175,14 @@ export default function DesignStudioPage() {
   const [showLibrary, setShowLibrary] = useState(false);
   const [pendingLibraryItem, setPendingLibraryItem] = useState<LibraryItem | null>(null);
   const [materialPickerWallId, setMaterialPickerWallId] = useState<string | null>(null);
+  const [blockMessage, setBlockMessage] = useState<string | null>(null);
+  const blockMessageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function showBlockMessage(message: string) {
+    setBlockMessage(message);
+    if (blockMessageTimer.current) clearTimeout(blockMessageTimer.current);
+    blockMessageTimer.current = setTimeout(() => setBlockMessage(null), 5000);
+  }
 
   const { selection, setSelection, explodedView, mobileViewMode, setMobileViewMode } =
     useDesignStudioStore();
@@ -274,6 +289,10 @@ export default function DesignStudioPage() {
   async function handleCreateBeam(start: { x: number; y: number }, end: { x: number; y: number }) {
     if (!buildingId || !floorId) return;
     if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
+    if (!isBeamSupported(start, end, columns, walls)) {
+      showBlockMessage(t.designStudio.structuralBlock.floatingBeamEnd);
+      return;
+    }
     await createBeam(projectId, buildingId, floorId, {
       start,
       end,
@@ -285,8 +304,17 @@ export default function DesignStudioPage() {
 
   async function handleCreateColumn(center: { x: number; y: number }) {
     if (!buildingId || !floorId) return;
+    // Snap onto the nearest footing's exact center first (a convenience
+    // so the two line up without pixel-perfect placement), then gate on
+    // that same footing set — a column is never allowed to exist without
+    // one directly underneath it.
+    const snapped = snapToNearestFooting(center, footings);
+    if (!isColumnSupportedByFooting(snapped, footings)) {
+      showBlockMessage(t.designStudio.structuralBlock.columnWithoutFooting);
+      return;
+    }
     await createColumn(projectId, buildingId, floorId, {
-      center,
+      center: snapped,
       shape: 'RECTANGULAR',
       width: DEFAULT_COLUMN_WIDTH,
       depth: DEFAULT_COLUMN_DEPTH,
@@ -296,8 +324,13 @@ export default function DesignStudioPage() {
 
   async function handleCreateFooting(center: { x: number; y: number }) {
     if (!buildingId || !floorId) return;
+    // Snap onto an existing column's center if one is nearby, so a
+    // footing drawn after its column (the normal order for every column
+    // past the first, since columns are gated on having a footing) lines
+    // up exactly rather than needing pixel-perfect placement.
+    const snapped = snapToNearestColumn(center, columns);
     await footingCrud.create(projectId, buildingId, floorId, {
-      center,
+      center: snapped,
       width: DEFAULT_FOOTING_WIDTH,
       depth: DEFAULT_FOOTING_DEPTH,
       thickness: DEFAULT_FOOTING_THICKNESS,
@@ -322,6 +355,21 @@ export default function DesignStudioPage() {
     if (!buildingId || !floorId) return;
     if (Math.abs(corner2.x - corner1.x) < 0.05 || Math.abs(corner2.y - corner1.y) < 0.05) return;
     const boundary = rectBoundary(corner1, corner2);
+
+    // Slab and Roof are real structural spans — every corner needs a
+    // column or wall underneath for support. Ceiling/Foundation/Balcony/
+    // Shaft/SiteBoundary aren't gated: a ceiling is a non-structural
+    // finish layer, a foundation sits below any column/wall reference
+    // point, and balcony/shaft/site-boundary aren't spanning structural
+    // elements in the same sense.
+    if (tool === 'slab' && !isBoundarySupported(boundary, columns, walls)) {
+      showBlockMessage(t.designStudio.structuralBlock.unsupportedSlabCorner);
+      return;
+    }
+    if (tool === 'roof' && !isBoundarySupported(boundary, columns, walls)) {
+      showBlockMessage(t.designStudio.structuralBlock.unsupportedRoofCorner);
+      return;
+    }
 
     if (tool === 'slab') {
       await createSlab(projectId, buildingId, floorId, {
@@ -528,6 +576,57 @@ export default function DesignStudioPage() {
   async function handleDeleteSelection() {
     if (!buildingId || !floorId || !selection) return;
     const { kind, id } = selection;
+
+    // A footing/column/wall can't be deleted while something else in
+    // the model depends on it for support — deleting it out from under
+    // a column/beam/slab/roof would leave that dependent unsupported,
+    // which Design Studio never allows to exist in the first place (see
+    // the create-time gates above). Same underlying checks, just run in
+    // the opposite direction: "does anything currently rest on this."
+    if (kind === 'footing') {
+      const footing = footings.find((f) => f.id === id);
+      const hasColumn = footing && columns.some((c) => isColumnSupportedByFooting(c.center, [footing]));
+      if (hasColumn) {
+        showBlockMessage(t.designStudio.structuralBlock.footingHasColumn);
+        return;
+      }
+    }
+
+    if (kind === 'column') {
+      const column = columns.find((c) => c.id === id);
+      if (column) {
+        const otherColumns = columns.filter((c) => c.id !== id);
+        const dependentBeam = beams.some(
+          (b) => !isBeamSupported(b.start, b.end, otherColumns, walls) && isBeamSupported(b.start, b.end, columns, walls),
+        );
+        const dependentSlab = [...slabs, ...roofs].some(
+          (s) =>
+            !isBoundarySupported(s.boundary, otherColumns, walls) &&
+            isBoundarySupported(s.boundary, columns, walls),
+        );
+        if (dependentBeam || dependentSlab) {
+          showBlockMessage(t.designStudio.structuralBlock.columnHasDependents);
+          return;
+        }
+      }
+    }
+
+    if (kind === 'wall') {
+      const otherWalls = walls.filter((w) => w.id !== id);
+      const dependentBeam = beams.some(
+        (b) => !isBeamSupported(b.start, b.end, columns, otherWalls) && isBeamSupported(b.start, b.end, columns, walls),
+      );
+      const dependentSlab = [...slabs, ...roofs].some(
+        (s) =>
+          !isBoundarySupported(s.boundary, columns, otherWalls) &&
+          isBoundarySupported(s.boundary, columns, walls),
+      );
+      if (dependentBeam || dependentSlab) {
+        showBlockMessage(t.designStudio.structuralBlock.wallHasDependents);
+        return;
+      }
+    }
+
     if (kind === 'wall') await deleteWall(projectId, buildingId, floorId, id);
     if (kind === 'opening') await deleteOpening(projectId, buildingId, floorId, id);
     if (kind === 'column') await deleteColumn(projectId, buildingId, floorId, id);
@@ -639,6 +738,19 @@ export default function DesignStudioPage() {
         onOpenLibrary={() => setShowLibrary(true)}
         roomCount={rooms.length}
       />
+
+      {blockMessage && (
+        <div className="flex items-center justify-between gap-3 border-b border-line bg-danger-soft px-4 py-2 text-sm text-danger">
+          <span>{blockMessage}</span>
+          <button
+            onClick={() => setBlockMessage(null)}
+            aria-label={t.designStudio.closeAriaLabel}
+            className="shrink-0 font-medium"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto overflow-x-hidden bg-paper p-3 lg:flex-row lg:overflow-hidden">
         <div

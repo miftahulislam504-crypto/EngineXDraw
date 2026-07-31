@@ -17,6 +17,7 @@ import {
   buildWindowScheduleRows,
   buildRoomScheduleRows,
   computeDesignStatistics,
+  type StructuralCoordinationIssue,
 } from '@archibim/core-engine';
 import { subscribeToBuildings, subscribeToProject } from '@/lib/projects';
 import { useAuthStore } from '@/lib/auth-store';
@@ -31,6 +32,7 @@ import { subscribeToShafts } from '@/lib/shafts';
 import { subscribeToSheets } from '@/lib/sheets';
 import {
   scanForModelIssues,
+  scanForStructuralCoordinationIssues,
   applyModelCleanupFixes,
   applyAutoRoomNumberingForBuilding,
   applyAutoDimensionsForBuilding,
@@ -122,6 +124,11 @@ export default function AutomationPage() {
   const modelIssues: ModelIssue[] = useMemo(() => {
     if (!allFloorsLoaded) return [];
     return scanForModelIssues(floors, floorElements);
+  }, [floors, floorElements, allFloorsLoaded]);
+
+  const structuralIssues: StructuralCoordinationIssue[] = useMemo(() => {
+    if (!allFloorsLoaded) return [];
+    return scanForStructuralCoordinationIssues(floors, floorElements);
   }, [floors, floorElements, allFloorsLoaded]);
 
   const allRooms = useMemo(
@@ -349,7 +356,13 @@ export default function AutomationPage() {
   }
 
   const cleanupMessageLabel = (issue: ModelIssue) =>
-    formatTemplate(t.automation.cleanupMessages[issue.kind as ModelIssueKind], issue.values);
+    formatTemplate(
+      t.automation.cleanupMessages[issue.kind as 'ZERO_LENGTH_WALL' | 'ORPHAN_OPENING' | 'DEGENERATE_BOUNDARY'],
+      issue.values,
+    );
+
+  const structuralMessageLabel = (issue: StructuralCoordinationIssue) =>
+    formatTemplate(t.automation.structuralMessages[issue.kind], issue.values);
 
   return (
     <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
@@ -416,6 +429,30 @@ export default function AutomationPage() {
                       >
                         {isFixingCleanup ? t.automation.cleanupFixing : t.automation.cleanupFixAll}
                       </Button>
+                    </>
+                  )}
+                </div>
+              </section>
+
+              {/* Structural Coordination */}
+              <section className="rounded-sheet border border-line bg-surface p-4">
+                <h2 className="font-display text-lg font-medium text-ink">{t.automation.structuralTitle}</h2>
+                <p className="mt-1 text-sm text-ink-muted">{t.automation.structuralDescription}</p>
+                <div className="mt-3">
+                  {structuralIssues.length === 0 ? (
+                    <p className="text-sm text-success">{t.automation.structuralNoIssues}</p>
+                  ) : (
+                    <>
+                      <p className="text-sm font-medium text-ink">
+                        {formatTemplate(t.automation.structuralIssuesFound, { n: structuralIssues.length })}
+                      </p>
+                      <ul className="mt-2 flex flex-col gap-1">
+                        {structuralIssues.map((issue) => (
+                          <li key={issue.id} className="text-sm text-ink-muted">
+                            · {structuralMessageLabel(issue)}
+                          </li>
+                        ))}
+                      </ul>
                     </>
                   )}
                 </div>

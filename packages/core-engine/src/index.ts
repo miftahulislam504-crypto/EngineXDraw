@@ -17,4 +17,5 @@ export * from './compliance';
 export * from './sun-position';
 export * from './automation';
 export * from './analytics';
+export * from './structural-coordination';
 

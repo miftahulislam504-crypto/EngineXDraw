@@ -55,9 +55,7 @@ export type ModelIssueElementType =
   | 'ceiling'
   | 'foundation'
   | 'roof'
-  | 'balcony'
-  | 'column'
-  | 'beam';
+  | 'balcony';
 
 export interface ModelIssue {
   /** Stable within one cleanup scan — kind + elementId. */

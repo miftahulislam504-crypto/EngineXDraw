@@ -666,6 +666,12 @@ export function FloorPlanCanvas({
                   setSelection({ kind: 'foundation', id: f.id });
                 }
               }}
+              onTap={(e) => {
+                if (activeTool === 'select') {
+                  e.cancelBubble = true;
+                  setSelection({ kind: 'foundation', id: f.id });
+                }
+              }}
             />
           ))}
           {slabs.map((slab) => (
@@ -677,6 +683,12 @@ export function FloorPlanCanvas({
               stroke={selection?.kind === 'slab' && selection.id === slab.id ? '#2D6CDF' : '#B7C0D1'}
               strokeWidth={1}
               onClick={(e) => {
+                if (activeTool === 'select') {
+                  e.cancelBubble = true;
+                  setSelection({ kind: 'slab', id: slab.id });
+                }
+              }}
+              onTap={(e) => {
                 if (activeTool === 'select') {
                   e.cancelBubble = true;
                   setSelection({ kind: 'slab', id: slab.id });
@@ -694,6 +706,12 @@ export function FloorPlanCanvas({
               strokeWidth={1}
               dash={[8, 3]}
               onClick={(e) => {
+                if (activeTool === 'select') {
+                  e.cancelBubble = true;
+                  setSelection({ kind: 'roof', id: r.id });
+                }
+              }}
+              onTap={(e) => {
                 if (activeTool === 'select') {
                   e.cancelBubble = true;
                   setSelection({ kind: 'roof', id: r.id });
@@ -718,6 +736,12 @@ export function FloorPlanCanvas({
                   strokeWidth={1.5}
                   dash={[4, 3]}
                   onClick={(e) => {
+                    if (activeTool === 'select') {
+                      e.cancelBubble = true;
+                      setSelection({ kind: 'shaft', id: shaft.id });
+                    }
+                  }}
+                  onTap={(e) => {
                     if (activeTool === 'select') {
                       e.cancelBubble = true;
                       setSelection({ kind: 'shaft', id: shaft.id });
@@ -751,6 +775,12 @@ export function FloorPlanCanvas({
                 strokeWidth={2}
                 dash={[8, 5]}
                 onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'siteBoundary', id: siteBoundary.id });
+                  }
+                }}
+                onTap={(e) => {
                   if (activeTool === 'select') {
                     e.cancelBubble = true;
                     setSelection({ kind: 'siteBoundary', id: siteBoundary.id });
@@ -805,6 +835,12 @@ export function FloorPlanCanvas({
                   setSelection({ kind: 'ceiling', id: c.id });
                 }
               }}
+              onTap={(e) => {
+                if (activeTool === 'select') {
+                  e.cancelBubble = true;
+                  setSelection({ kind: 'ceiling', id: c.id });
+                }
+              }}
             />
           ))}
           {balconies.map((b) => (
@@ -816,6 +852,12 @@ export function FloorPlanCanvas({
               stroke={selection?.kind === 'balcony' && selection.id === b.id ? '#2D6CDF' : '#8B93A7'}
               strokeWidth={1.5}
               onClick={(e) => {
+                if (activeTool === 'select') {
+                  e.cancelBubble = true;
+                  setSelection({ kind: 'balcony', id: b.id });
+                }
+              }}
+              onTap={(e) => {
                 if (activeTool === 'select') {
                   e.cancelBubble = true;
                   setSelection({ kind: 'balcony', id: b.id });
@@ -835,8 +877,15 @@ export function FloorPlanCanvas({
                 points={[a.x, a.y, b.x, b.y]}
                 stroke={isSelected ? '#2D6CDF' : '#8B93A7'}
                 strokeWidth={Math.max(2, beam.width * pixelsPerMeter * 0.4)}
+                hitStrokeWidth={20}
                 dash={[10, 6]}
                 onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'beam', id: beam.id });
+                  }
+                }}
+                onTap={(e) => {
                   if (activeTool === 'select') {
                     e.cancelBubble = true;
                     setSelection({ kind: 'beam', id: beam.id });
@@ -855,7 +904,14 @@ export function FloorPlanCanvas({
                 points={[a.x, a.y, b.x, b.y]}
                 stroke={isSelected ? '#2D6CDF' : '#C7CCD6'}
                 strokeWidth={Math.max(4, r.width * pixelsPerMeter * 0.5)}
+                hitStrokeWidth={20}
                 onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'ramp', id: r.id });
+                  }
+                }}
+                onTap={(e) => {
                   if (activeTool === 'select') {
                     e.cancelBubble = true;
                     setSelection({ kind: 'ramp', id: r.id });
@@ -874,8 +930,15 @@ export function FloorPlanCanvas({
                 points={[a.x, a.y, b.x, b.y]}
                 stroke={isSelected ? '#2D6CDF' : '#B7C0D1'}
                 strokeWidth={Math.max(6, s.width * pixelsPerMeter * 0.6)}
+                hitStrokeWidth={20}
                 dash={[3, 4]}
                 onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'stair', id: s.id });
+                  }
+                }}
+                onTap={(e) => {
                   if (activeTool === 'select') {
                     e.cancelBubble = true;
                     setSelection({ kind: 'stair', id: s.id });
@@ -894,8 +957,15 @@ export function FloorPlanCanvas({
                 points={[a.x, a.y, b.x, b.y]}
                 stroke={isSelected ? '#2D6CDF' : '#8B93A7'}
                 strokeWidth={2}
+                hitStrokeWidth={20}
                 dash={[1, 4]}
                 onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'railing', id: r.id });
+                  }
+                }}
+                onTap={(e) => {
                   if (activeTool === 'select') {
                     e.cancelBubble = true;
                     setSelection({ kind: 'railing', id: r.id });
@@ -914,7 +984,14 @@ export function FloorPlanCanvas({
                 points={[a.x, a.y, b.x, b.y]}
                 stroke={isSelected ? '#2D6CDF' : '#7FB3E8'}
                 strokeWidth={Math.max(2, cw.thickness * pixelsPerMeter * 2)}
+                hitStrokeWidth={20}
                 onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'curtainWall', id: cw.id });
+                  }
+                }}
+                onTap={(e) => {
                   if (activeTool === 'select') {
                     e.cancelBubble = true;
                     setSelection({ kind: 'curtainWall', id: cw.id });
@@ -936,6 +1013,12 @@ export function FloorPlanCanvas({
                 stroke={isSelected ? '#1E4FB0' : undefined}
                 strokeWidth={isSelected ? 2 : 0}
                 onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'wall', id: wall.id });
+                  }
+                }}
+                onTap={(e) => {
                   if (activeTool === 'select') {
                     e.cancelBubble = true;
                     setSelection({ kind: 'wall', id: wall.id });
@@ -963,6 +1046,12 @@ export function FloorPlanCanvas({
                     setSelection({ kind: 'column', id: column.id });
                   }
                 }}
+                onTap={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'column', id: column.id });
+                  }
+                }}
               />
             ) : (
               <Rect
@@ -973,6 +1062,12 @@ export function FloorPlanCanvas({
                 height={dPx}
                 fill={isSelected ? '#2D6CDF' : '#5B6478'}
                 onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'column', id: column.id });
+                  }
+                }}
+                onTap={(e) => {
                   if (activeTool === 'select') {
                     e.cancelBubble = true;
                     setSelection({ kind: 'column', id: column.id });
@@ -1004,6 +1099,12 @@ export function FloorPlanCanvas({
                     setSelection({ kind: 'footing', id: f.id });
                   }
                 }}
+                onTap={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'footing', id: f.id });
+                  }
+                }}
               />
             );
           })}
@@ -1026,6 +1127,12 @@ export function FloorPlanCanvas({
                   stroke={isSelected ? '#2D6CDF' : isDoor ? '#E8871E' : '#2D6CDF'}
                   strokeWidth={isSelected ? 3 : 2}
                   onClick={(e) => {
+                    if (activeTool === 'select') {
+                      e.cancelBubble = true;
+                      setSelection({ kind: 'opening', id: opening.id });
+                    }
+                  }}
+                  onTap={(e) => {
                     if (activeTool === 'select') {
                       e.cancelBubble = true;
                       setSelection({ kind: 'opening', id: opening.id });
@@ -1070,6 +1177,12 @@ export function FloorPlanCanvas({
                     setSelection({ kind: 'skylight', id: sky.id });
                   }
                 }}
+                onTap={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'skylight', id: sky.id });
+                  }
+                }}
               />
             );
           })}
@@ -1094,6 +1207,12 @@ export function FloorPlanCanvas({
                 stroke={isSelected ? '#2D6CDF' : categoryColor.stroke}
                 strokeWidth={1.5}
                 onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'placedObject', id: obj.id });
+                  }
+                }}
+                onTap={(e) => {
                   if (activeTool === 'select') {
                     e.cancelBubble = true;
                     setSelection({ kind: 'placedObject', id: obj.id });
@@ -1133,7 +1252,14 @@ export function FloorPlanCanvas({
                   points={[a.x, a.y, b.x, b.y]}
                   stroke={color}
                   strokeWidth={1.5}
+                  hitStrokeWidth={20}
                   onClick={(e) => {
+                    if (activeTool === 'select') {
+                      e.cancelBubble = true;
+                      setSelection({ kind: 'dimension', id: dim.id });
+                    }
+                  }}
+                  onTap={(e) => {
                     if (activeTool === 'select') {
                       e.cancelBubble = true;
                       setSelection({ kind: 'dimension', id: dim.id });
@@ -1175,8 +1301,15 @@ export function FloorPlanCanvas({
                     points={[x, 0, x, height]}
                     stroke={color}
                     strokeWidth={1}
+                    hitStrokeWidth={20}
                     dash={[6, 4]}
                     onClick={(e) => {
+                      if (activeTool === 'select') {
+                        e.cancelBubble = true;
+                        setSelection({ kind: 'gridLine', id: line.id });
+                      }
+                    }}
+                    onTap={(e) => {
                       if (activeTool === 'select') {
                         e.cancelBubble = true;
                         setSelection({ kind: 'gridLine', id: line.id });
@@ -1207,8 +1340,15 @@ export function FloorPlanCanvas({
                   points={[0, y, width, y]}
                   stroke={color}
                   strokeWidth={1}
+                  hitStrokeWidth={20}
                   dash={[6, 4]}
                   onClick={(e) => {
+                    if (activeTool === 'select') {
+                      e.cancelBubble = true;
+                      setSelection({ kind: 'gridLine', id: line.id });
+                    }
+                  }}
+                  onTap={(e) => {
                     if (activeTool === 'select') {
                       e.cancelBubble = true;
                       setSelection({ kind: 'gridLine', id: line.id });
@@ -1250,6 +1390,12 @@ export function FloorPlanCanvas({
                   strokeWidth={isSelected ? 2 : 1}
                   cornerRadius={3}
                   onClick={(e) => {
+                    if (activeTool === 'select') {
+                      e.cancelBubble = true;
+                      setSelection({ kind: 'note', id: note.id });
+                    }
+                  }}
+                  onTap={(e) => {
                     if (activeTool === 'select') {
                       e.cancelBubble = true;
                       setSelection({ kind: 'note', id: note.id });
@@ -1306,6 +1452,12 @@ export function FloorPlanCanvas({
                       setSelection({ kind: 'sectionLine', id: line.id });
                     }
                   }}
+                  onTap={(e) => {
+                    if (activeTool === 'select') {
+                      e.cancelBubble = true;
+                      setSelection({ kind: 'sectionLine', id: line.id });
+                    }
+                  }}
                 />
                 <Line points={[mid.x, mid.y, arrowTip.x, arrowTip.y]} stroke={color} strokeWidth={2} listening={false} />
                 {[a, b].map((pt, i) => (
@@ -1356,6 +1508,12 @@ export function FloorPlanCanvas({
                     stroke="#3F7A4E"
                     strokeWidth={1.5}
                     onClick={(e) => {
+                      if (activeTool === 'select' && onOpenElevation) {
+                        e.cancelBubble = true;
+                        onOpenElevation(dir);
+                      }
+                    }}
+                    onTap={(e) => {
                       if (activeTool === 'select' && onOpenElevation) {
                         e.cancelBubble = true;
                         onOpenElevation(dir);

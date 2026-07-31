@@ -161,6 +161,7 @@ export const bn: Translations = {
     closeAriaLabel: 'বন্ধ করুন',
     view2D: '2D প্ল্যান',
     view3D: '3D ভিউ',
+    addFloor: 'ফ্লোর',
     resetView: 'ভিউ রিসেট',
     resetViewTooltip: 'প্যান ও জুম ডিফল্টে ফিরিয়ে দিন',
     zoomInTooltip: 'জুম ইন',

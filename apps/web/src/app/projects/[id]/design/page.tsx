@@ -82,6 +82,7 @@ import { subscribeToBuildings } from '@/lib/projects';
 import { useAuthStore } from '@/lib/auth-store';
 import {
   subscribeToFloors,
+  createFloor,
   subscribeToWalls,
   subscribeToOpenings,
   subscribeToColumns,
@@ -182,6 +183,22 @@ export default function DesignStudioPage() {
     setBlockMessage(message);
     if (blockMessageTimer.current) clearTimeout(blockMessageTimer.current);
     blockMessageTimer.current = setTimeout(() => setBlockMessage(null), 5000);
+  }
+
+  const [isAddingFloor, setIsAddingFloor] = useState(false);
+
+  async function handleAddFloor() {
+    if (!buildingId || isAddingFloor) return;
+    setIsAddingFloor(true);
+    try {
+      const newFloorId = await createFloor(projectId, buildingId, floors);
+      // subscribeToFloors will push the new floor into `floors` on its own,
+      // but switch the dropdown to it right away instead of waiting on that
+      // round trip, so tapping "+" feels immediate.
+      setFloorId(newFloorId);
+    } finally {
+      setIsAddingFloor(false);
+    }
   }
 
   const { selection, setSelection, explodedView, mobileViewMode, setMobileViewMode } =
@@ -706,6 +723,15 @@ export default function DesignStudioPage() {
                   </option>
                 ))}
               </select>
+              <button
+                type="button"
+                onClick={handleAddFloor}
+                disabled={!buildingId || isAddingFloor}
+                title={t.designStudio.addFloor}
+                className="rounded-sheet border border-line-strong px-2 py-1 text-sm font-medium text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
+              >
+                {isAddingFloor ? '…' : `+ ${t.designStudio.addFloor}`}
+              </button>
 
               <div className="flex items-center rounded-sheet border border-line-strong p-0.5 lg:hidden">
                 <button

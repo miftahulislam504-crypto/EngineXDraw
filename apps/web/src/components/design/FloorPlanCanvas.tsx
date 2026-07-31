@@ -487,12 +487,18 @@ export function FloorPlanCanvas({
     }
 
     if (activeTool === 'gridV') {
-      onCreateGridLine('vertical', point.x);
+      // The first vertical grid line anchors to the origin (x = 0m) instead
+      // of wherever was tapped, so the grid always starts from the plan's
+      // 0,0 point like a real structural grid — every grid line after the
+      // first still places exactly where the person taps.
+      const hasVertical = gridLines.some((l) => l.orientation === 'vertical');
+      onCreateGridLine('vertical', hasVertical ? point.x : 0);
       return;
     }
 
     if (activeTool === 'gridH') {
-      onCreateGridLine('horizontal', point.y);
+      const hasHorizontal = gridLines.some((l) => l.orientation === 'horizontal');
+      onCreateGridLine('horizontal', hasHorizontal ? point.y : 0);
       return;
     }
 
@@ -1028,6 +1034,46 @@ export function FloorPlanCanvas({
             );
           })}
 
+          {/* Footings render BEFORE columns (not after) so that columns —
+              which are almost always centered inside their footing and
+              visually smaller — sit on top in both paint order and Konva's
+              hit-test order. A footing with fill="transparent" is still a
+              solid hit target (transparent fill ≠ listening={false}), so
+              drawing it after the column used to let its rectangle swallow
+              every tap meant for the column beneath it, making the column
+              impossible to select once a footing was placed under it. */}
+          {footings.map((f) => {
+            const px = toPixels(f.center);
+            const isSelected = selection?.kind === 'footing' && selection.id === f.id;
+            const wPx = f.width * pixelsPerMeter;
+            const dPx = f.depth * pixelsPerMeter;
+            return (
+              <Rect
+                key={f.id}
+                x={px.x - wPx / 2}
+                y={px.y - dPx / 2}
+                width={wPx}
+                height={dPx}
+                fill={isSelected ? '#2D6CDF' : 'transparent'}
+                stroke={isSelected ? '#2D6CDF' : '#6B7280'}
+                strokeWidth={2}
+                dash={[4, 3]}
+                onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'footing', id: f.id });
+                  }
+                }}
+                onTap={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    setSelection({ kind: 'footing', id: f.id });
+                  }
+                }}
+              />
+            );
+          })}
+
           {columns.map((column) => {
             const px = toPixels(column.center);
             const isSelected = selection?.kind === 'column' && selection.id === column.id;
@@ -1071,38 +1117,6 @@ export function FloorPlanCanvas({
                   if (activeTool === 'select') {
                     e.cancelBubble = true;
                     setSelection({ kind: 'column', id: column.id });
-                  }
-                }}
-              />
-            );
-          })}
-
-          {footings.map((f) => {
-            const px = toPixels(f.center);
-            const isSelected = selection?.kind === 'footing' && selection.id === f.id;
-            const wPx = f.width * pixelsPerMeter;
-            const dPx = f.depth * pixelsPerMeter;
-            return (
-              <Rect
-                key={f.id}
-                x={px.x - wPx / 2}
-                y={px.y - dPx / 2}
-                width={wPx}
-                height={dPx}
-                fill={isSelected ? '#2D6CDF' : 'transparent'}
-                stroke={isSelected ? '#2D6CDF' : '#6B7280'}
-                strokeWidth={2}
-                dash={[4, 3]}
-                onClick={(e) => {
-                  if (activeTool === 'select') {
-                    e.cancelBubble = true;
-                    setSelection({ kind: 'footing', id: f.id });
-                  }
-                }}
-                onTap={(e) => {
-                  if (activeTool === 'select') {
-                    e.cancelBubble = true;
-                    setSelection({ kind: 'footing', id: f.id });
                   }
                 }}
               />

@@ -175,6 +175,7 @@ export interface Translations {
     closeAriaLabel: string;
     view2D: string;
     view3D: string;
+    addFloor: string;
     resetView: string;
     resetViewTooltip: string;
     zoomInTooltip: string;

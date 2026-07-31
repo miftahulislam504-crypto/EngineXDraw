@@ -83,6 +83,40 @@ export function subscribeToFloors(
   });
 }
 
+/** Adds one new floor above the building's current highest floor —
+ * `createBuilding` only ever seeds the Ground Floor (level 0), so this is
+ * the only way additional floors (First Floor, Second Floor, …) get
+ * created. Level and name are derived from the existing floors passed in,
+ * the same "next in sequence" pattern GridLine/Dimension labels use, so
+ * the caller doesn't have to track numbering itself. Basements (level < 0)
+ * aren't handled by this — it always adds upward from the current top. */
+export async function createFloor(
+  projectId: string,
+  buildingId: string,
+  existingFloors: Floor[],
+) {
+  const topLevel = existingFloors.reduce((max, f) => Math.max(max, f.level), -1);
+  const nextLevel = topLevel + 1;
+  const name =
+    nextLevel === 0
+      ? 'Ground Floor'
+      : nextLevel === 1
+        ? 'First Floor'
+        : nextLevel === 2
+          ? 'Second Floor'
+          : nextLevel === 3
+            ? 'Third Floor'
+            : `Floor ${nextLevel}`;
+  const floorRef = await addDoc(floorsCol(projectId, buildingId), {
+    buildingId,
+    level: nextLevel,
+    name,
+    floorToFloorHeight: 3.05,
+    createdAt: serverTimestamp(),
+  });
+  return floorRef.id;
+}
+
 export function subscribeToWalls(
   projectId: string,
   buildingId: string,

@@ -161,6 +161,7 @@ export const en: Translations = {
     closeAriaLabel: 'Close',
     view2D: '2D Plan',
     view3D: '3D View',
+    addFloor: 'Floor',
     resetView: 'Reset View',
     resetViewTooltip: 'Reset pan and zoom to the default view',
     zoomInTooltip: 'Zoom in',

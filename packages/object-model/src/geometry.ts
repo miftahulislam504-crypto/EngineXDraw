@@ -174,6 +174,12 @@ export interface Roof {
   boundary: Point2D[];
   thickness: number;
   elevation: number; // meters above floor level
+  // Same optional Property-System pattern as Wall (see materialLabel/
+  // libraryItemId there) — a roof's material genuinely reads as a
+  // distinct facade element in elevation/render views, so it gets the
+  // same override rather than always inheriting a flat theme color.
+  materialLabel?: string;
+  libraryItemId?: string;
   createdAt: FirestoreTimestampLike;
   updatedAt: FirestoreTimestampLike;
 }

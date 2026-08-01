@@ -3,9 +3,10 @@
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { PageHeader } from '@archibim/shared-ui';
-import type { Building, Floor } from '@archibim/object-model';
+import type { Building, Floor, LibraryItem } from '@archibim/object-model';
 import { subscribeToBuildings } from '@/lib/projects';
 import { subscribeToFloors, subscribeToFloorElements, type FloorElements } from '@/lib/floors';
+import { subscribeToLibrary, ensureLibrarySeeded } from '@/lib/library';
 import {
   BuildingElevationView,
   type ElevationDirection,
@@ -24,6 +25,7 @@ export default function ElevationsPage() {
   const [buildingId, setBuildingId] = useState<string | null>(null);
   const [floors, setFloors] = useState<Floor[]>([]);
   const [floorElements, setFloorElements] = useState<Record<string, FloorElements>>({});
+  const [materialLibraryItems, setMaterialLibraryItems] = useState<LibraryItem[]>([]);
   const initialDirection = searchParams.get('direction');
   const [direction, setDirection] = useState<ElevationDirection>(
     initialDirection === 'N' || initialDirection === 'S' || initialDirection === 'E' || initialDirection === 'W'
@@ -52,6 +54,17 @@ export default function ElevationsPage() {
     );
     return () => unsubs.forEach((unsub) => unsub());
   }, [projectId, buildingId, floors]);
+
+  // Phase A — Elevation/Render material fidelity: same MATERIAL-category
+  // subscription pattern as the design studio page, so a wall's assigned
+  // material shows up here too instead of the elevation always falling
+  // back to a flat default.
+  useEffect(() => {
+    ensureLibrarySeeded().catch(() => {
+      // Non-fatal — elevation still renders with theme-default colors.
+    });
+    return subscribeToLibrary('MATERIAL', setMaterialLibraryItems);
+  }, []);
 
   const directionLabels: Record<ElevationDirection, string> = {
     N: t.elevations.north,
@@ -85,7 +98,13 @@ export default function ElevationsPage() {
 
       <div className="mt-6">
         {hasAnyWalls ? (
-          <BuildingElevationView floors={floors} floorElements={floorElements} direction={direction} height={640} />
+          <BuildingElevationView
+            floors={floors}
+            floorElements={floorElements}
+            direction={direction}
+            height={640}
+            libraryItems={materialLibraryItems}
+          />
         ) : (
           <p className="text-sm text-ink-muted">{t.elevations.emptyState}</p>
         )}

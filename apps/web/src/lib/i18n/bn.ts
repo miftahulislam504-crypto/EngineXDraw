@@ -159,6 +159,7 @@ export const bn: Translations = {
     explodedViewTooltip: '3D ভিউতে প্রতিটা ফ্লোর উলম্বভাবে আলাদা করে দেখায়',
     deleteSelection: 'মুছে ফেলুন ({kind})',
     closeAriaLabel: 'বন্ধ করুন',
+    northLabel: 'উত্তর',
     view2D: '2D প্ল্যান',
     view3D: '3D ভিউ',
     addFloor: 'ফ্লোর',
@@ -444,7 +445,7 @@ export const bn: Translations = {
     direction: 'দিক',
     sectionLine: 'সেকশন লাইন',
     noSectionLinesYet: 'এখনো কোনো সেকশন লাইন নেই — প্রথমে ডিজাইন স্টুডিওতে একটা আঁকুন।',
-    scaleLabel: 'স্কেল (শুধু লেবেল)',
+    scaleLabel: 'স্কেল',
     scaleLabelPlaceholder: 'যেমন 1:100',
     drawnBy: 'আঁকিয়েছেন',
     date: 'তারিখ',
@@ -453,6 +454,15 @@ export const bn: Translations = {
     open: 'খুলুন',
     exportPdf: 'PDF এক্সপোর্ট',
     notFound: 'শিট খুঁজে পাওয়া যায়নি।',
+    generateSetTitle: 'স্ট্যান্ডার্ড শিট সেট',
+    generateSetDescription:
+      'এক ক্লিকে প্রতিটা ফ্লোরের জন্য একটা Floor Plan শিট এবং N/E/S/W চারটা Elevation শিট তৈরি করে। যেগুলো আগে থেকে আছে সেগুলো বাদ যায়, তাই নতুন ফ্লোর যোগ করার পর আবার চালানো নিরাপদ।',
+    generateSetAction: 'স্ট্যান্ডার্ড সেট তৈরি করুন',
+    generateSetInProgress: 'তৈরি হচ্ছে…',
+    generateSetNoSectionsHint:
+      'এখনো কোনো Section শিট তৈরি হবে না — প্রথমে ডিজাইন স্টুডিওতে একটা সেকশন লাইন আঁকুন, তারপর আবার চালান।',
+    generateSetResultCreated: '{count}টা নতুন শিট তৈরি হয়েছে।',
+    generateSetResultNoneNew: 'নতুন কিছু তৈরি করার নেই — সব স্ট্যান্ডার্ড শিট আগে থেকেই আছে।',
   },
   compliance: {
     pageTitle: 'বিল্ডিং ইন্টেলিজেন্স',

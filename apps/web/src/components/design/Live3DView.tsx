@@ -11,6 +11,7 @@ import type {
   CurtainWall,
   Footing,
   Foundation,
+  LibraryItem,
   Opening,
   PlacedObject,
   Railing,
@@ -23,6 +24,7 @@ import type {
   Wall,
 } from '@archibim/object-model';
 import { pointAtParameter, computeExtendedWallSegments } from '@archibim/core-engine';
+import { buildMaterialLookup, resolveMaterial } from '@/lib/material-resolver';
 
 export interface Live3DViewProps {
   walls: Wall[];
@@ -44,6 +46,12 @@ export interface Live3DViewProps {
   rooms: Room[];
   explodedView?: boolean;
   height?: number;
+  /** Phase A — Elevation/Render material fidelity: the MATERIAL-category
+   * subset of the shared library, used to resolve each wall/roof's
+   * assigned material to an actual render color instead of always
+   * showing the flat default. Optional and defaults to empty so existing
+   * callers that haven't wired this up yet keep working unchanged. */
+  libraryItems?: LibraryItem[];
 }
 
 /** Exploded view offsets everything above ground floor upward, per-floor —
@@ -53,14 +61,22 @@ export interface Live3DViewProps {
  * once, which is a page-level change beyond this component. */
 const EXPLODE_LIFT = 1.5;
 
-export function WallMesh({ wall, segment, selected, colorOverride }: {
+export function WallMesh({ wall, segment, selected, colorOverride, roughness, metalness }: {
   wall: Wall;
   segment: { start: typeof wall.start; end: typeof wall.end };
   selected: boolean;
   /** Phase 8 — Visualization: optional Material Preview theme override for
    * the unselected color. Selected state always wins (still shows the
-   * selection-blue highlight) — this only swaps the "normal" appearance. */
+   * selection-blue highlight) — this only swaps the "normal" appearance.
+   * As of Phase A this is also how a per-wall assigned material (resolved
+   * via lib/material-resolver.ts against the wall's libraryItemId) reaches
+   * the mesh — same prop, whichever caller resolved the color wins. */
   colorOverride?: string;
+  /** Optional PBR fine-tuning carried from a resolved library MATERIAL
+   * item. Omitted entirely (rather than defaulted here) when nothing
+   * resolved, so meshStandardMaterial falls back to its own defaults. */
+  roughness?: number;
+  metalness?: number;
 }) {
   const dx = segment.end.x - segment.start.x;
   const dz = segment.end.y - segment.start.y;
@@ -74,7 +90,11 @@ export function WallMesh({ wall, segment, selected, colorOverride }: {
   return (
     <mesh position={[center.x, wall.height / 2, center.z]} rotation={[0, -angle, 0]} castShadow receiveShadow>
       <boxGeometry args={[length, wall.height, wall.thickness]} />
-      <meshStandardMaterial color={selected ? '#2D6CDF' : (colorOverride ?? '#E7E9EE')} />
+      <meshStandardMaterial
+        color={selected ? '#2D6CDF' : (colorOverride ?? '#E7E9EE')}
+        roughness={selected ? undefined : roughness}
+        metalness={selected ? undefined : metalness}
+      />
     </mesh>
   );
 }
@@ -141,6 +161,8 @@ export function PlanarBoxMesh({
   color,
   selectedColor,
   selected,
+  roughness,
+  metalness,
 }: {
   boundary: { x: number; y: number }[];
   thickness: number;
@@ -148,6 +170,12 @@ export function PlanarBoxMesh({
   color: string;
   selectedColor: string;
   selected: boolean;
+  /** Optional PBR fine-tuning from a resolved library MATERIAL item —
+   * currently only passed for Roof (the one PlanarBoxMesh user with its
+   * own materialLabel/libraryItemId as of Phase A). Slab/Ceiling/
+   * Foundation callers simply omit these and get renderer defaults. */
+  roughness?: number;
+  metalness?: number;
 }) {
   const xs = boundary.map((p) => p.x);
   const zs = boundary.map((p) => p.y);
@@ -162,7 +190,11 @@ export function PlanarBoxMesh({
   return (
     <mesh position={[(minX + maxX) / 2, centerY, (minZ + maxZ) / 2]} receiveShadow castShadow>
       <boxGeometry args={[width, thickness, depth]} />
-      <meshStandardMaterial color={selected ? selectedColor : color} />
+      <meshStandardMaterial
+        color={selected ? selectedColor : color}
+        roughness={selected ? undefined : roughness}
+        metalness={selected ? undefined : metalness}
+      />
     </mesh>
   );
 }
@@ -372,6 +404,7 @@ export function Live3DView({
   rooms,
   explodedView = false,
   height,
+  libraryItems = [],
 }: Live3DViewProps) {
   const center = useMemo(() => {
     if (walls.length === 0) return { x: 0, z: 0 };
@@ -385,6 +418,7 @@ export function Live3DView({
 
   const extendedSegments = useMemo(() => computeExtendedWallSegments(walls), [walls]);
   const lift = explodedView ? EXPLODE_LIFT : 0;
+  const materialLookup = useMemo(() => buildMaterialLookup(libraryItems), [libraryItems]);
 
   return (
     <div
@@ -435,7 +469,18 @@ export function Live3DView({
           ))}
           {walls.map((wall) => {
             const segment = extendedSegments.find((s) => s.wallId === wall.id) ?? wall;
-            return <WallMesh key={wall.id} wall={wall} segment={segment} selected={false} />;
+            const material = resolveMaterial(wall, materialLookup, '#E7E9EE');
+            return (
+              <WallMesh
+                key={wall.id}
+                wall={wall}
+                segment={segment}
+                selected={false}
+                colorOverride={material.color}
+                roughness={material.roughness}
+                metalness={material.metalness}
+              />
+            );
           })}
           {openings.map((opening) => {
             const wall = walls.find((w) => w.id === opening.wallId);
@@ -458,17 +503,22 @@ export function Live3DView({
               selected={false}
             />
           ))}
-          {roofs.map((r) => (
-            <PlanarBoxMesh
-              key={r.id}
-              boundary={r.boundary}
-              thickness={r.thickness}
-              elevation={r.elevation}
-              color="#8B5E4A"
-              selectedColor="#2D6CDF"
-              selected={false}
-            />
-          ))}
+          {roofs.map((r) => {
+            const material = resolveMaterial(r, materialLookup, '#8B5E4A');
+            return (
+              <PlanarBoxMesh
+                key={r.id}
+                boundary={r.boundary}
+                thickness={r.thickness}
+                elevation={r.elevation}
+                color={material.color}
+                selectedColor="#2D6CDF"
+                selected={false}
+                roughness={material.roughness}
+                metalness={material.metalness}
+              />
+            );
+          })}
           {ramps.map((r) => (
             <RampMesh key={r.id} ramp={r} selected={false} />
           ))}

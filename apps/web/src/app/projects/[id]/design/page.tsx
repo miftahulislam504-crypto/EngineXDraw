@@ -78,7 +78,7 @@ import {
   snapToNearestFooting,
   snapToNearestColumn,
 } from '@archibim/core-engine';
-import { subscribeToBuildings } from '@/lib/projects';
+import { subscribeToBuildings, updateBuilding } from '@/lib/projects';
 import { useAuthStore } from '@/lib/auth-store';
 import {
   subscribeToFloors,
@@ -128,6 +128,7 @@ import {
   deleteSiteBoundary,
 } from '@/lib/siteBoundary';
 import { subscribeToRooms, reconcileRooms, updateRoom } from '@/lib/rooms';
+import { subscribeToLibrary, ensureLibrarySeeded } from '@/lib/library';
 import { useDesignStudioStore } from '@/lib/design-studio-store';
 import { useI18nStore, formatTemplate } from '@/lib/i18n';
 import { Toolbar } from '@/components/design/Toolbar';
@@ -171,11 +172,17 @@ export default function DesignStudioPage() {
   const [sectionLines, setSectionLines] = useState<SectionLine[]>([]);
   const [shafts, setShafts] = useState<Shaft[]>([]);
   const [siteBoundary, setSiteBoundary] = useState<SiteBoundary | null>(null);
+  // Phase A — Elevation/Render material fidelity: MATERIAL-category
+  // library items, subscribed once at the page level (not per-view) so
+  // Live3DView/BuildingElevationView/BuildingRenderStudioView/
+  // PropertiesPanel's material picker all resolve against the same live
+  // list without each re-subscribing independently.
+  const [materialLibraryItems, setMaterialLibraryItems] = useState<LibraryItem[]>([]);
 
   const [showRooms, setShowRooms] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
   const [pendingLibraryItem, setPendingLibraryItem] = useState<LibraryItem | null>(null);
-  const [materialPickerWallId, setMaterialPickerWallId] = useState<string | null>(null);
+  const [materialPickerTarget, setMaterialPickerTarget] = useState<{ id: string; kind: 'wall' | 'roof' } | null>(null);
   const [blockMessage, setBlockMessage] = useState<string | null>(null);
   const blockMessageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -205,6 +212,7 @@ export default function DesignStudioPage() {
     useDesignStudioStore();
   const { t } = useI18nStore();
   const currentFloorLevel = floors.find((f) => f.id === floorId)?.level ?? 0;
+  const currentBuilding = buildings.find((b) => b.id === buildingId) ?? null;
 
   useEffect(() => {
     return subscribeToBuildings(projectId, (bs) => {
@@ -231,6 +239,19 @@ export default function DesignStudioPage() {
     if (!buildingId) return;
     return subscribeToSiteBoundary(projectId, buildingId, setSiteBoundary);
   }, [projectId, buildingId]);
+
+  // Phase A — Elevation/Render material fidelity. ensureLibrarySeeded is
+  // idempotent (see lib/library.ts) so calling it here as well as from
+  // LibraryBrowser is safe — this just means the material catalog exists
+  // even if the person never opens the Library Browser in this session.
+  useEffect(() => {
+    ensureLibrarySeeded().catch(() => {
+      // Non-fatal — the design view still works with whatever materials
+      // (if any) already exist; walls/roofs with no resolvable material
+      // simply fall back to the theme color.
+    });
+    return subscribeToLibrary('MATERIAL', setMaterialLibraryItems);
+  }, []);
 
   useEffect(() => {
     if (!buildingId || !floorId) return;
@@ -828,7 +849,35 @@ export default function DesignStudioPage() {
             onCreateSectionLine={handleCreateSectionLine}
             onOpenElevation={handleOpenElevation}
             onMoveWallEndpoint={handleMoveWallEndpoint}
+            northAngleDeg={currentBuilding?.northAngleDeg ?? 0}
           />
+          {/* Phase C — Sheet annotation: lets the person set the
+              building's true-north offset (Building.northAngleDeg) that
+              drives the north arrow drawn inside FloorPlanCanvas itself
+              and, downstream, any exported floor plan sheet. Kept as a
+              small overlay here rather than a separate settings page —
+              this is the only view where "north" is a meaningful concept
+              (elevations/sections are vertical cuts with no compass
+              direction), so it belongs right next to the arrow it
+              controls. */}
+          {buildingId && (
+            <div className="absolute right-2 top-2 z-10 flex items-center gap-1.5 rounded-sheet border border-line bg-white/90 px-2 py-1 text-xs text-ink-muted shadow-sm">
+              <label htmlFor="north-angle-input">{t.designStudio.northLabel}</label>
+              <input
+                id="north-angle-input"
+                type="number"
+                step={1}
+                className="w-14 rounded border border-line px-1 py-0.5 text-right font-mono text-xs"
+                value={currentBuilding?.northAngleDeg ?? 0}
+                onChange={(e) => {
+                  const deg = Number(e.target.value);
+                  if (!buildingId || !Number.isFinite(deg)) return;
+                  updateBuilding(projectId, buildingId, { northAngleDeg: deg });
+                }}
+              />
+              <span>°</span>
+            </div>
+          )}
           <PropertiesPanel
             walls={walls}
             openings={openings}
@@ -915,8 +964,8 @@ export default function DesignStudioPage() {
             onViewSection={handleViewSection}
             onUpdateShaft={(id, patch) => buildingId && updateShaft(projectId, buildingId, id, patch)}
             onUpdateSiteBoundary={(id, patch) => buildingId && updateSiteBoundary(projectId, buildingId, id, patch)}
-            onOpenMaterialLibrary={(wallId) => {
-              setMaterialPickerWallId(wallId);
+            onOpenMaterialLibrary={(targetId, targetKind) => {
+              setMaterialPickerTarget({ id: targetId, kind: targetKind });
               setShowLibrary(true);
             }}
             onDelete={handleDeleteSelection}
@@ -933,18 +982,25 @@ export default function DesignStudioPage() {
           {showLibrary && user && (
             <LibraryBrowser
               currentUserId={user.uid}
-              initialCategory={materialPickerWallId ? 'MATERIAL' : undefined}
+              initialCategory={materialPickerTarget ? 'MATERIAL' : undefined}
               onClose={() => {
                 setShowLibrary(false);
-                setMaterialPickerWallId(null);
+                setMaterialPickerTarget(null);
               }}
               onSelect={(item) => {
-                if (materialPickerWallId && buildingId && floorId) {
-                  updateWall(projectId, buildingId, floorId, materialPickerWallId, {
-                    materialLabel: item.name,
-                    libraryItemId: item.id,
-                  });
-                  setMaterialPickerWallId(null);
+                if (materialPickerTarget && buildingId && floorId) {
+                  if (materialPickerTarget.kind === 'wall') {
+                    updateWall(projectId, buildingId, floorId, materialPickerTarget.id, {
+                      materialLabel: item.name,
+                      libraryItemId: item.id,
+                    });
+                  } else {
+                    roofCrud.update(projectId, buildingId, floorId, materialPickerTarget.id, {
+                      materialLabel: item.name,
+                      libraryItemId: item.id,
+                    });
+                  }
+                  setMaterialPickerTarget(null);
                 } else {
                   setPendingLibraryItem(item);
                 }
@@ -978,6 +1034,7 @@ export default function DesignStudioPage() {
             placedObjects={placedObjects}
             rooms={rooms}
             explodedView={explodedView}
+            libraryItems={materialLibraryItems}
           />
         </div>
       </div>

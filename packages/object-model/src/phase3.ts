@@ -84,4 +84,16 @@ export interface LibraryItem {
   isCustom: boolean;
   createdBy?: string;
   createdAt: FirestoreTimestampLike;
+  // ─── Visual material properties (Phase A — Elevation/Render material
+  // fidelity) ───────────────────────────────────────────────────────────
+  // Only meaningful for category 'MATERIAL' items, but kept optional on
+  // the shared type rather than a separate interface — every other
+  // LibraryItem field is already shared across categories the same way,
+  // and a wall's assigned material is looked up by libraryItemId, so the
+  // render resolver needs these to live on the same object it already
+  // fetches. All optional: existing MATERIAL items (and every non-MATERIAL
+  // item) remain valid without a migration.
+  colorHex?: string; // e.g. '#4A4A4A' — the base color meshStandardMaterial uses
+  roughness?: number; // 0 (mirror-like) .. 1 (fully matte); undefined = renderer default
+  metalness?: number; // 0 (dielectric: brick/wood/stucco) .. 1 (metal); undefined = renderer default
 }

@@ -102,6 +102,39 @@ service cloud.firestore {
     match /notifications/{id}      { allow read, write: if isSignedIn(); }
 
     // ──────────────────────────────────────────────────────────
+    // LIBRARY ITEMS — ArchiBIM shared component/material catalog
+    // (root collection: libraryItems/{itemId}). Read by every
+    // signed-in user (Library Browser, material pickers in
+    // PropertiesPanel, and the material resolver used by
+    // Live3DView/BuildingElevationView/BuildingSectionView/
+    // BuildingRenderStudioView). Writes happen two ways:
+    //   - createCustomLibraryItem() (lib/library.ts) — always sets
+    //     isCustom: true and createdBy: <uid>.
+    //   - ensureLibrarySeeded() (lib/library.ts) — client-side,
+    //     idempotent starter-catalog seeding, writes isCustom: false
+    //     items with no createdBy. Runs from the design/elevations/
+    //     sections/visualization pages on load, and can't require
+    //     createdBy == auth.uid since seeded items are shared, not
+    //     personal. There's also a Cloud Function version of the same
+    //     seed (seedLibraryDefaults) using the Admin SDK, which
+    //     bypasses these rules entirely — both are safe to run.
+    // Once a built-in (isCustom: false) item exists, it's read-only
+    // from the client — only a custom item's own creator may update
+    // or delete it — so seeding can insert starter items but nobody
+    // can silently repaint or remove the shared catalog for everyone.
+    // ──────────────────────────────────────────────────────────
+    match /libraryItems/{itemId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (
+        (request.resource.data.isCustom == true && request.resource.data.createdBy == request.auth.uid) ||
+        request.resource.data.isCustom == false
+      );
+      allow update, delete: if isSignedIn()
+        && resource.data.isCustom == true
+        && resource.data.createdBy == request.auth.uid;
+    }
+
+    // ──────────────────────────────────────────────────────────
     // Default deny — anything not explicitly listed above
     // ──────────────────────────────────────────────────────────
     match /{document=**} {

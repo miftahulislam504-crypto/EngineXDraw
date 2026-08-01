@@ -110,6 +110,14 @@ export interface Building {
   numberOfFloors: number;
   buildingType?: string;
   totalAreaSqm?: number;
+  /** Phase C — Sheet annotation: degrees clockwise from world +Y (the
+   * floor plan's "up" screen direction) to true north. Optional and
+   * defaults to 0 wherever unset — meaning "plan up already is north",
+   * the common case and why this needs no migration for existing
+   * buildings. Only meaningful for FloorPlanCanvas's north arrow;
+   * elevations/sections are vertical cuts and don't have a compass
+   * direction of their own. */
+  northAngleDeg?: number;
   createdAt: FirestoreTimestampLike;
 }
 

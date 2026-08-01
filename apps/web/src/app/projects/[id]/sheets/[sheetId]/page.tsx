@@ -5,12 +5,13 @@ import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import type Konva from 'konva';
 import { Button, PageHeader } from '@archibim/shared-ui';
-import type { Floor, Sheet, SectionLine, Shaft, SiteBoundary } from '@archibim/object-model';
+import type { Building, Floor, LibraryItem, Sheet, SectionLine, Shaft, SiteBoundary } from '@archibim/object-model';
 import { subscribeToBuildings } from '@/lib/projects';
 import { subscribeToFloors, subscribeToFloorElements, EMPTY_FLOOR_ELEMENTS, type FloorElements } from '@/lib/floors';
 import { subscribeToShafts } from '@/lib/shafts';
 import { subscribeToSiteBoundary } from '@/lib/siteBoundary';
 import { subscribeToSheet } from '@/lib/sheets';
+import { subscribeToLibrary, ensureLibrarySeeded } from '@/lib/library';
 import { exportSheetToPdf } from '@/lib/sheet-export';
 import { BuildingElevationView } from '@/components/design/BuildingElevationView';
 import { BuildingSectionView } from '@/components/design/BuildingSectionView';
@@ -27,20 +28,24 @@ export default function SheetDetailPage() {
   const { t } = useI18nStore();
 
   const [buildingId, setBuildingId] = useState<string | null>(searchParams.get('buildingId'));
+  const [buildings, setBuildings] = useState<Building[]>([]);
   const [sheet, setSheet] = useState<Sheet | null | undefined>(undefined);
   const [floors, setFloors] = useState<Floor[]>([]);
   const [floorElements, setFloorElements] = useState<Record<string, FloorElements>>({});
   const [shafts, setShafts] = useState<Shaft[]>([]);
   const [siteBoundary, setSiteBoundary] = useState<SiteBoundary | null>(null);
+  const [materialLibraryItems, setMaterialLibraryItems] = useState<LibraryItem[]>([]);
   const [canvasEl, setCanvasEl] = useState<HTMLCanvasElement | null>(null);
+  const [canvasMetersPerPixel, setCanvasMetersPerPixel] = useState<number | undefined>(undefined);
   const [stage, setStage] = useState<Konva.Stage | null>(null);
+  const [stagePixelsPerMeter, setStagePixelsPerMeter] = useState<number | undefined>(undefined);
 
   useEffect(() => {
-    if (buildingId) return;
     return subscribeToBuildings(projectId, (bs) => {
+      setBuildings(bs);
       setBuildingId((current) => current ?? bs[0]?.id ?? null);
     });
-  }, [projectId, buildingId]);
+  }, [projectId]);
 
   useEffect(() => {
     if (!buildingId) return;
@@ -62,6 +67,18 @@ export default function SheetDetailPage() {
     return subscribeToSiteBoundary(projectId, buildingId, setSiteBoundary);
   }, [projectId, buildingId]);
 
+  // Phase A — Elevation/Render material fidelity: this is the page that
+  // actually produces the exported PDF sheet, so a wall's assigned
+  // material needs to reach it the same way it reaches the live
+  // elevation/render-studio views, or the exported drawing would show a
+  // different result than what was designed.
+  useEffect(() => {
+    ensureLibrarySeeded().catch(() => {
+      // Non-fatal — sheet still renders/exports with theme-default colors.
+    });
+    return subscribeToLibrary('MATERIAL', setMaterialLibraryItems);
+  }, []);
+
   useEffect(() => {
     if (!buildingId || floors.length === 0) return;
     const unsubs = floors.map((floor) =>
@@ -72,8 +89,14 @@ export default function SheetDetailPage() {
     return () => unsubs.forEach((unsub) => unsub());
   }, [projectId, buildingId, floors]);
 
-  const handleCanvasReady = useCallback((el: HTMLCanvasElement) => setCanvasEl(el), []);
-  const handleStageReady = useCallback((s: Konva.Stage) => setStage(s), []);
+  const handleCanvasReady = useCallback((el: HTMLCanvasElement, metersPerPixel: number) => {
+    setCanvasEl(el);
+    setCanvasMetersPerPixel(metersPerPixel);
+  }, []);
+  const handleStageReady = useCallback((s: Konva.Stage, pixelsPerMeter: number) => {
+    setStage(s);
+    setStagePixelsPerMeter(pixelsPerMeter);
+  }, []);
 
   const sectionLine: SectionLine | undefined =
     sheet?.viewportType === 'section'
@@ -91,10 +114,17 @@ export default function SheetDetailPage() {
     if (!sheet) return;
     if (sheet.viewportType === 'floorPlan') {
       if (!stage) return;
+      // toDataURL is captured at 2x for print sharpness — its actual
+      // pixel dimensions are 2x the Stage's own width()/height(), so the
+      // dimensions passed here must match, or the true-scale computation
+      // in exportSheetToPdf would read every pixel as covering half the
+      // real-world distance it actually does (a silent 2x scale error).
+      const pixelRatio = 2;
       exportSheetToPdf(sheet, {
-        dataUrl: stage.toDataURL({ pixelRatio: 2 }),
-        width: stage.width(),
-        height: stage.height(),
+        dataUrl: stage.toDataURL({ pixelRatio }),
+        width: stage.width() * pixelRatio,
+        height: stage.height() * pixelRatio,
+        metersPerPixel: stagePixelsPerMeter ? 1 / (stagePixelsPerMeter * pixelRatio) : undefined,
       });
       return;
     }
@@ -103,6 +133,7 @@ export default function SheetDetailPage() {
       dataUrl: canvasEl.toDataURL('image/png'),
       width: canvasEl.width,
       height: canvasEl.height,
+      metersPerPixel: canvasMetersPerPixel,
     });
   }
 
@@ -134,6 +165,7 @@ export default function SheetDetailPage() {
                 floorElements={floorElements}
                 direction={sheet.direction}
                 height={560}
+                libraryItems={materialLibraryItems}
                 onCanvasReady={handleCanvasReady}
               />
             )}
@@ -143,6 +175,7 @@ export default function SheetDetailPage() {
                 floorElements={floorElements}
                 sectionLine={sectionLine}
                 height={560}
+                libraryItems={materialLibraryItems}
                 onCanvasReady={handleCanvasReady}
               />
             )}
@@ -193,6 +226,7 @@ export default function SheetDetailPage() {
                 height={560}
                 readOnly
                 onStageReady={handleStageReady}
+                northAngleDeg={buildings.find((b) => b.id === buildingId)?.northAngleDeg ?? 0}
               />
             )}
 

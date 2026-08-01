@@ -11,6 +11,9 @@ interface SeedItem {
   defaultDepth?: number;
   manufacturer?: string;
   tags: string[];
+  colorHex?: string;
+  roughness?: number;
+  metalness?: number;
 }
 
 // A small starter set per category — not an exhaustive catalog, just
@@ -53,9 +56,25 @@ const STARTER_ITEMS: SeedItem[] = [
   { category: 'PLANT', name: 'Flower Bed', defaultWidth: 1.5, defaultHeight: 0.3, defaultDepth: 0.6, tags: ['bed'] },
   { category: 'PLANT', name: 'Climbing Vine', defaultWidth: 0.3, defaultHeight: 2.0, defaultDepth: 0.2, tags: ['vine'] },
 
-  { category: 'MATERIAL', name: '9-inch Brick Wall', defaultWidth: 0.229, defaultHeight: 3.05, tags: ['brick', 'exterior'] },
-  { category: 'MATERIAL', name: '5-inch Brick Wall', defaultWidth: 0.127, defaultHeight: 3.05, tags: ['brick', 'interior'] },
-  { category: 'MATERIAL', name: 'RCC Wall 150mm', defaultWidth: 0.15, defaultHeight: 3.05, tags: ['rcc', 'structural'] },
+  { category: 'MATERIAL', name: '9-inch Brick Wall', defaultWidth: 0.229, defaultHeight: 3.05, tags: ['brick', 'exterior'], colorHex: '#B5654A', roughness: 0.85, metalness: 0 },
+  { category: 'MATERIAL', name: '5-inch Brick Wall', defaultWidth: 0.127, defaultHeight: 3.05, tags: ['brick', 'interior'], colorHex: '#C77B5E', roughness: 0.85, metalness: 0 },
+  { category: 'MATERIAL', name: 'RCC Wall 150mm', defaultWidth: 0.15, defaultHeight: 3.05, tags: ['rcc', 'structural'], colorHex: '#9AA3B2', roughness: 0.6, metalness: 0 },
+
+  // Facade finishes — the palette below is deliberately close to the
+  // reference elevation set (dark charcoal panels, white render, warm wood
+  // slats, tan stucco, glazing, orange accent) so a project can be
+  // recolored to read like that kind of multi-material modern facade
+  // instead of one flat wall color per building.
+  { category: 'MATERIAL', name: 'Charcoal Render', defaultWidth: 0.15, defaultHeight: 3.05, tags: ['facade', 'exterior', 'dark'], colorHex: '#3A3D42', roughness: 0.55, metalness: 0 },
+  { category: 'MATERIAL', name: 'White Render', defaultWidth: 0.15, defaultHeight: 3.05, tags: ['facade', 'exterior', 'light'], colorHex: '#F2F1EC', roughness: 0.7, metalness: 0 },
+  { category: 'MATERIAL', name: 'Tan Stucco', defaultWidth: 0.15, defaultHeight: 3.05, tags: ['facade', 'exterior', 'stucco'], colorHex: '#C9A876', roughness: 0.8, metalness: 0 },
+  { category: 'MATERIAL', name: 'Warm Wood Slat Cladding', defaultWidth: 0.05, defaultHeight: 3.05, tags: ['facade', 'exterior', 'wood', 'timber'], colorHex: '#7A4E2E', roughness: 0.65, metalness: 0 },
+  { category: 'MATERIAL', name: 'Dark Grey Fiber Cement Panel', defaultWidth: 0.12, defaultHeight: 3.05, tags: ['facade', 'exterior', 'panel'], colorHex: '#55585E', roughness: 0.5, metalness: 0.05 },
+  { category: 'MATERIAL', name: 'Glazed Curtain Glass', defaultWidth: 0.05, defaultHeight: 3.05, tags: ['glass', 'glazing', 'curtain-wall'], colorHex: '#A9CBE0', roughness: 0.1, metalness: 0.1 },
+  { category: 'MATERIAL', name: 'Anodized Aluminum Frame', defaultWidth: 0.05, defaultHeight: 3.05, tags: ['frame', 'metal', 'window'], colorHex: '#2B2E33', roughness: 0.35, metalness: 0.8 },
+  { category: 'MATERIAL', name: 'Orange Accent Panel', defaultWidth: 0.15, defaultHeight: 3.05, tags: ['accent', 'feature'], colorHex: '#D9662B', roughness: 0.6, metalness: 0 },
+  { category: 'MATERIAL', name: 'Flat Roof Membrane', defaultWidth: 0.15, defaultHeight: 3.05, tags: ['roof', 'flat'], colorHex: '#4A4A4A', roughness: 0.75, metalness: 0 },
+  { category: 'MATERIAL', name: 'Terracotta Roof Tile', defaultWidth: 0.15, defaultHeight: 3.05, tags: ['roof', 'tile'], colorHex: '#8B5E4A', roughness: 0.8, metalness: 0 },
 ];
 
 export const seedLibraryDefaults = onCall(async (request) => {

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { PageHeader } from '@archibim/shared-ui';
-import type { Building, Floor, SectionLine } from '@archibim/object-model';
+import type { Building, Floor, LibraryItem, SectionLine } from '@archibim/object-model';
 import { subscribeToBuildings } from '@/lib/projects';
 import {
   subscribeToFloors,
@@ -12,6 +12,7 @@ import {
   getSectionLineAutoLabel,
   type FloorElements,
 } from '@/lib/floors';
+import { subscribeToLibrary, ensureLibrarySeeded } from '@/lib/library';
 import { BuildingSectionView } from '@/components/design/BuildingSectionView';
 import { useI18nStore, formatTemplate } from '@/lib/i18n';
 
@@ -27,6 +28,17 @@ export default function SectionViewPage() {
   const [floorElements, setFloorElements] = useState<Record<string, FloorElements>>({});
   const [sectionLine, setSectionLine] = useState<SectionLine | null | undefined>(undefined);
   const [allSectionLines, setAllSectionLines] = useState<SectionLine[]>([]);
+  const [materialLibraryItems, setMaterialLibraryItems] = useState<LibraryItem[]>([]);
+
+  // Phase A — Elevation/Render material fidelity: same MATERIAL-category
+  // subscription as the elevations page, so a wall's/roof's assigned
+  // material shows up in the section cut too.
+  useEffect(() => {
+    ensureLibrarySeeded().catch(() => {
+      // Non-fatal — section still renders with theme-default colors.
+    });
+    return subscribeToLibrary('MATERIAL', setMaterialLibraryItems);
+  }, []);
 
   // Falls back to the project's first building if none was passed in the
   // URL — matches the same "auto-pick the first building" simplification
@@ -86,7 +98,13 @@ export default function SectionViewPage() {
         {sectionLine === undefined && <p className="font-mono text-sm text-ink-muted">{t.common.loading}</p>}
         {sectionLine === null && <p className="text-sm text-danger">{t.sections.notFound}</p>}
         {sectionLine && (
-          <BuildingSectionView floors={floors} floorElements={floorElements} sectionLine={sectionLine} height={640} />
+          <BuildingSectionView
+            floors={floors}
+            floorElements={floorElements}
+            sectionLine={sectionLine}
+            height={640}
+            libraryItems={materialLibraryItems}
+          />
         )}
       </div>
     </div>

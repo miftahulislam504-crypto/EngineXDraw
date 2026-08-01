@@ -74,7 +74,7 @@ export interface PropertiesPanelProps {
       >
     >,
   ) => void;
-  onOpenMaterialLibrary?: (wallId: string) => void;
+  onOpenMaterialLibrary?: (targetId: string, targetKind: 'wall' | 'roof') => void;
   onUpdateOpening: (id: string, patch: Partial<Pick<Opening, 'width' | 'height' | 'sillHeight' | 'tag'>>) => void;
   onUpdateColumn: (id: string, patch: Partial<Pick<Column, 'width' | 'depth' | 'height'>>) => void;
   onUpdateBeam: (id: string, patch: Partial<Pick<Beam, 'width' | 'depth' | 'elevation'>>) => void;
@@ -82,7 +82,10 @@ export interface PropertiesPanelProps {
   onUpdateCeiling: (id: string, patch: Partial<Pick<Ceiling, 'thickness' | 'elevation'>>) => void;
   onUpdateFoundation: (id: string, patch: Partial<Pick<Foundation, 'thickness' | 'elevation'>>) => void;
   onUpdateFooting: (id: string, patch: Partial<Pick<Footing, 'width' | 'depth' | 'thickness'>>) => void;
-  onUpdateRoof: (id: string, patch: Partial<Pick<Roof, 'thickness' | 'elevation'>>) => void;
+  onUpdateRoof: (
+    id: string,
+    patch: Partial<Pick<Roof, 'thickness' | 'elevation' | 'materialLabel' | 'libraryItemId'>>,
+  ) => void;
   onUpdateRamp: (id: string, patch: Partial<Pick<Ramp, 'width' | 'endElevation'>>) => void;
   onUpdateRailing: (id: string, patch: Partial<Pick<Railing, 'height' | 'postSpacing'>>) => void;
   onUpdateStair: (id: string, patch: Partial<Pick<Stair, 'width' | 'numberOfSteps' | 'riserHeight'>>) => void;
@@ -279,7 +282,7 @@ export function PropertiesPanel({
                   />
                 </div>
                 {onOpenMaterialLibrary && (
-                  <Button variant="secondary" size="sm" onClick={() => onOpenMaterialLibrary(wall.id)}>
+                  <Button variant="secondary" size="sm" onClick={() => onOpenMaterialLibrary(wall.id, 'wall')}>
                     {t.properties.libraryButton}
                   </Button>
                 )}
@@ -769,14 +772,33 @@ export function PropertiesPanel({
       )}
 
       {roof && (
-        <BoundaryElementFields
-          thickness={roof.thickness}
-          elevation={roof.elevation}
-          boundaryPoints={roof.boundary.length}
-          onUpdateThickness={(thickness) => onUpdateRoof(roof.id, { thickness })}
-          onUpdateElevation={(elevation) => onUpdateRoof(roof.id, { elevation })}
-          t={t}
-        />
+        <>
+          <BoundaryElementFields
+            thickness={roof.thickness}
+            elevation={roof.elevation}
+            boundaryPoints={roof.boundary.length}
+            onUpdateThickness={(thickness) => onUpdateRoof(roof.id, { thickness })}
+            onUpdateElevation={(elevation) => onUpdateRoof(roof.id, { elevation })}
+            t={t}
+          />
+          <div className="mt-1 border-t border-line pt-3">
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <Input
+                  label={t.properties.material}
+                  value={roof.materialLabel ?? ''}
+                  onChange={(e) => onUpdateRoof(roof.id, { materialLabel: e.target.value })}
+                  placeholder={t.properties.materialPlaceholder}
+                />
+              </div>
+              {onOpenMaterialLibrary && (
+                <Button variant="secondary" size="sm" onClick={() => onOpenMaterialLibrary(roof.id, 'roof')}>
+                  {t.properties.libraryButton}
+                </Button>
+              )}
+            </div>
+          </div>
+        </>
       )}
 
       {balcony && (

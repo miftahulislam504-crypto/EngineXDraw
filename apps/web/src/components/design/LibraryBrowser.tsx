@@ -92,13 +92,22 @@ export function LibraryBrowser({ currentUserId, initialCategory, onClose, onSele
             <button
               key={item.id}
               onClick={() => onSelect(item)}
-              className="rounded-sheet border border-line p-3 text-left hover:border-accent hover:bg-accent-soft"
+              className="flex items-start gap-2 rounded-sheet border border-line p-3 text-left hover:border-accent hover:bg-accent-soft"
             >
-              <div className="font-medium text-ink">{item.name}</div>
-              <div className="font-mono text-xs text-ink-faint">
-                {item.defaultWidth}m × {item.defaultHeight}m
-                {item.defaultDepth ? ` × ${item.defaultDepth}m` : ''}
-                {item.isCustom ? ` ${t.libraryPanel.customTag}` : ''}
+              {item.colorHex && (
+                <span
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded-full border border-line-strong"
+                  style={{ backgroundColor: item.colorHex }}
+                  aria-hidden
+                />
+              )}
+              <div>
+                <div className="font-medium text-ink">{item.name}</div>
+                <div className="font-mono text-xs text-ink-faint">
+                  {item.defaultWidth}m × {item.defaultHeight}m
+                  {item.defaultDepth ? ` × ${item.defaultDepth}m` : ''}
+                  {item.isCustom ? ` ${t.libraryPanel.customTag}` : ''}
+                </div>
               </div>
             </button>
           ))}

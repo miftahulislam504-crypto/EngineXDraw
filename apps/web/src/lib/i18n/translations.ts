@@ -173,6 +173,7 @@ export interface Translations {
     explodedViewTooltip: string;
     deleteSelection: string; // use {kind} as placeholder — kind is a translated selectionKinds value
     closeAriaLabel: string;
+    northLabel: string; // label next to the north-angle input overlaid on the floor plan (Phase C)
     view2D: string;
     view3D: string;
     addFloor: string;
@@ -349,6 +350,13 @@ export interface Translations {
     open: string;
     exportPdf: string;
     notFound: string;
+    generateSetTitle: string;
+    generateSetDescription: string;
+    generateSetAction: string;
+    generateSetInProgress: string;
+    generateSetNoSectionsHint: string;
+    generateSetResultCreated: string; // use {count} as placeholder
+    generateSetResultNoneNew: string;
   };
   compliance: {
     pageTitle: string;

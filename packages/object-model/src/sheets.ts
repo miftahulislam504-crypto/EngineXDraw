@@ -24,13 +24,17 @@ export interface Sheet {
   direction?: 'N' | 'S' | 'E' | 'W'; // set when viewportType === 'elevation'
   sectionLineId?: string; // set when viewportType === 'section'
   /**
-   * A label only (e.g. "1:100") — shown on the title block, but NOT
-   * dimensionally enforced against the paper size. A true to-scale
-   * export would need to compute pixels-per-meter against the sheet's
-   * physical paper dimensions and lock the viewport's zoom to match;
-   * this pass captures the viewport at whatever framing it's already
-   * showing and places that image on the sheet as-is. Fine for sharing
-   * and review; not yet fine for a contractor measuring off a printout.
+   * A label shown on the title block (e.g. "1:100", "1:50", or free text
+   * like "As indicated"/"NTS"). When it parses as a simple ratio (see
+   * parseScaleRatio in lib/sheet-export.ts) AND the exported viewport
+   * capture reports its real-world metersPerPixel, the PDF export places
+   * the drawing at that TRUE printed size rather than just stretching it
+   * to fill the page — a ruler on the printout reads correctly at that
+   * scale. If the label doesn't parse as "1:N", the capture didn't
+   * report a scale, or the true-scale image wouldn't fit the sheet's
+   * drawable area, export falls back to aspect-fit and stamps a
+   * "NOT TO SCALE" note next to this label so the output is never
+   * silently wrong.
    */
   scaleLabel: string;
   drawnBy?: string;

@@ -4,10 +4,11 @@ import { useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment, Line } from '@react-three/drei';
 import * as THREE from 'three';
-import type { Floor, SiteBoundary } from '@archibim/object-model';
+import type { Floor, LibraryItem, SiteBoundary } from '@archibim/object-model';
 import { computeFloorBaseElevations, sunDirectionVector } from '@archibim/core-engine';
 import type { FloorElements } from '@/lib/floors';
 import type { EnvironmentPreset, MaterialTheme } from '@/lib/render-theme';
+import { buildMaterialLookup, resolveMaterial } from '@/lib/material-resolver';
 import {
   WallMesh,
   OpeningMarker,
@@ -36,6 +37,12 @@ export interface BuildingRenderStudioViewProps {
    * ("Walkthrough Video") without this component needing to know
    * anything about recording itself. */
   onCanvasReady?: (canvas: HTMLCanvasElement) => void;
+  /** Phase A — Elevation/Render material fidelity: same resolved-material
+   * source as Live3DView/BuildingElevationView. When a wall/roof has no
+   * assigned material this falls back to materialTheme's flat color, so
+   * existing projects with no per-element materials set still render
+   * exactly as before. */
+  libraryItems?: LibraryItem[];
 }
 
 /** A fixed, pleasant key-light angle for presentation rendering —
@@ -58,8 +65,10 @@ export function BuildingRenderStudioView({
   autoRotate,
   height = 600,
   onCanvasReady,
+  libraryItems = [],
 }: BuildingRenderStudioViewProps) {
   const baseElevations = useMemo(() => computeFloorBaseElevations(floors), [floors]);
+  const materialLookup = useMemo(() => buildMaterialLookup(libraryItems), [libraryItems]);
 
   const bounds = useMemo(() => {
     let minX = Infinity;
@@ -187,7 +196,18 @@ export function BuildingRenderStudioView({
               ))}
               {elements.walls.map((wall) => {
                 const segment = extendedSegments.find((s) => s.wallId === wall.id) ?? wall;
-                return <WallMesh key={wall.id} wall={wall} segment={segment} selected={false} colorOverride={materialTheme.wallColor} />;
+                const material = resolveMaterial(wall, materialLookup, materialTheme.wallColor);
+                return (
+                  <WallMesh
+                    key={wall.id}
+                    wall={wall}
+                    segment={segment}
+                    selected={false}
+                    colorOverride={material.color}
+                    roughness={material.roughness}
+                    metalness={material.metalness}
+                  />
+                );
               })}
               {elements.openings.map((opening) => {
                 const wall = elements.walls.find((w) => w.id === opening.wallId);
@@ -210,17 +230,22 @@ export function BuildingRenderStudioView({
                   selected={false}
                 />
               ))}
-              {elements.roofs.map((r) => (
-                <PlanarBoxMesh
-                  key={r.id}
-                  boundary={r.boundary}
-                  thickness={r.thickness}
-                  elevation={r.elevation}
-                  color={materialTheme.roofColor}
-                  selectedColor={materialTheme.roofColor}
-                  selected={false}
-                />
-              ))}
+              {elements.roofs.map((r) => {
+                const material = resolveMaterial(r, materialLookup, materialTheme.roofColor);
+                return (
+                  <PlanarBoxMesh
+                    key={r.id}
+                    boundary={r.boundary}
+                    thickness={r.thickness}
+                    elevation={r.elevation}
+                    color={material.color}
+                    selectedColor={material.color}
+                    selected={false}
+                    roughness={material.roughness}
+                    metalness={material.metalness}
+                  />
+                );
+              })}
               {elements.ramps.map((r) => (
                 <RampMesh key={r.id} ramp={r} selected={false} colorOverride={materialTheme.concreteColor} />
               ))}

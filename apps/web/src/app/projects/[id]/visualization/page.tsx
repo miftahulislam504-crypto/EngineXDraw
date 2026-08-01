@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { PageHeader } from '@archibim/shared-ui';
-import type { Building, Floor, Project, SiteBoundary } from '@archibim/object-model';
+import type { Building, Floor, LibraryItem, Project, SiteBoundary } from '@archibim/object-model';
 import { subscribeToBuildings, subscribeToProject } from '@/lib/projects';
 import { subscribeToFloorElements, subscribeToFloors, type FloorElements } from '@/lib/floors';
 import { subscribeToSiteBoundary } from '@/lib/siteBoundary';
+import { subscribeToLibrary, ensureLibrarySeeded } from '@/lib/library';
 import { useI18nStore, formatTemplate } from '@/lib/i18n';
 import { BuildingRenderStudioView } from '@/components/design/BuildingRenderStudioView';
 import { ENVIRONMENT_PRESETS, MATERIAL_THEMES, findMaterialTheme, type EnvironmentPreset, type MaterialThemeId } from '@/lib/render-theme';
@@ -22,6 +23,7 @@ export default function VisualizationPage() {
   const [floors, setFloors] = useState<Floor[]>([]);
   const [floorElements, setFloorElements] = useState<Record<string, FloorElements>>({});
   const [siteBoundary, setSiteBoundary] = useState<SiteBoundary | null>(null);
+  const [materialLibraryItems, setMaterialLibraryItems] = useState<LibraryItem[]>([]);
 
   const [materialThemeId, setMaterialThemeId] = useState<MaterialThemeId>(MATERIAL_THEMES[0].id);
   const [environmentPreset, setEnvironmentPreset] = useState<EnvironmentPreset>('city');
@@ -76,6 +78,17 @@ export default function VisualizationPage() {
     }
     return subscribeToSiteBoundary(projectId, buildingId, setSiteBoundary);
   }, [projectId, buildingId]);
+
+  // Phase A — Elevation/Render material fidelity: same MATERIAL-category
+  // subscription as the design studio and elevations pages, so a wall's/
+  // roof's assigned material actually shows up in the photoreal render
+  // instead of always falling back to the flat theme color.
+  useEffect(() => {
+    ensureLibrarySeeded().catch(() => {
+      // Non-fatal — the render still works with theme-default colors.
+    });
+    return subscribeToLibrary('MATERIAL', setMaterialLibraryItems);
+  }, []);
 
   // Revoke the previous recording's object URL whenever a new one is made
   // (or the page unmounts) — otherwise each recording leaks the blob.
@@ -171,6 +184,7 @@ export default function VisualizationPage() {
                   qualityMode={qualityMode}
                   autoRotate={autoRotate}
                   height={520}
+                  libraryItems={materialLibraryItems}
                   onCanvasReady={(canvas) => {
                     canvasRef.current = canvas;
                   }}

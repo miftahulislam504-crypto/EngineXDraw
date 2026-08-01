@@ -490,7 +490,12 @@ export function getOpeningAutoTag(opening: Opening, allOpenings: Opening[]): str
  * past 'Z' as 'AA', 'AB', … like spreadsheet columns, though a real
  * project running past 26 horizontal grid lines would be unusual. */
 /** Spreadsheet-column-style letter sequence: 0->A, 1->B, …, 25->Z, 26->AA, … */
-function numberToLetters(n: number): string {
+/** Converts a 0-based index to spreadsheet-style letters: 0→A, 1→B, …
+ * 25→Z, 26→AA, 27→AB, … Used for horizontal grid line auto-labels
+ * (getGridLineAutoLabel below) and reused by BuildingElevationView/
+ * BuildingSectionView so a grid line's letter reads identically whether
+ * you're looking at the floor plan or a vertical elevation/section cut. */
+export function numberToLetters(n: number): string {
   let letters = '';
   let remaining = n;
   do {

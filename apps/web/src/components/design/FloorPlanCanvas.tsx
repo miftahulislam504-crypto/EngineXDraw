@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef, Fragment } from 'react';
 import clsx from 'clsx';
-import { Stage, Layer, Line, Circle, Rect, Text } from 'react-konva';
+import { Stage, Layer, Line, Circle, Rect, Text, Group } from 'react-konva';
 import type Konva from 'konva';
 import type {
   Balcony,
@@ -100,12 +100,23 @@ export interface FloorPlanCanvasProps {
    * ever firing — much safer than trying to individually guard dozens of
    * onClick handlers scattered through this file. */
   readOnly?: boolean;
-  /** Fires with the underlying Konva Stage instance once mounted — the
-   * Sheet export flow uses `stage.toDataURL()` to capture this view as
-   * an image for the PDF, same idea as the onCanvasReady bridge the R3F
-   * views (Elevation/Section) use, just via Konva's own built-in API
-   * instead of reaching into a raw WebGL canvas. */
-  onStageReady?: (stage: Konva.Stage) => void;
+  /** Fires with the underlying Konva Stage instance once mounted, and
+   * again any time pixelsPerMeter changes (the person zooming the floor
+   * plan) — the Sheet export flow uses `stage.toDataURL()` to capture
+   * this view as an image, and needs the current pixelsPerMeter at
+   * capture time to compose the PDF at a true printed scale instead of
+   * just aspect-fitting the image (see lib/sheet-export.ts). Same idea
+   * as the onCanvasReady bridge the R3F views (Elevation/Section) use,
+   * just via Konva's own built-in API instead of reaching into a raw
+   * WebGL canvas. */
+  onStageReady?: (stage: Konva.Stage, pixelsPerMeter: number) => void;
+  /** Phase C — Sheet annotation: degrees clockwise from screen-up to
+   * true north (see Building.northAngleDeg). Defaults to 0 — plan-up is
+   * north, the common case — which draws the arrow pointing straight up.
+   * Only rendered when this prop is passed, so callers that don't care
+   * about orientation (most of the design studio's own canvas usage)
+   * don't get an overlay they didn't ask for. */
+  northAngleDeg?: number;
 }
 
 const ORIGIN_RATIO = 0.5; // meters (0,0) renders at the canvas center
@@ -178,6 +189,7 @@ export function FloorPlanCanvas({
   height: heightOverride,
   readOnly = false,
   onStageReady,
+  northAngleDeg,
 }: FloorPlanCanvasProps) {
   const {
     activeTool,
@@ -201,6 +213,7 @@ export function FloorPlanCanvas({
   // phone screen, which is what was clipping the canvas and leaving
   // no way to scroll to the rest of it.
   const containerRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<Konva.Stage | null>(null);
   const [measuredSize, setMeasuredSize] = useState({ width: 700, height: 600 });
 
   useEffect(() => {
@@ -340,6 +353,16 @@ export function FloorPlanCanvas({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [setDrawStart, setSelection]);
+
+  // Phase B — Scale-accurate sheet export: the Stage ref callback only
+  // fires on mount/unmount, but pixelsPerMeter changes continuously as
+  // the person zooms (mouse wheel / pinch). Re-report it here so a
+  // caller reading it via onStageReady (i.e. the Sheet export flow)
+  // always has the value that matches what's currently on screen.
+  useEffect(() => {
+    if (stageRef.current) onStageReady?.(stageRef.current, pixelsPerMeter);
+  }, [pixelsPerMeter, onStageReady]);
+
 
   // Given a raw pointer position (pixels), returns the snapped point in
   // meters using the same snap rules the hover preview uses. Both the
@@ -591,7 +614,8 @@ export function FloorPlanCanvas({
         height={height}
         listening={!readOnly}
         ref={(node) => {
-          if (node) onStageReady?.(node);
+          stageRef.current = node;
+          if (node) onStageReady?.(node, pixelsPerMeter);
         }}
         onMouseMove={readOnly ? undefined : handleMouseMove}
         onTouchMove={readOnly ? undefined : handleMouseMove}
@@ -1616,7 +1640,39 @@ export function FloorPlanCanvas({
             <Circle x={toPixels(drawStart).x} y={toPixels(drawStart).y} radius={4} fill="#2D6CDF" />
           )}
         </Layer>
+
+        {/* Phase C — Sheet annotation: north arrow, fixed to a screen
+            corner in raw pixel coordinates (not toPixels()) so it stays
+            put through pan/zoom, the same convention a compass rose has
+            on a printed drawing regardless of how far you've scrolled.
+            Only rendered when a caller passes northAngleDeg — most
+            design-studio usage of this canvas doesn't want an overlay
+            competing with the live editing UI. */}
+        {northAngleDeg !== undefined && (
+          <Layer listening={false}>
+            <NorthArrow x={width - 44} y={56} rotationDeg={northAngleDeg} />
+          </Layer>
+        )}
       </Stage>
     </div>
+  );
+}
+
+/** A simple compass-rose north arrow: a long spike pointing toward north
+ * with a short tail, a ring around the pivot, and an "N" label — same
+ * visual language as the circular north-arrow markers in the reference
+ * elevation set's plan sheets, just drawn from Konva primitives instead
+ * of an imported icon (avoids pulling in an SVG asset for one marker). */
+function NorthArrow({ x, y, rotationDeg }: { x: number; y: number; rotationDeg: number }) {
+  const spike = 20;
+  const tail = 8;
+  const headWidth = 6;
+  return (
+    <Group x={x} y={y} rotation={rotationDeg}>
+      <Circle radius={spike + 6} stroke="#5B6478" strokeWidth={1} fill="rgba(255,255,255,0.85)" />
+      <Line points={[0, -spike, headWidth, 4, 0, -2, -headWidth, 4]} closed fill="#1C2430" />
+      <Line points={[0, -2, 0, tail]} stroke="#1C2430" strokeWidth={2} />
+      <Text text="N" x={-5} y={-spike - 18} width={10} align="center" fontSize={11} fontStyle="bold" fill="#1C2430" />
+    </Group>
   );
 }

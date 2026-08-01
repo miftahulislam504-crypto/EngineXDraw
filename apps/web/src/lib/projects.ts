@@ -9,6 +9,7 @@ import {
   doc,
   writeBatch,
   serverTimestamp,
+  updateDoc,
 } from 'firebase/firestore';
 import { db } from './firebase-client';
 import type { Building, Project, ProjectMember } from '@archibim/object-model';
@@ -109,4 +110,20 @@ export async function createBuilding(
 
   await batch.commit();
   return buildingRef.id;
+}
+
+/**
+ * Generic Building field update — introduced for Phase C's north arrow
+ * (northAngleDeg), but written as Partial<Building> over the patchable
+ * fields rather than a single-purpose "setNorthAngle" so any future
+ * building-level setting (name edits, etc.) can reuse this instead of
+ * each needing its own one-off function.
+ */
+export async function updateBuilding(
+  projectId: string,
+  buildingId: string,
+  patch: Partial<Pick<Building, 'name' | 'numberOfFloors' | 'buildingType' | 'totalAreaSqm' | 'northAngleDeg'>>,
+) {
+  const buildingRef = doc(db, 'projects', projectId, 'buildings', buildingId);
+  await updateDoc(buildingRef, patch);
 }

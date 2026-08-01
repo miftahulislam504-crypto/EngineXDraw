@@ -7,7 +7,7 @@ import { Button, Input, PageHeader } from '@archibim/shared-ui';
 import type { Floor, SectionLine, Sheet, SheetSize, SheetViewportType } from '@archibim/object-model';
 import { subscribeToBuildings } from '@/lib/projects';
 import { subscribeToFloors, sectionLineCrud } from '@/lib/floors';
-import { subscribeToSheets, createSheet, deleteSheet } from '@/lib/sheets';
+import { subscribeToSheets, createSheet, deleteSheet, generateStandardSheetSet } from '@/lib/sheets';
 import { useI18nStore } from '@/lib/i18n';
 
 const SIZES: SheetSize[] = ['A4', 'A3', 'A1'];
@@ -33,6 +33,8 @@ export default function SheetsPage() {
   const [scaleLabel, setScaleLabel] = useState('1:100');
   const [drawnBy, setDrawnBy] = useState('');
   const [date, setDate] = useState('');
+  const [isGeneratingSet, setIsGeneratingSet] = useState(false);
+  const [generateResult, setGenerateResult] = useState<{ created: number; skipped: number } | null>(null);
 
   useEffect(() => {
     return subscribeToBuildings(projectId, (bs) => {
@@ -90,12 +92,64 @@ export default function SheetsPage() {
     await deleteSheet(projectId, buildingId, sheetId);
   }
 
+  async function handleGenerateStandardSet() {
+    if (!buildingId || floors.length === 0) return;
+    setIsGeneratingSet(true);
+    setGenerateResult(null);
+    try {
+      const result = await generateStandardSheetSet(
+        projectId,
+        buildingId,
+        floors,
+        allSectionLines,
+        sheets,
+        {
+          size,
+          scaleLabel: scaleLabel.trim() || '1:100',
+          drawnBy: drawnBy.trim() || undefined,
+          date: date.trim() || undefined,
+        },
+      );
+      setGenerateResult(result);
+    } finally {
+      setIsGeneratingSet(false);
+    }
+  }
+
   return (
     <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
       <PageHeader title={t.sheetsPage.pageTitle} />
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
+          <div className="mb-4 rounded-sheet border border-line bg-surface p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-faint">
+                  {t.sheetsPage.generateSetTitle}
+                </h2>
+                <p className="mt-1 text-xs text-ink-muted">{t.sheetsPage.generateSetDescription}</p>
+              </div>
+              <Button
+                onClick={handleGenerateStandardSet}
+                disabled={isGeneratingSet || floors.length === 0}
+                variant="secondary"
+              >
+                {isGeneratingSet ? t.sheetsPage.generateSetInProgress : t.sheetsPage.generateSetAction}
+              </Button>
+            </div>
+            {allSectionLines.length === 0 && (
+              <p className="mt-2 text-xs text-ink-faint">{t.sheetsPage.generateSetNoSectionsHint}</p>
+            )}
+            {generateResult && (
+              <p className="mt-2 text-xs text-ink-muted">
+                {generateResult.created > 0
+                  ? t.sheetsPage.generateSetResultCreated.replace('{count}', String(generateResult.created))
+                  : t.sheetsPage.generateSetResultNoneNew}
+              </p>
+            )}
+          </div>
+
           <div className="flex flex-col gap-2">
             {sheets.map((sheet) => (
               <div

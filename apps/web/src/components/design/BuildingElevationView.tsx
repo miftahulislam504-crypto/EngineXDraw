@@ -1,11 +1,14 @@
 'use client';
 
-import { useEffect, useMemo } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
+import { useEffect, useMemo, useRef } from 'react';
+import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, OrthographicCamera, Html, Line } from '@react-three/drei';
-import type { Floor } from '@archibim/object-model';
+import * as THREE from 'three';
+import type { Floor, LibraryItem } from '@archibim/object-model';
 import { computeFloorBaseElevations } from '@archibim/core-engine';
 import type { FloorElements } from '@/lib/floors';
+import { numberToLetters } from '@/lib/floors';
+import { buildMaterialLookup, resolveMaterial } from '@/lib/material-resolver';
 import {
   WallMesh,
   OpeningMarker,
@@ -27,24 +30,53 @@ export interface BuildingElevationViewProps {
   floorElements: Record<string, FloorElements>;
   direction: ElevationDirection;
   height?: number;
+  /** Phase A — Elevation/Render material fidelity: same resolved-material
+   * source as Live3DView/BuildingRenderStudioView. Optional/defaults to
+   * empty so this view keeps working unchanged if a caller hasn't wired
+   * the library subscription up yet. */
+  libraryItems?: LibraryItem[];
   /** Shows a horizontal datum line + label at each floor's base height —
    * the "Levels" annotation, derived live from Floor data (no separate
    * placed object, same idea as Room Tags reusing Room data). Defaults
    * to on since it's genuinely useful reference info, not clutter. */
   showLevels?: boolean;
-  /** Fires once the underlying WebGL canvas element is available — used
-   * by the Sheet export flow to capture this view as an image. Needs the
-   * renderer's preserveDrawingBuffer (set below) or the capture would
-   * come back blank; that's a well-known Three.js/WebGL screenshot
-   * gotcha, not optional here. */
-  onCanvasReady?: (canvas: HTMLCanvasElement) => void;
+  /** Fires whenever the underlying WebGL canvas element and/or the
+   * camera's effective world-units-per-pixel changes — used by the
+   * Sheet export flow both to capture this view as an image AND to know
+   * the true scale of that capture, so the PDF can be composed at an
+   * exact printed scale instead of just aspect-fit into the page (see
+   * lib/sheet-export.ts). Needs the renderer's preserveDrawingBuffer (set
+   * below) or the capture would come back blank — a well-known Three.js/
+   * WebGL screenshot gotcha, not optional here. Fires on every zoom/pan
+   * frame (not just once on mount) because OrbitControls lets the person
+   * change zoom after this view loads — export always reads whatever
+   * scale is on screen at click time, same as Revit's "current viewport
+   * scale" behavior.
+   */
+  onCanvasReady?: (canvas: HTMLCanvasElement, metersPerPixel: number) => void;
 }
 
-function CanvasRefBridge({ onReady }: { onReady?: (canvas: HTMLCanvasElement) => void }) {
-  const { gl } = useThree();
-  useEffect(() => {
-    onReady?.(gl.domElement);
-  }, [gl, onReady]);
+/** Reports the live canvas element plus how many world-units (meters, in
+ * this app's convention) one screen pixel represents for the current
+ * orthographic camera zoom — see OrthographicCamera's own frustum setup
+ * (left/right/top/bottom = canvas size in CSS pixels, sized by drei) for
+ * why `1 / zoom` is exactly that conversion, not an approximation. */
+function CanvasRefBridge({ onReady }: { onReady?: (canvas: HTMLCanvasElement, metersPerPixel: number) => void }) {
+  const { gl, camera } = useThree();
+  const lastReported = useRef<number | null>(null);
+  useFrame(() => {
+    const zoom = (camera as THREE.OrthographicCamera).zoom || 1;
+    const metersPerPixel = 1 / zoom;
+    // Compare with a small epsilon rather than strict equality — zoom is
+    // a float that OrbitControls nudges continuously while the person is
+    // actively dragging/scrolling, so exact equality would still fire
+    // every frame during interaction. Only report real, visually
+    // meaningful changes.
+    if (lastReported.current === null || Math.abs(lastReported.current - metersPerPixel) > 1e-6) {
+      lastReported.current = metersPerPixel;
+      onReady?.(gl.domElement, metersPerPixel);
+    }
+  });
   return null;
 }
 
@@ -71,8 +103,10 @@ export function BuildingElevationView({
   height = 600,
   showLevels = true,
   onCanvasReady,
+  libraryItems = [],
 }: BuildingElevationViewProps) {
   const baseElevations = useMemo(() => computeFloorBaseElevations(floors), [floors]);
+  const materialLookup = useMemo(() => buildMaterialLookup(libraryItems), [libraryItems]);
 
   const bounds = useMemo(() => {
     let minX = Infinity;
@@ -103,6 +137,32 @@ export function BuildingElevationView({
       maxTop,
     };
   }, [floors, floorElements, baseElevations]);
+
+  // Phase C — Sheet annotation: grid bubbles. A grid line is defined
+  // per-floor (see GridLine's own comment) but in practice the same grid
+  // runs through every floor of a building, so this dedupes by
+  // (orientation, position) across all floors to get one building-wide
+  // set — a line added on only one floor still shows up here rather than
+  // being missed. Only the axis that reads as "left-to-right" for this
+  // camera direction is shown, same as the reference elevation sheets
+  // (a north/south elevation shows the numbered verticals; an east/west
+  // elevation shows the lettered horizontals) — showing both would just
+  // be two overlapping bubble rows for an axis that's edge-on to this view.
+  const relevantGridLines = useMemo(() => {
+    const wantOrientation = direction === 'N' || direction === 'S' ? 'vertical' : 'horizontal';
+    const seen = new Map<number, { position: number; label: string }>();
+    for (const floor of floors) {
+      const lines = floorElements[floor.id]?.gridLines ?? [];
+      const sameOrientation = lines.filter((l) => l.orientation === wantOrientation);
+      sameOrientation.forEach((line, index) => {
+        const key = Math.round(line.position * 1000); // dedupe by position, mm precision
+        if (seen.has(key)) return;
+        const label = line.label ?? (wantOrientation === 'vertical' ? String(index + 1) : numberToLetters(index));
+        seen.set(key, { position: line.position, label });
+      });
+    }
+    return Array.from(seen.values()).sort((a, b) => a.position - b.position);
+  }, [floors, floorElements, direction]);
 
   const far = Math.max(bounds.spanX, bounds.spanZ, bounds.maxTop) * 4 + 50;
   const midY = bounds.maxTop / 2;
@@ -199,7 +259,18 @@ export function BuildingElevationView({
               ))}
               {elements.walls.map((wall) => {
                 const segment = extendedSegments.find((s) => s.wallId === wall.id) ?? wall;
-                return <WallMesh key={wall.id} wall={wall} segment={segment} selected={false} />;
+                const material = resolveMaterial(wall, materialLookup, '#E7E9EE');
+                return (
+                  <WallMesh
+                    key={wall.id}
+                    wall={wall}
+                    segment={segment}
+                    selected={false}
+                    colorOverride={material.color}
+                    roughness={material.roughness}
+                    metalness={material.metalness}
+                  />
+                );
               })}
               {elements.openings.map((opening) => {
                 const wall = elements.walls.find((w) => w.id === opening.wallId);
@@ -222,17 +293,22 @@ export function BuildingElevationView({
                   selected={false}
                 />
               ))}
-              {elements.roofs.map((r) => (
-                <PlanarBoxMesh
-                  key={r.id}
-                  boundary={r.boundary}
-                  thickness={r.thickness}
-                  elevation={r.elevation}
-                  color="#8B5E4A"
-                  selectedColor="#8B5E4A"
-                  selected={false}
-                />
-              ))}
+              {elements.roofs.map((r) => {
+                const material = resolveMaterial(r, materialLookup, '#8B5E4A');
+                return (
+                  <PlanarBoxMesh
+                    key={r.id}
+                    boundary={r.boundary}
+                    thickness={r.thickness}
+                    elevation={r.elevation}
+                    color={material.color}
+                    selectedColor={material.color}
+                    selected={false}
+                    roughness={material.roughness}
+                    metalness={material.metalness}
+                  />
+                );
+              })}
               {elements.ramps.map((r) => (
                 <RampMesh key={r.id} ramp={r} selected={false} />
               ))}
@@ -267,8 +343,47 @@ export function BuildingElevationView({
           );
         })}
 
+        {relevantGridLines.map((line) => {
+          // Map this grid line's 1D position (meters, along whichever
+          // world axis is "horizontal" for this camera direction) into
+          // the 3D coordinate the OTHER two axes need to stay fixed at —
+          // running the full height of the building, on the camera-facing
+          // face so it's never occluded by the building itself.
+          const bubbleTop = bounds.maxTop + 1.2;
+          let start: [number, number, number];
+          let end: [number, number, number];
+          let bubblePos: [number, number, number];
+          if (direction === 'N') {
+            start = [line.position, 0, bounds.centerZ + bounds.spanZ / 2 + levelLineOffset];
+            end = [line.position, bubbleTop, bounds.centerZ + bounds.spanZ / 2 + levelLineOffset];
+            bubblePos = end;
+          } else if (direction === 'S') {
+            start = [line.position, 0, bounds.centerZ - bounds.spanZ / 2 - levelLineOffset];
+            end = [line.position, bubbleTop, bounds.centerZ - bounds.spanZ / 2 - levelLineOffset];
+            bubblePos = end;
+          } else if (direction === 'E') {
+            start = [bounds.centerX + bounds.spanX / 2 + levelLineOffset, 0, line.position];
+            end = [bounds.centerX + bounds.spanX / 2 + levelLineOffset, bubbleTop, line.position];
+            bubblePos = end;
+          } else {
+            start = [bounds.centerX - bounds.spanX / 2 - levelLineOffset, 0, line.position];
+            end = [bounds.centerX - bounds.spanX / 2 - levelLineOffset, bubbleTop, line.position];
+            bubblePos = end;
+          }
+          return (
+            <group key={`grid-${line.label}`}>
+              <Line points={[start, end]} color="#9AA3B2" lineWidth={1} dashed dashSize={0.25} gapSize={0.15} />
+              <Html position={bubblePos} center occlude={false}>
+                <div className="pointer-events-none flex h-6 w-6 items-center justify-center rounded-full border border-ink-muted bg-white font-mono text-[11px] font-semibold text-ink shadow-sm">
+                  {line.label}
+                </div>
+              </Html>
+            </group>
+          );
+        })}
+
         {showLevels &&
-          floors.map((floor) => {
+          floors.map((floor, floorIndex) => {
             const base = baseElevations.get(floor.id) ?? 0;
             const a: [number, number, number] = [levelA[0], base, levelA[2]];
             const b: [number, number, number] = [levelB[0], base, levelB[2]];
@@ -277,9 +392,14 @@ export function BuildingElevationView({
               <group key={`level-${floor.id}`}>
                 <Line points={[a, b]} color="#7A8599" lineWidth={1} dashed dashSize={0.3} gapSize={0.2} />
                 <Html position={labelPos} center={false} occlude={false}>
-                  <div className="pointer-events-none whitespace-nowrap rounded bg-white/85 px-1.5 py-0.5 font-mono text-[10px] text-ink-muted shadow-sm">
-                    {floor.name} {base >= 0 ? '+' : ''}
-                    {base.toFixed(2)}m
+                  <div className="pointer-events-none flex -translate-y-1/2 items-center gap-1.5 whitespace-nowrap">
+                    <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-ink-muted bg-white font-mono text-[9px] font-semibold text-ink shadow-sm">
+                      {floorIndex + 1}
+                    </div>
+                    <div className="rounded bg-white/85 px-1.5 py-0.5 font-mono text-[10px] text-ink-muted shadow-sm">
+                      {floor.name} {base >= 0 ? '+' : ''}
+                      {base.toFixed(2)}m
+                    </div>
                   </div>
                 </Html>
               </group>

@@ -159,6 +159,7 @@ export const en: Translations = {
     explodedViewTooltip: 'Offset each floor vertically in the 3D view',
     deleteSelection: 'Delete ({kind})',
     closeAriaLabel: 'Close',
+    northLabel: 'North',
     view2D: '2D Plan',
     view3D: '3D View',
     addFloor: 'Floor',
@@ -444,7 +445,7 @@ export const en: Translations = {
     direction: 'Direction',
     sectionLine: 'Section line',
     noSectionLinesYet: 'No section lines yet — draw one in the Design Studio first.',
-    scaleLabel: 'Scale (label only)',
+    scaleLabel: 'Scale',
     scaleLabelPlaceholder: 'e.g. 1:100',
     drawnBy: 'Drawn by',
     date: 'Date',
@@ -453,6 +454,15 @@ export const en: Translations = {
     open: 'Open',
     exportPdf: 'Export PDF',
     notFound: 'Sheet not found.',
+    generateSetTitle: 'Standard Sheet Set',
+    generateSetDescription:
+      'Creates a Floor Plan sheet for every floor and N/E/S/W Elevation sheets in one go. Already-created sheets are skipped, so this is safe to run again after adding a floor.',
+    generateSetAction: 'Generate Standard Set',
+    generateSetInProgress: 'Generating…',
+    generateSetNoSectionsHint:
+      'No section sheets will be created yet — draw a section line in the Design Studio first, then run this again to add it.',
+    generateSetResultCreated: 'Created {count} new sheet(s).',
+    generateSetResultNoneNew: 'Nothing new to create — every standard sheet already exists.',
   },
   compliance: {
     pageTitle: 'Building Intelligence',

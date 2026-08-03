@@ -674,9 +674,20 @@ export function FloorPlanCanvas({
   }, [walls]);
 
   // Shafts are building-level (span multiple floors) but only render on
-  // the floor plans they actually pass through.
+  // the floor plans they actually pass through. Also drops any shaft doc
+  // with a missing/malformed boundary (e.g. legacy or partially-written
+  // data) — rendering needs at least 3 points, and letting one bad doc
+  // through here used to crash the whole canvas instead of just hiding
+  // that one shaft.
   const visibleShafts = useMemo(
-    () => shafts.filter((s) => currentFloorLevel >= s.startLevel && currentFloorLevel <= s.endLevel),
+    () =>
+      shafts.filter(
+        (s) =>
+          Array.isArray(s.boundary) &&
+          s.boundary.length >= 3 &&
+          currentFloorLevel >= s.startLevel &&
+          currentFloorLevel <= s.endLevel,
+      ),
     [shafts, currentFloorLevel],
   );
 
@@ -689,7 +700,8 @@ export function FloorPlanCanvas({
     backgroundGridLines.push([0, y, width, y]);
   }
 
-  function boundaryToPixelPoints(boundary: Point2D[]) {
+  function boundaryToPixelPoints(boundary: Point2D[] | undefined | null) {
+    if (!Array.isArray(boundary)) return [];
     return boundary.flatMap((p) => {
       const px = toPixels(p);
       return [px.x, px.y];
@@ -884,7 +896,7 @@ export function FloorPlanCanvas({
             );
           })}
 
-          {siteBoundary && (
+          {siteBoundary && Array.isArray(siteBoundary.boundary) && siteBoundary.boundary.length >= 3 && (
             <Fragment key={siteBoundary.id}>
               <Line
                 points={boundaryToPixelPoints(siteBoundary.boundary)}

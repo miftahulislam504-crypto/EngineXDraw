@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Space_Grotesk, Inter, JetBrains_Mono, Noto_Sans_Bengali } from 'next/font/google';
 import './globals.css';
 import { I18nHydrator } from '@/components/I18nHydrator';
+import { DebugConsole } from '@/components/DebugConsole';
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ['latin'],
@@ -46,6 +47,7 @@ export default function RootLayout({
         className={`${spaceGrotesk.variable} ${inter.variable} ${jetbrainsMono.variable} ${notoSansBengali.variable}`}
       >
         <I18nHydrator />
+        <DebugConsole />
         {children}
       </body>
     </html>

@@ -8,6 +8,7 @@ import type {
   Column,
   CurtainWall,
   Dimension,
+  DoorSwingDirection,
   Footing,
   Foundation,
   GridLine,
@@ -27,6 +28,7 @@ import type {
   Stair,
   Wall,
 } from '@archibim/object-model';
+import { wallLength, treadDepth, stairTotalRise, stairTotalSteps } from '@archibim/core-engine';
 import { Button, Input } from '@archibim/shared-ui';
 import { useDesignStudioStore } from '@/lib/design-studio-store';
 import { useI18nStore, formatTemplate } from '@/lib/i18n';
@@ -75,7 +77,10 @@ export interface PropertiesPanelProps {
     >,
   ) => void;
   onOpenMaterialLibrary?: (targetId: string, targetKind: 'wall' | 'roof') => void;
-  onUpdateOpening: (id: string, patch: Partial<Pick<Opening, 'width' | 'height' | 'sillHeight' | 'tag'>>) => void;
+  onUpdateOpening: (
+    id: string,
+    patch: Partial<Pick<Opening, 'width' | 'height' | 'sillHeight' | 'tag' | 'swingDirection'>>,
+  ) => void;
   onUpdateColumn: (id: string, patch: Partial<Pick<Column, 'width' | 'depth' | 'height'>>) => void;
   onUpdateBeam: (id: string, patch: Partial<Pick<Beam, 'width' | 'depth' | 'elevation'>>) => void;
   onUpdateSlab: (id: string, patch: Partial<Pick<Slab, 'thickness' | 'elevation'>>) => void;
@@ -88,7 +93,7 @@ export interface PropertiesPanelProps {
   ) => void;
   onUpdateRamp: (id: string, patch: Partial<Pick<Ramp, 'width' | 'endElevation'>>) => void;
   onUpdateRailing: (id: string, patch: Partial<Pick<Railing, 'height' | 'postSpacing'>>) => void;
-  onUpdateStair: (id: string, patch: Partial<Pick<Stair, 'width' | 'numberOfSteps' | 'riserHeight'>>) => void;
+  onUpdateStair: (id: string, patch: Partial<Pick<Stair, 'width' | 'flights'>>) => void;
   onUpdateBalcony: (id: string, patch: Partial<Pick<Balcony, 'thickness' | 'elevation'>>) => void;
   onUpdateCurtainWall: (id: string, patch: Partial<Pick<CurtainWall, 'height' | 'mullionSpacing'>>) => void;
   onUpdateSkylight: (id: string, patch: Partial<Pick<Skylight, 'width' | 'depth'>>) => void;
@@ -239,6 +244,29 @@ export function PropertiesPanel({
       {wall && (
         <div className="flex flex-col gap-3">
           <Input
+            label={t.properties.length}
+            type="number"
+            step={0.05}
+            min={0.1}
+            value={Number(wallLength(wall).toFixed(3))}
+            onChange={(e) => {
+              const newLength = Number(e.target.value);
+              if (!Number.isFinite(newLength) || newLength <= 0) return;
+              const dx = wall.end.x - wall.start.x;
+              const dy = wall.end.y - wall.start.y;
+              const currentLength = Math.hypot(dx, dy) || 1e-6;
+              const ux = dx / currentLength;
+              const uy = dy / currentLength;
+              // Keeps start fixed and moves end along the wall's existing
+              // direction — the same asymmetric start/end convention the
+              // endpoint-drag handles already use, so typing a length and
+              // dragging the end handle behave predictably the same way.
+              onUpdateWall(wall.id, {
+                end: { x: wall.start.x + ux * newLength, y: wall.start.y + uy * newLength },
+              });
+            }}
+          />
+          <Input
             label={t.properties.thickness}
             type="number"
             step={0.01}
@@ -355,6 +383,27 @@ export function PropertiesPanel({
                 onUpdateOpening(opening.id, { sillHeight: Number(e.target.value) })
               }
             />
+          )}
+          {opening.kind === 'DOOR' && (
+            <label className="flex flex-col gap-1.5">
+              <span className="font-mono text-[11px] uppercase tracking-wide text-ink-muted">
+                {t.properties.doorSwingDirection}
+              </span>
+              <select
+                value={opening.swingDirection ?? 'hingeStart-in'}
+                onChange={(e) =>
+                  onUpdateOpening(opening.id, {
+                    swingDirection: e.target.value as DoorSwingDirection,
+                  })
+                }
+                className="rounded-sheet border border-line-strong px-3 py-2 text-sm"
+              >
+                <option value="hingeStart-in">{t.doorSwingDirections['hingeStart-in']}</option>
+                <option value="hingeStart-out">{t.doorSwingDirections['hingeStart-out']}</option>
+                <option value="hingeEnd-in">{t.doorSwingDirections['hingeEnd-in']}</option>
+                <option value="hingeEnd-out">{t.doorSwingDirections['hingeEnd-out']}</option>
+              </select>
+            </label>
           )}
           <Input
             label={t.properties.doorWindowTag}
@@ -492,21 +541,45 @@ export function PropertiesPanel({
             value={stair.width}
             onChange={(e) => onUpdateStair(stair.id, { width: Number(e.target.value) })}
           />
-          <Input
-            label={t.properties.numberOfSteps}
-            type="number"
-            step={1}
-            min={2}
-            value={stair.numberOfSteps}
-            onChange={(e) => onUpdateStair(stair.id, { numberOfSteps: Number(e.target.value) })}
-          />
-          <Input
-            label={t.properties.riserHeight}
-            type="number"
-            step={0.01}
-            value={stair.riserHeight}
-            onChange={(e) => onUpdateStair(stair.id, { riserHeight: Number(e.target.value) })}
-          />
+          <p className="text-xs text-ink-faint">
+            {formatTemplate(t.properties.stairSummary, {
+              steps: stairTotalSteps(stair),
+              rise: stairTotalRise(stair).toFixed(2),
+            })}
+          </p>
+          {stair.flights.map((flight, i) => (
+            <div key={i} className="flex flex-col gap-2 rounded-sheet border border-line p-2">
+              <span className="font-mono text-[11px] uppercase tracking-wide text-ink-muted">
+                {formatTemplate(t.properties.flightLabel, { n: i + 1 })}
+              </span>
+              <Input
+                label={t.properties.numberOfSteps}
+                type="number"
+                step={1}
+                min={2}
+                value={flight.numberOfSteps}
+                onChange={(e) => {
+                  const next = [...stair.flights];
+                  next[i] = { ...flight, numberOfSteps: Number(e.target.value) };
+                  onUpdateStair(stair.id, { flights: next });
+                }}
+              />
+              <Input
+                label={t.properties.riserHeight}
+                type="number"
+                step={0.01}
+                value={flight.riserHeight}
+                onChange={(e) => {
+                  const next = [...stair.flights];
+                  next[i] = { ...flight, riserHeight: Number(e.target.value) };
+                  onUpdateStair(stair.id, { flights: next });
+                }}
+              />
+              <p className="text-xs text-ink-faint">
+                {formatTemplate(t.properties.treadDepth, { depth: treadDepth(flight).toFixed(3) })}
+              </p>
+            </div>
+          ))}
         </div>
       )}
 

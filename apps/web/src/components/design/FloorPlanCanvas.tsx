@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef, Fragment } from 'react';
 import clsx from 'clsx';
-import { Stage, Layer, Line, Circle, Rect, Text, Group } from 'react-konva';
+import { Stage, Layer, Line, Circle, Rect, Text, Group, Arc, Arrow } from 'react-konva';
 import type Konva from 'konva';
 import type {
   Balcony,
@@ -37,10 +37,16 @@ import {
   findNearestWall,
   nearestParameterOnWall,
   pointAtParameter,
+  doorSwingGeometry,
   computeMiteredWallPolygons,
   isPointInPolygon,
+  deriveStairLandings,
 } from '@archibim/core-engine';
-import { useDesignStudioStore, type DesignTool } from '@/lib/design-studio-store';
+import {
+  useDesignStudioStore,
+  type DesignTool,
+  POLYGON_BOUNDARY_TOOLS as RECTANGLE_TOOLS,
+} from '@/lib/design-studio-store';
 import { getOpeningAutoTag, getGridLineAutoLabel, getSectionLineAutoLabel } from '@/lib/floors';
 
 export interface FloorPlanCanvasProps {
@@ -72,14 +78,12 @@ export interface FloorPlanCanvasProps {
   onCreateBeam: (start: Point2D, end: Point2D) => void;
   onCreateColumn: (center: Point2D) => void;
   onCreateFooting: (center: Point2D) => void;
-  onCreateRectangle: (
+  onCreatePolygon: (
     tool: 'slab' | 'ceiling' | 'foundation' | 'roof' | 'balcony' | 'shaft' | 'siteBoundary',
-    corner1: Point2D,
-    corner2: Point2D,
+    boundary: Point2D[],
   ) => void;
   onCreateRamp: (start: Point2D, end: Point2D) => void;
   onCreateRailing: (start: Point2D, end: Point2D) => void;
-  onCreateStair: (start: Point2D, end: Point2D) => void;
   onCreateCurtainWall: (start: Point2D, end: Point2D) => void;
   onCreateSkylight: (roofId: string, center: Point2D) => void;
   onCreatePlacedObject: (category: PlacedObjectCategory, center: Point2D) => void;
@@ -90,6 +94,11 @@ export interface FloorPlanCanvasProps {
   onCreateSectionLine: (start: Point2D, end: Point2D) => void;
   onOpenElevation?: (direction: 'N' | 'E' | 'S' | 'W') => void;
   onMoveWallEndpoint: (wallId: string, end: 'start' | 'end', point: Point2D) => void;
+  /** Drag-to-offset for the Dimension tool — lets the offset distance
+   * (and which side of the measured line it sits on) be set by dragging
+   * the dimension line itself, the standard CAD gesture, instead of only
+   * being editable as a typed number in the Properties Panel. */
+  onUpdateDimension: (id: string, patch: Partial<Pick<Dimension, 'offset'>>) => void;
   width?: number;
   height?: number;
   /** Renders everything but disables all interaction — used for the
@@ -122,8 +131,14 @@ export interface FloorPlanCanvasProps {
 const ORIGIN_RATIO = 0.5; // meters (0,0) renders at the canvas center
 
 const CHAINING_LINE_TOOLS: DesignTool[] = ['wall', 'beam', 'railing', 'curtainWall'];
-const ONESHOT_LINE_TOOLS: DesignTool[] = ['ramp', 'stair', 'dimension', 'section'];
-const RECTANGLE_TOOLS: DesignTool[] = ['slab', 'ceiling', 'foundation', 'roof', 'balcony', 'shaft', 'siteBoundary'];
+const ONESHOT_LINE_TOOLS: DesignTool[] = ['ramp', 'dimension', 'section'];
+const STAIR_TOOL: DesignTool[] = ['stair'];
+const SNAP_AWARE_TOOLS: DesignTool[] = [
+  ...CHAINING_LINE_TOOLS,
+  ...ONESHOT_LINE_TOOLS,
+  ...RECTANGLE_TOOLS,
+  ...STAIR_TOOL,
+];
 const PLACED_OBJECT_TOOLS: DesignTool[] = ['furniture', 'kitchen', 'bathroom', 'parking', 'landscape'];
 const PLACED_OBJECT_CATEGORY_BY_TOOL: Partial<Record<DesignTool, PlacedObjectCategory>> = {
   furniture: 'FURNITURE',
@@ -132,7 +147,6 @@ const PLACED_OBJECT_CATEGORY_BY_TOOL: Partial<Record<DesignTool, PlacedObjectCat
   parking: 'PARKING',
   landscape: 'LANDSCAPE',
 };
-const SNAP_AWARE_TOOLS: DesignTool[] = [...CHAINING_LINE_TOOLS, ...ONESHOT_LINE_TOOLS, ...RECTANGLE_TOOLS];
 
 const PLACED_OBJECT_COLORS: Record<PlacedObjectCategory, { fill: string; stroke: string }> = {
   FURNITURE: { fill: 'rgba(139,148,167,0.4)', stroke: '#5B6478' },
@@ -171,10 +185,9 @@ export function FloorPlanCanvas({
   onCreateBeam,
   onCreateColumn,
   onCreateFooting,
-  onCreateRectangle,
+  onCreatePolygon,
   onCreateRamp,
   onCreateRailing,
-  onCreateStair,
   onCreateCurtainWall,
   onCreateSkylight,
   onCreatePlacedObject,
@@ -185,6 +198,7 @@ export function FloorPlanCanvas({
   onCreateSectionLine,
   onOpenElevation,
   onMoveWallEndpoint,
+  onUpdateDimension,
   width: widthOverride,
   height: heightOverride,
   readOnly = false,
@@ -195,6 +209,10 @@ export function FloorPlanCanvas({
     activeTool,
     drawStart,
     setDrawStart,
+    polygonDraft,
+    setPolygonDraft,
+    stairDraft,
+    setStairDraft,
     selection,
     setSelection,
     gridSize,
@@ -347,12 +365,14 @@ export function FloorPlanCanvas({
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         setDrawStart(null);
+        setPolygonDraft(null);
+        setStairDraft(null);
         setSelection(null);
       }
     }
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setDrawStart, setSelection]);
+  }, [setDrawStart, setPolygonDraft, setStairDraft, setSelection]);
 
   // Phase B — Scale-accurate sheet export: the Stage ref callback only
   // fires on mount/unmount, but pixelsPerMeter changes continuously as
@@ -372,15 +392,27 @@ export function FloorPlanCanvas({
     (pos: Point2D) => {
       const cursorMeters = toMeters(pos);
       if (SNAP_AWARE_TOOLS.includes(activeTool)) {
+        // Polygon and Stair tools track their in-progress points in
+        // polygonDraft/stairDraft, not drawStart (drawStart stays null
+        // for these tools) — so the angle-snap-to-previous-point
+        // behavior needs the draft's last point here, or every new
+        // segment would only snap to the grid/walls and lose the
+        // clean-90°-corner snapping a rectangular room/roof/stair-flight
+        // draw depends on.
+        const lastPoint = RECTANGLE_TOOLS.includes(activeTool)
+          ? (polygonDraft?.[polygonDraft.length - 1] ?? undefined)
+          : STAIR_TOOL.includes(activeTool)
+            ? (stairDraft?.[stairDraft.length - 1] ?? undefined)
+            : (drawStart ?? undefined);
         return resolveSnap(cursorMeters, {
           walls,
           gridSize,
-          lastPoint: drawStart ?? undefined,
+          lastPoint,
         }).point;
       }
       return cursorMeters;
     },
-    [toMeters, activeTool, walls, gridSize, drawStart],
+    [toMeters, activeTool, walls, gridSize, drawStart, polygonDraft],
   );
 
   function handleMouseMove(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
@@ -424,10 +456,15 @@ export function FloorPlanCanvas({
     const cursorMeters = toMeters(pos);
 
     if (SNAP_AWARE_TOOLS.includes(activeTool)) {
+      const lastPoint = RECTANGLE_TOOLS.includes(activeTool)
+        ? (polygonDraft?.[polygonDraft.length - 1] ?? undefined)
+        : STAIR_TOOL.includes(activeTool)
+          ? (stairDraft?.[stairDraft.length - 1] ?? undefined)
+          : (drawStart ?? undefined);
       const snap = resolveSnap(cursorMeters, {
         walls,
         gridSize,
-        lastPoint: drawStart ?? undefined,
+        lastPoint,
       });
       setSnappedCursor(snap.point);
       setGuide(snap.guide ?? null);
@@ -472,7 +509,6 @@ export function FloorPlanCanvas({
         setDrawStart(point);
       } else {
         if (activeTool === 'ramp') onCreateRamp(drawStart, point);
-        if (activeTool === 'stair') onCreateStair(drawStart, point);
         if (activeTool === 'dimension') onCreateDimension(drawStart, point);
         if (activeTool === 'section') onCreateSectionLine(drawStart, point);
         setDrawStart(null);
@@ -480,17 +516,48 @@ export function FloorPlanCanvas({
       return;
     }
 
+    if (STAIR_TOOL.includes(activeTool)) {
+      // Each click adds one more flight point — point[0]->point[1] is
+      // flight 1, point[1]->point[2] is flight 2, etc. Unlike the
+      // polygon boundary tools this never auto-closes (a stair isn't a
+      // loop back to its own start); finishing is only via the
+      // floating Finish bar the design page shows once stairDraft has
+      // 2+ points (see POLYGON_BOUNDARY_TOOLS's sibling bar for the
+      // same UI pattern, reused for stairs).
+      setStairDraft(stairDraft ? [...stairDraft, point] : [point]);
+      return;
+    }
+
     if (RECTANGLE_TOOLS.includes(activeTool)) {
-      if (!drawStart) {
-        setDrawStart(point);
-      } else {
-        onCreateRectangle(
-          activeTool as 'slab' | 'ceiling' | 'foundation' | 'roof' | 'balcony' | 'shaft' | 'siteBoundary',
-          drawStart,
-          point,
-        );
-        setDrawStart(null);
+      if (!polygonDraft || polygonDraft.length === 0) {
+        setPolygonDraft([point]);
+        return;
       }
+      // Closing gesture: clicking back near the first vertex (in pixel
+      // space, so the tap tolerance doesn't shrink/grow with zoom) with
+      // at least 3 vertices placed finishes a custom polygon. Below 3
+      // vertices there's nothing to close into (a 2-point "polygon"
+      // isn't a shape), so a click near vertex 1 with only 1 vertex
+      // placed just... places vertex 2 there, same as anywhere else.
+      const firstPx = toPixels(polygonDraft[0]);
+      const clickPx = toPixels(point);
+      const nearFirst = Math.hypot(clickPx.x - firstPx.x, clickPx.y - firstPx.y) < 20;
+      if (nearFirst && polygonDraft.length >= 3) {
+        onCreatePolygon(
+          activeTool as 'slab' | 'ceiling' | 'foundation' | 'roof' | 'balcony' | 'shaft' | 'siteBoundary',
+          polygonDraft,
+        );
+        setPolygonDraft(null);
+        return;
+      }
+      // Every other click just extends the draft with a new vertex.
+      // Closing happens either by clicking back near vertex 1 (above,
+      // requires 3+ vertices) or via the floating Finish bar the design
+      // page shows once polygonDraft is active — which also offers
+      // "Finish as rectangle" when exactly 2 vertices are placed, so
+      // the fast 2-click box from before this change still works, just
+      // as an explicit action instead of an implicit second click.
+      setPolygonDraft([...polygonDraft, point]);
       return;
     }
 
@@ -563,6 +630,27 @@ export function FloorPlanCanvas({
     node.position({ x: px.x, y: px.y });
   }
 
+  function handleDimensionOffsetDragEnd(dim: Dimension, e: Konva.KonvaEventObject<DragEvent>) {
+    const node = e.target;
+    const dragged = toMeters({ x: node.x(), y: node.y() });
+    const dx = dim.end.x - dim.start.x;
+    const dy = dim.end.y - dim.start.y;
+    const len = Math.hypot(dx, dy) || 1e-6;
+    const ux = dx / len;
+    const uy = dy / len;
+    const nx = -uy;
+    const ny = ux;
+    // Signed perpendicular distance from the dimension's own measured
+    // line (dim.start -> dim.end) to wherever the handle was dropped —
+    // this becomes the new offset. Project (dragged - start) onto the
+    // normal (nx, ny); sign naturally comes out right since dropping on
+    // the opposite side of the line flips which way the projection
+    // points, so dragging across the line flips the dimension to that
+    // side exactly like a CAD tool's dimension-line drag does.
+    const newOffset = (dragged.x - dim.start.x) * nx + (dragged.y - dim.start.y) * ny;
+    onUpdateDimension(dim.id, { offset: newOffset });
+  }
+
   const miteredPolygons = computeMiteredWallPolygons(walls);
 
   // Wall bounding box, in meters — used to place the Elevation Marks
@@ -600,7 +688,7 @@ export function FloorPlanCanvas({
     backgroundGridLines.push([0, y, width, y]);
   }
 
-  function rectPolygon(boundary: Point2D[]) {
+  function boundaryToPixelPoints(boundary: Point2D[]) {
     return boundary.flatMap((p) => {
       const px = toPixels(p);
       return [px.x, px.y];
@@ -646,7 +734,7 @@ export function FloorPlanCanvas({
 
         <Layer>
           {rooms.map((room) => {
-            const flat = rectPolygon(room.boundary);
+            const flat = boundaryToPixelPoints(room.boundary);
             return (
               <Line
                 key={room.id}
@@ -684,7 +772,7 @@ export function FloorPlanCanvas({
           {foundations.map((f) => (
             <Line
               key={f.id}
-              points={rectPolygon(f.boundary)}
+              points={boundaryToPixelPoints(f.boundary)}
               closed
               fill={selection?.kind === 'foundation' && selection.id === f.id ? 'rgba(45,108,223,0.25)' : 'rgba(154,163,178,0.35)'}
               stroke={selection?.kind === 'foundation' && selection.id === f.id ? '#2D6CDF' : '#9AA3B2'}
@@ -707,7 +795,7 @@ export function FloorPlanCanvas({
           {slabs.map((slab) => (
             <Line
               key={slab.id}
-              points={rectPolygon(slab.boundary)}
+              points={boundaryToPixelPoints(slab.boundary)}
               closed
               fill={selection?.kind === 'slab' && selection.id === slab.id ? 'rgba(45,108,223,0.25)' : 'rgba(184,192,209,0.35)'}
               stroke={selection?.kind === 'slab' && selection.id === slab.id ? '#2D6CDF' : '#B7C0D1'}
@@ -729,7 +817,7 @@ export function FloorPlanCanvas({
           {roofs.map((r) => (
             <Line
               key={r.id}
-              points={rectPolygon(r.boundary)}
+              points={boundaryToPixelPoints(r.boundary)}
               closed
               fill={selection?.kind === 'roof' && selection.id === r.id ? 'rgba(45,108,223,0.25)' : 'rgba(139,94,74,0.25)'}
               stroke={selection?.kind === 'roof' && selection.id === r.id ? '#2D6CDF' : '#8B5E4A'}
@@ -759,7 +847,7 @@ export function FloorPlanCanvas({
             return (
               <Fragment key={shaft.id}>
                 <Line
-                  points={rectPolygon(shaft.boundary)}
+                  points={boundaryToPixelPoints(shaft.boundary)}
                   closed
                   fill={isSelected ? 'rgba(45,108,223,0.2)' : 'rgba(196,105,44,0.15)'}
                   stroke={isSelected ? '#2D6CDF' : '#C4692C'}
@@ -798,7 +886,7 @@ export function FloorPlanCanvas({
           {siteBoundary && (
             <Fragment key={siteBoundary.id}>
               <Line
-                points={rectPolygon(siteBoundary.boundary)}
+                points={boundaryToPixelPoints(siteBoundary.boundary)}
                 closed
                 fill="transparent"
                 stroke={selection?.kind === 'siteBoundary' ? '#2D6CDF' : '#4C9A6A'}
@@ -853,7 +941,7 @@ export function FloorPlanCanvas({
           {ceilings.map((c) => (
             <Line
               key={c.id}
-              points={rectPolygon(c.boundary)}
+              points={boundaryToPixelPoints(c.boundary)}
               closed
               fill={selection?.kind === 'ceiling' && selection.id === c.id ? 'rgba(45,108,223,0.25)' : 'rgba(237,239,243,0.5)'}
               stroke={selection?.kind === 'ceiling' && selection.id === c.id ? '#2D6CDF' : '#D8DEE9'}
@@ -876,7 +964,7 @@ export function FloorPlanCanvas({
           {balconies.map((b) => (
             <Line
               key={b.id}
-              points={rectPolygon(b.boundary)}
+              points={boundaryToPixelPoints(b.boundary)}
               closed
               fill={selection?.kind === 'balcony' && selection.id === b.id ? 'rgba(45,108,223,0.25)' : 'rgba(184,192,209,0.45)'}
               stroke={selection?.kind === 'balcony' && selection.id === b.id ? '#2D6CDF' : '#8B93A7'}
@@ -951,30 +1039,117 @@ export function FloorPlanCanvas({
             );
           })}
           {stairs.map((s) => {
-            const a = toPixels(s.start);
-            const b = toPixels(s.end);
             const isSelected = selection?.kind === 'stair' && selection.id === s.id;
+            const color = isSelected ? '#2D6CDF' : '#5A6472';
+            const landings = deriveStairLandings(s);
+
+            const selectFn = (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+              if (activeTool === 'select') {
+                e.cancelBubble = true;
+                setSelection({ kind: 'stair', id: s.id });
+              }
+            };
+
             return (
-              <Line
-                key={s.id}
-                points={[a.x, a.y, b.x, b.y]}
-                stroke={isSelected ? '#2D6CDF' : '#B7C0D1'}
-                strokeWidth={Math.max(6, s.width * pixelsPerMeter * 0.6)}
-                hitStrokeWidth={20}
-                dash={[3, 4]}
-                onClick={(e) => {
-                  if (activeTool === 'select') {
-                    e.cancelBubble = true;
-                    setSelection({ kind: 'stair', id: s.id });
+              <Fragment key={s.id}>
+                {s.flights.map((flight, flightIndex) => {
+                  const dx = flight.end.x - flight.start.x;
+                  const dy = flight.end.y - flight.start.y;
+                  const len = Math.hypot(dx, dy) || 1e-9;
+                  const ux = dx / len;
+                  const uy = dy / len;
+                  const nx = -uy;
+                  const ny = ux;
+                  const half = s.width / 2;
+
+                  // Outline: a rectangle of width `s.width` running the
+                  // flight's full length, in pixels.
+                  const corners = [
+                    { x: flight.start.x + nx * half, y: flight.start.y + ny * half },
+                    { x: flight.end.x + nx * half, y: flight.end.y + ny * half },
+                    { x: flight.end.x - nx * half, y: flight.end.y - ny * half },
+                    { x: flight.start.x - nx * half, y: flight.start.y - ny * half },
+                  ].flatMap((p) => {
+                    const px = toPixels(p);
+                    return [px.x, px.y];
+                  });
+
+                  // One tread line per riser, evenly spaced along the
+                  // flight's length — the standard plan convention
+                  // (every step shown as a line across the flight's
+                  // width), rather than the old single dashed
+                  // centerline that didn't distinguish a stair from a
+                  // railing or a ramp.
+                  const treadLines = [];
+                  for (let i = 1; i < flight.numberOfSteps; i++) {
+                    const t = i / flight.numberOfSteps;
+                    const cx = flight.start.x + dx * t;
+                    const cy = flight.start.y + dy * t;
+                    const p1 = toPixels({ x: cx + nx * half, y: cy + ny * half });
+                    const p2 = toPixels({ x: cx - nx * half, y: cy - ny * half });
+                    treadLines.push({ key: `${s.id}-${flightIndex}-${i}`, points: [p1.x, p1.y, p2.x, p2.y] });
                   }
-                }}
-                onTap={(e) => {
-                  if (activeTool === 'select') {
-                    e.cancelBubble = true;
-                    setSelection({ kind: 'stair', id: s.id });
-                  }
-                }}
-              />
+
+                  // Up-direction arrow along the centerline, standard
+                  // architectural convention (an arrow pointing toward
+                  // the direction of travel going up, usually paired
+                  // with an "UP" label at the base) — arrowhead sits
+                  // 80% of the way along so it doesn't collide with the
+                  // first tread line, tail starts 20% in for the same
+                  // reason.
+                  const arrowStart = toPixels({
+                    x: flight.start.x + dx * 0.2,
+                    y: flight.start.y + dy * 0.2,
+                  });
+                  const arrowEnd = toPixels({
+                    x: flight.start.x + dx * 0.85,
+                    y: flight.start.y + dy * 0.85,
+                  });
+
+                  return (
+                    <Fragment key={flightIndex}>
+                      <Line
+                        points={corners}
+                        closed
+                        stroke={color}
+                        strokeWidth={isSelected ? 2 : 1.5}
+                        fill={isSelected ? 'rgba(45,108,223,0.06)' : undefined}
+                        onClick={selectFn}
+                        onTap={selectFn}
+                        hitStrokeWidth={12}
+                      />
+                      {treadLines.map((tl) => (
+                        <Line key={tl.key} points={tl.points} stroke={color} strokeWidth={1} listening={false} />
+                      ))}
+                      <Arrow
+                        points={[arrowStart.x, arrowStart.y, arrowEnd.x, arrowEnd.y]}
+                        stroke={color}
+                        fill={color}
+                        strokeWidth={1.5}
+                        pointerLength={8}
+                        pointerWidth={7}
+                        listening={false}
+                      />
+                    </Fragment>
+                  );
+                })}
+                {landings.map((landing, i) => (
+                  <Line
+                    key={`${s.id}-landing-${i}`}
+                    points={landing.boundary.flatMap((p) => {
+                      const px = toPixels(p);
+                      return [px.x, px.y];
+                    })}
+                    closed
+                    stroke={color}
+                    strokeWidth={isSelected ? 2 : 1.5}
+                    fill={isSelected ? 'rgba(45,108,223,0.1)' : 'rgba(183,192,209,0.25)'}
+                    onClick={selectFn}
+                    onTap={selectFn}
+                    hitStrokeWidth={12}
+                  />
+                ))}
+              </Fragment>
             );
           })}
           {railings.map((r) => {
@@ -1037,7 +1212,7 @@ export function FloorPlanCanvas({
             return (
               <Line
                 key={wall.id}
-                points={rectPolygon(poly.points)}
+                points={boundaryToPixelPoints(poly.points)}
                 closed
                 fill={isSelected ? '#2D6CDF' : '#131B2E'}
                 stroke={isSelected ? '#1E4FB0' : undefined}
@@ -1151,19 +1326,138 @@ export function FloorPlanCanvas({
             const wall = walls.find((w) => w.id === opening.wallId);
             if (!wall) return null;
             const center = pointAtParameter(wall, opening.positionOnWall);
-            const px = toPixels(center);
             const isDoor = opening.kind === 'DOOR';
             const isSelected = selection?.kind === 'opening' && selection.id === opening.id;
             const tag = opening.tag ?? getOpeningAutoTag(opening, openings);
+            const color = isSelected ? '#2D6CDF' : isDoor ? '#E8871E' : '#2D6CDF';
+
+            const dx = wall.end.x - wall.start.x;
+            const dy = wall.end.y - wall.start.y;
+            const wallLen = Math.hypot(dx, dy) || 1e-6;
+            const ux = dx / wallLen;
+            const uy = dy / wallLen;
+            const nx = -uy;
+            const ny = ux;
+            const halfW = opening.width / 2;
+            const gapA: Point2D = { x: center.x - ux * halfW, y: center.y - uy * halfW };
+            const gapB: Point2D = { x: center.x + ux * halfW, y: center.y + uy * halfW };
+            const gapAPx = toPixels(gapA);
+            const gapBPx = toPixels(gapB);
+            const centerPx = toPixels(center);
+            // Wall gap: white rectangle across the wall thickness so the
+            // solid wall polygon visually breaks here, matching how a
+            // real plan shows a door/window as an interruption in the
+            // wall line rather than a shape drawn on top of it.
+            const gapHalfThickness = (wall.thickness * pixelsPerMeter) / 2 + 1.5;
+            const wallAngleDeg = (Math.atan2(gapBPx.y - gapAPx.y, gapBPx.x - gapAPx.x) * 180) / Math.PI;
+            const gapLengthPx = Math.hypot(gapBPx.x - gapAPx.x, gapBPx.y - gapAPx.y);
+
+            let symbol: JSX.Element;
+            if (isDoor) {
+              const { hinge, farJamb, openTip } = doorSwingGeometry(wall, opening);
+              const hingePx = toPixels(hinge);
+              const farJambPx = toPixels(farJamb);
+              const openTipPx = toPixels(openTip);
+              const radiusPx = Math.hypot(openTipPx.x - hingePx.x, openTipPx.y - hingePx.y);
+              const closedAngleDeg =
+                (Math.atan2(farJambPx.y - hingePx.y, farJambPx.x - hingePx.x) * 180) / Math.PI;
+              const openAngleDeg =
+                (Math.atan2(openTipPx.y - hingePx.y, openTipPx.x - hingePx.x) * 180) / Math.PI;
+              // Konva's Arc sweeps from `rotation` through `angle` degrees
+              // (always the positive/clockwise direction) — normalize so
+              // it always sweeps the short way (90°) between the closed
+              // and open angles regardless of which side swingDirection put
+              // them on.
+              let sweep = openAngleDeg - closedAngleDeg;
+              sweep = ((sweep + 540) % 360) - 180; // normalize to range: -180 exclusive, 180 inclusive
+              const rotation = sweep >= 0 ? closedAngleDeg : openAngleDeg;
+              symbol = (
+                <>
+                  {/* Leaf, drawn open (the conventional plan symbol) */}
+                  <Line
+                    points={[hingePx.x, hingePx.y, openTipPx.x, openTipPx.y]}
+                    stroke={color}
+                    strokeWidth={isSelected ? 2 : 1.5}
+                    listening={false}
+                  />
+                  {/* Swing arc from the open leaf tip back to the closed
+                      (flush-with-wall) position */}
+                  <Arc
+                    x={hingePx.x}
+                    y={hingePx.y}
+                    innerRadius={radiusPx}
+                    outerRadius={radiusPx}
+                    angle={Math.abs(sweep)}
+                    rotation={rotation}
+                    stroke={color}
+                    strokeWidth={1}
+                    dash={[3, 3]}
+                    listening={false}
+                  />
+                  <Circle x={hingePx.x} y={hingePx.y} radius={2} fill={color} listening={false} />
+                </>
+              );
+            } else {
+              // Window: two parallel glazing lines across the gap, offset
+              // to each side of the wall centerline — the standard plan
+              // symbol for glass set into a wall opening.
+              const offsetPx = Math.max(2, gapHalfThickness * 0.45);
+              symbol = (
+                <>
+                  <Line
+                    points={[gapAPx.x + nx * offsetPx, gapAPx.y - ny * offsetPx, gapBPx.x + nx * offsetPx, gapBPx.y - ny * offsetPx]}
+                    stroke={color}
+                    strokeWidth={1.5}
+                    listening={false}
+                  />
+                  <Line
+                    points={[gapAPx.x - nx * offsetPx, gapAPx.y + ny * offsetPx, gapBPx.x - nx * offsetPx, gapBPx.y + ny * offsetPx]}
+                    stroke={color}
+                    strokeWidth={1.5}
+                    listening={false}
+                  />
+                </>
+              );
+            }
+
             return (
               <Fragment key={opening.id}>
-                <Circle
-                  x={px.x}
-                  y={px.y}
-                  radius={(opening.width * pixelsPerMeter) / 2}
-                  fill={isDoor ? '#FDF1E2' : '#E8EFFD'}
-                  stroke={isSelected ? '#2D6CDF' : isDoor ? '#E8871E' : '#2D6CDF'}
-                  strokeWidth={isSelected ? 3 : 2}
+                <Rect
+                  x={centerPx.x}
+                  y={centerPx.y}
+                  width={gapLengthPx}
+                  height={gapHalfThickness * 2}
+                  offsetX={gapLengthPx / 2}
+                  offsetY={gapHalfThickness}
+                  rotation={wallAngleDeg}
+                  fill="#FFFFFF"
+                  listening={false}
+                />
+                {isSelected && (
+                  <Rect
+                    x={centerPx.x}
+                    y={centerPx.y}
+                    width={gapLengthPx}
+                    height={gapHalfThickness * 2}
+                    offsetX={gapLengthPx / 2}
+                    offsetY={gapHalfThickness}
+                    rotation={wallAngleDeg}
+                    stroke="#2D6CDF"
+                    strokeWidth={1}
+                    dash={[2, 2]}
+                    listening={false}
+                  />
+                )}
+                {symbol}
+                {/* Invisible, generously-sized hit target — the visible
+                    symbol lines are thin and easy to miss on a phone
+                    screen, same reasoning as hitStrokeWidth elsewhere in
+                    this file. */}
+                <Line
+                  points={[gapAPx.x, gapAPx.y, gapBPx.x, gapBPx.y]}
+                  stroke="transparent"
+                  strokeWidth={1}
+                  hitStrokeWidth={Math.max(24, gapHalfThickness * 2)}
                   onClick={(e) => {
                     if (activeTool === 'select') {
                       e.cancelBubble = true;
@@ -1178,8 +1472,8 @@ export function FloorPlanCanvas({
                   }}
                 />
                 <Text
-                  x={px.x}
-                  y={px.y}
+                  x={centerPx.x}
+                  y={centerPx.y}
                   text={`${tag} · ${opening.width.toFixed(2)}m`}
                   fontFamily="monospace"
                   fontSize={10}
@@ -1187,7 +1481,7 @@ export function FloorPlanCanvas({
                   align="center"
                   width={80}
                   offsetX={40}
-                  offsetY={(opening.width * pixelsPerMeter) / 2 + 14}
+                  offsetY={gapHalfThickness + (isDoor ? opening.width * pixelsPerMeter : 0) + 14}
                   listening={false}
                 />
               </Fragment>
@@ -1319,6 +1613,43 @@ export function FloorPlanCanvas({
                   offsetY={16}
                   rotation={angleDeg}
                   listening={false}
+                />
+                {/* Drag-to-offset handle — grabbing and moving this sets
+                    dim.offset (and flips which side of the measured line
+                    the dimension sits on) live, the standard CAD gesture
+                    for placing a dimension line, rather than offset only
+                    being a typed number in the Properties Panel. */}
+                <Circle
+                  x={mid.x}
+                  y={mid.y}
+                  radius={6}
+                  fill={color}
+                  opacity={isSelected ? 0.9 : 0.35}
+                  stroke={color}
+                  strokeWidth={1}
+                  draggable={activeTool === 'select'}
+                  hitStrokeWidth={16}
+                  onMouseEnter={(e) => {
+                    const stage = e.target.getStage();
+                    if (stage) stage.container().style.cursor = 'move';
+                  }}
+                  onMouseLeave={(e) => {
+                    const stage = e.target.getStage();
+                    if (stage) stage.container().style.cursor = 'default';
+                  }}
+                  onClick={(e) => {
+                    if (activeTool === 'select') {
+                      e.cancelBubble = true;
+                      setSelection({ kind: 'dimension', id: dim.id });
+                    }
+                  }}
+                  onTap={(e) => {
+                    if (activeTool === 'select') {
+                      e.cancelBubble = true;
+                      setSelection({ kind: 'dimension', id: dim.id });
+                    }
+                  }}
+                  onDragEnd={(e) => handleDimensionOffsetDragEnd(dim, e)}
                 />
               </Fragment>
             );
@@ -1608,18 +1939,121 @@ export function FloorPlanCanvas({
               );
             })()}
 
-          {SNAP_AWARE_TOOLS.includes(activeTool) && drawStart && snappedCursor && (
-            <Line
-              points={[
-                toPixels(drawStart).x,
-                toPixels(drawStart).y,
-                toPixels(snappedCursor).x,
-                toPixels(snappedCursor).y,
-              ]}
-              stroke="#2D6CDF"
-              strokeWidth={2}
-              dash={[6, 4]}
-            />
+          {SNAP_AWARE_TOOLS.includes(activeTool) &&
+            !RECTANGLE_TOOLS.includes(activeTool) &&
+            drawStart &&
+            snappedCursor && (
+              <Line
+                points={[
+                  toPixels(drawStart).x,
+                  toPixels(drawStart).y,
+                  toPixels(snappedCursor).x,
+                  toPixels(snappedCursor).y,
+                ]}
+                stroke="#2D6CDF"
+                strokeWidth={2}
+                dash={[6, 4]}
+              />
+            )}
+
+          {/* Polygon boundary tools (Slab/Ceiling/Foundation/Roof/
+              Balcony/Shaft/SiteBoundary) — in-progress vertex chain,
+              live segment to the cursor, and a highlighted first vertex
+              showing where to click to close the shape. Separate from
+              the drawStart-based single-segment preview above since
+              these tools track an open-ended vertex list, not one
+              start point. */}
+          {RECTANGLE_TOOLS.includes(activeTool) && polygonDraft && polygonDraft.length > 0 && (
+            <>
+              <Line
+                points={polygonDraft.flatMap((p) => {
+                  const px = toPixels(p);
+                  return [px.x, px.y];
+                })}
+                stroke="#2D6CDF"
+                strokeWidth={2}
+                dash={polygonDraft.length < 2 ? undefined : [6, 4]}
+              />
+              {snappedCursor && (
+                <Line
+                  points={[
+                    toPixels(polygonDraft[polygonDraft.length - 1]).x,
+                    toPixels(polygonDraft[polygonDraft.length - 1]).y,
+                    toPixels(snappedCursor).x,
+                    toPixels(snappedCursor).y,
+                  ]}
+                  stroke="#2D6CDF"
+                  strokeWidth={1.5}
+                  dash={[3, 3]}
+                />
+              )}
+              {polygonDraft.length >= 3 && snappedCursor && (
+                // Closing preview — a faint line back to vertex 1, so
+                // the shape that would result from clicking Finish (or
+                // clicking back on vertex 1) is visible before committing.
+                <Line
+                  points={[
+                    toPixels(snappedCursor).x,
+                    toPixels(snappedCursor).y,
+                    toPixels(polygonDraft[0]).x,
+                    toPixels(polygonDraft[0]).y,
+                  ]}
+                  stroke="#2D6CDF"
+                  strokeWidth={1}
+                  opacity={0.4}
+                  dash={[2, 4]}
+                />
+              )}
+              {polygonDraft.map((p, i) => {
+                const px = toPixels(p);
+                const isFirst = i === 0;
+                return (
+                  <Circle
+                    key={i}
+                    x={px.x}
+                    y={px.y}
+                    radius={isFirst && polygonDraft.length >= 3 ? 7 : 4}
+                    fill={isFirst && polygonDraft.length >= 3 ? '#FFFFFF' : '#2D6CDF'}
+                    stroke={isFirst && polygonDraft.length >= 3 ? '#2D6CDF' : undefined}
+                    strokeWidth={isFirst && polygonDraft.length >= 3 ? 2 : 0}
+                  />
+                );
+              })}
+            </>
+          )}
+
+          {/* Stair tool — in-progress flight-point chain and live segment
+              to the cursor. Simpler than the polygon preview above since
+              a stair never closes into a loop; finishing is only via the
+              design page's Finish bar. */}
+          {STAIR_TOOL.includes(activeTool) && stairDraft && stairDraft.length > 0 && (
+            <>
+              <Line
+                points={stairDraft.flatMap((p) => {
+                  const px = toPixels(p);
+                  return [px.x, px.y];
+                })}
+                stroke="#2D6CDF"
+                strokeWidth={2}
+              />
+              {snappedCursor && (
+                <Line
+                  points={[
+                    toPixels(stairDraft[stairDraft.length - 1]).x,
+                    toPixels(stairDraft[stairDraft.length - 1]).y,
+                    toPixels(snappedCursor).x,
+                    toPixels(snappedCursor).y,
+                  ]}
+                  stroke="#2D6CDF"
+                  strokeWidth={1.5}
+                  dash={[3, 3]}
+                />
+              )}
+              {stairDraft.map((p, i) => {
+                const px = toPixels(p);
+                return <Circle key={i} x={px.x} y={px.y} radius={4} fill="#2D6CDF" />;
+              })}
+            </>
           )}
 
           {guide && (
@@ -1636,7 +2070,7 @@ export function FloorPlanCanvas({
             />
           )}
 
-          {drawStart && (
+          {drawStart && !RECTANGLE_TOOLS.includes(activeTool) && (
             <Circle x={toPixels(drawStart).x} y={toPixels(drawStart).y} radius={4} fill="#2D6CDF" />
           )}
         </Layer>

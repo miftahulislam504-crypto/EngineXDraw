@@ -209,10 +209,9 @@ export default function SheetDetailPage() {
                 onCreateBeam={noop}
                 onCreateColumn={noop}
                 onCreateFooting={noop}
-                onCreateRectangle={noop}
+                onCreatePolygon={noop}
                 onCreateRamp={noop}
                 onCreateRailing={noop}
-                onCreateStair={noop}
                 onCreateCurtainWall={noop}
                 onCreateSkylight={noop}
                 onCreatePlacedObject={noop}
@@ -222,6 +221,7 @@ export default function SheetDetailPage() {
                 onCreateGridLine={noop}
                 onCreateSectionLine={noop}
                 onMoveWallEndpoint={noop}
+                onUpdateDimension={noop}
                 width={900}
                 height={560}
                 readOnly

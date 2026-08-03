@@ -9,6 +9,7 @@ import type {
   ComplianceCategory,
   ComplianceCheckType,
   DesignStatistics,
+  DoorSwingDirection,
 } from '@archibim/object-model';
 
 /**
@@ -177,6 +178,9 @@ export interface Translations {
     view2D: string;
     view3D: string;
     addFloor: string;
+    publishToHub: string;
+    publishToHubSuccess: string; // use {version} placeholder
+    publishToHubFailure: string; // use {error} placeholder
     resetView: string;
     resetViewTooltip: string;
     zoomInTooltip: string;
@@ -186,9 +190,24 @@ export interface Translations {
       floatingBeamEnd: string;
       unsupportedSlabCorner: string;
       unsupportedRoofCorner: string;
+      unsupportedCornerDetail: string;
       footingHasColumn: string;
       columnHasDependents: string;
       wallHasDependents: string;
+      roofNotOnTopFloor: string;
+      unsupportedBalcony: string;
+      floorCountExceedsHub: string; // use {drawn} and {hub} placeholders
+    };
+    polygonDraft: {
+      vertexCount: string; // use {n} as placeholder
+      finishRectangle: string;
+      finishShape: string;
+      cancel: string;
+    };
+    stairDraft: {
+      pointCount: string; // use {n} as placeholder
+      finish: string;
+      cancel: string;
     };
     toolGroups: {
       structure: string;
@@ -204,10 +223,12 @@ export interface Translations {
   hints: Record<DesignTool, string>;
   selectionKinds: Record<SelectionKind, string>;
   wallTypes: Record<Wall['type'], string>;
+  doorSwingDirections: Record<DoorSwingDirection, string>;
   occupancyTypes: Record<OccupancyType, string>;
   libraryCategories: Record<Exclude<LibraryCategory, 'CUSTOM'>, string>;
   shaftTypes: Record<ShaftType, string>;
   properties: {
+    length: string;
     thickness: string;
     height: string;
     elevation: string;
@@ -233,12 +254,16 @@ export interface Translations {
     postSpacing: string;
     numberOfSteps: string;
     riserHeight: string;
+    stairSummary: string; // use {steps} and {rise} placeholders
+    flightLabel: string; // use {n} placeholder
+    treadDepth: string; // use {depth} placeholder
     mullionSpacing: string;
     label: string;
     rotation: string;
     offset: string;
     dimensionLabelPlaceholder: string;
     doorWindowTag: string;
+    doorSwingDirection: string;
     noteText: string;
     gridPosition: string;
     viewDirection: string;

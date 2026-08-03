@@ -75,10 +75,16 @@ import {
   isColumnSupportedByFooting,
   isBeamSupported,
   isBoundarySupported,
+  checkBoundarySupport,
+  isBalconySupported,
+  polygonArea,
   snapToNearestFooting,
   snapToNearestColumn,
 } from '@archibim/core-engine';
 import { subscribeToBuildings, updateBuilding } from '@/lib/projects';
+import { buildExportPayload } from '@/lib/hub/hub-read';
+import { publishArchitecturalModel } from '@/lib/hub/hub-write';
+import type { HubExportPayload } from '@/lib/hub/export.types';
 import { useAuthStore } from '@/lib/auth-store';
 import {
   subscribeToFloors,
@@ -129,7 +135,7 @@ import {
 } from '@/lib/siteBoundary';
 import { subscribeToRooms, reconcileRooms, updateRoom } from '@/lib/rooms';
 import { subscribeToLibrary, ensureLibrarySeeded } from '@/lib/library';
-import { useDesignStudioStore } from '@/lib/design-studio-store';
+import { useDesignStudioStore, POLYGON_BOUNDARY_TOOLS } from '@/lib/design-studio-store';
 import { useI18nStore, formatTemplate } from '@/lib/i18n';
 import { Toolbar } from '@/components/design/Toolbar';
 import { FloorPlanCanvas } from '@/components/design/FloorPlanCanvas';
@@ -137,6 +143,20 @@ import { Live3DView } from '@/components/design/Live3DView';
 import { PropertiesPanel } from '@/components/design/PropertiesPanel';
 import { RoomListPanel } from '@/components/design/RoomListPanel';
 import { LibraryBrowser } from '@/components/design/LibraryBrowser';
+
+/** Formats which corner(s) of a rejected Slab/Roof rectangle failed the
+ * support check and how far each one sits from the nearest column/wall
+ * — e.g. "corner 2 (0.34m away), corner 3 (0.61m away)" — so the
+ * create-time block message tells the person something they can act on
+ * instead of a flat "can't place this" with no way to tell whether they
+ * were 5cm off or 2m off. Locale-neutral by design (just corner numbers
+ * and a metric distance), slotted into the translated message via
+ * formatTemplate's {corners} placeholder. */
+function describeUnsupportedCorners(failed: { index: number; distanceMeters: number }[]): string {
+  return failed
+    .map((c) => `${c.index} (${Number.isFinite(c.distanceMeters) ? `${c.distanceMeters.toFixed(2)}m` : '—'})`)
+    .join(', ');
+}
 
 export default function DesignStudioPage() {
   const params = useParams<{ id: string }>();
@@ -192,7 +212,39 @@ export default function DesignStudioPage() {
     blockMessageTimer.current = setTimeout(() => setBlockMessage(null), 5000);
   }
 
+  // Non-blocking counterpart to blockMessage — for things worth flagging
+  // (e.g. a roof drawn on a floor that isn't the top one) that still go
+  // ahead rather than being refused, so this uses the signal/amber color
+  // rather than danger/red and never returns early from the caller.
+  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
+  const noticeMessageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function showNoticeMessage(message: string) {
+    setNoticeMessage(message);
+    if (noticeMessageTimer.current) clearTimeout(noticeMessageTimer.current);
+    noticeMessageTimer.current = setTimeout(() => setNoticeMessage(null), 5000);
+  }
+
   const [isAddingFloor, setIsAddingFloor] = useState(false);
+  // Building info Hub has on file for this project — read once per
+  // project load (not subscribed live; Hub's own buildingInfo doc has no
+  // onSnapshot equivalent ported here, matching hub-read.ts's read-only,
+  // fetch-on-demand design). Used to give a heads-up if the floor count
+  // being built in Draw doesn't match what was declared in Hub, and to
+  // pre-fill a brand-new building's floor plan with a sensible default —
+  // see handleAddFloor and the building-info notice below.
+  const [hubBuildingInfo, setHubBuildingInfo] = useState<HubExportPayload['buildingInfo'] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    buildExportPayload(projectId).then((payload) => {
+      if (!cancelled) setHubBuildingInfo(payload?.buildingInfo ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
 
   async function handleAddFloor() {
     if (!buildingId || isAddingFloor) return;
@@ -203,15 +255,55 @@ export default function DesignStudioPage() {
       // but switch the dropdown to it right away instead of waiting on that
       // round trip, so tapping "+" feels immediate.
       setFloorId(newFloorId);
+      if (hubBuildingInfo && floors.length + 1 > hubBuildingInfo.numFloors) {
+        showNoticeMessage(
+          formatTemplate(t.designStudio.structuralBlock.floorCountExceedsHub, {
+            drawn: floors.length + 1,
+            hub: hubBuildingInfo.numFloors,
+          }),
+        );
+      }
     } finally {
       setIsAddingFloor(false);
     }
   }
 
-  const { selection, setSelection, explodedView, mobileViewMode, setMobileViewMode } =
-    useDesignStudioStore();
+  const [isPublishingToHub, setIsPublishingToHub] = useState(false);
+
+  async function handlePublishToHub() {
+    if (!buildingId || isPublishingToHub) return;
+    setIsPublishingToHub(true);
+    try {
+      const result = await publishArchitecturalModel(projectId, buildingId);
+      if (result.success) {
+        showNoticeMessage(formatTemplate(t.designStudio.publishToHubSuccess, { version: result.moduleVersion }));
+      } else {
+        showBlockMessage(formatTemplate(t.designStudio.publishToHubFailure, { error: result.error }));
+      }
+    } finally {
+      setIsPublishingToHub(false);
+    }
+  }
+
+  const {
+    selection,
+    setSelection,
+    explodedView,
+    mobileViewMode,
+    setMobileViewMode,
+    activeTool,
+    polygonDraft,
+    setPolygonDraft,
+    stairDraft,
+    setStairDraft,
+  } = useDesignStudioStore();
   const { t } = useI18nStore();
   const currentFloorLevel = floors.find((f) => f.id === floorId)?.level ?? 0;
+  // Highest Floor.level among this building's floors — used to notice
+  // (not block; a stepped-back terrace roof on a middle floor is a real
+  // design, not a mistake) when a roof is being drawn somewhere other
+  // than the top floor.
+  const topFloorLevel = floors.length > 0 ? Math.max(...floors.map((f) => f.level)) : 0;
   const currentBuilding = buildings.find((b) => b.id === buildingId) ?? null;
 
   useEffect(() => {
@@ -385,27 +477,46 @@ export default function DesignStudioPage() {
     ];
   }
 
-  async function handleCreateRectangle(
+  async function handleCreatePolygon(
     tool: 'slab' | 'ceiling' | 'foundation' | 'roof' | 'balcony' | 'shaft' | 'siteBoundary',
-    corner1: { x: number; y: number },
-    corner2: { x: number; y: number },
+    boundary: { x: number; y: number }[],
   ) {
     if (!buildingId || !floorId) return;
-    if (Math.abs(corner2.x - corner1.x) < 0.05 || Math.abs(corner2.y - corner1.y) < 0.05) return;
-    const boundary = rectBoundary(corner1, corner2);
-
+    // Same degenerate-shape guard the old two-corner check did (reject
+    // a sliver too thin to be a real room/roof/etc.), generalized to an
+    // arbitrary polygon via its shoelace area instead of an axis-aligned
+    // width/height comparison — 0.05m in either dimension of a rectangle
+    // is roughly a 0.0025 sq m minimum, so this uses the same order of
+    // magnitude as a floor.
+    if (boundary.length < 3 || polygonArea(boundary) < 0.0025) return;
     // Slab and Roof are real structural spans — every corner needs a
-    // column or wall underneath for support. Ceiling/Foundation/Balcony/
-    // Shaft/SiteBoundary aren't gated: a ceiling is a non-structural
-    // finish layer, a foundation sits below any column/wall reference
-    // point, and balcony/shaft/site-boundary aren't spanning structural
-    // elements in the same sense.
-    if (tool === 'slab' && !isBoundarySupported(boundary, columns, walls)) {
-      showBlockMessage(t.designStudio.structuralBlock.unsupportedSlabCorner);
-      return;
+    // column or wall underneath for support. Balcony is a cantilever —
+    // it doesn't need columns underneath (that's the point of a
+    // cantilever), but it does need at least one boundary edge actually
+    // anchored along a wall, or there's nothing holding it up at all.
+    // Ceiling/Foundation/Shaft/SiteBoundary stay ungated: a ceiling is a
+    // non-structural finish layer, a foundation sits below any
+    // column/wall reference point, and shaft/site-boundary aren't
+    // spanning structural elements in the same sense.
+    if (tool === 'slab' || tool === 'roof') {
+      const support = checkBoundarySupport(boundary, columns, walls);
+      const failed = support.filter((c) => !c.supported);
+      if (failed.length > 0) {
+        const base =
+          tool === 'slab'
+            ? t.designStudio.structuralBlock.unsupportedSlabCorner
+            : t.designStudio.structuralBlock.unsupportedRoofCorner;
+        showBlockMessage(
+          `${base} ${formatTemplate(t.designStudio.structuralBlock.unsupportedCornerDetail, {
+            corners: describeUnsupportedCorners(failed),
+          })}`,
+        );
+        return;
+      }
     }
-    if (tool === 'roof' && !isBoundarySupported(boundary, columns, walls)) {
-      showBlockMessage(t.designStudio.structuralBlock.unsupportedRoofCorner);
+
+    if (tool === 'balcony' && !isBalconySupported(boundary, walls)) {
+      showBlockMessage(t.designStudio.structuralBlock.unsupportedBalcony);
       return;
     }
 
@@ -433,6 +544,9 @@ export default function DesignStudioPage() {
         thickness: DEFAULT_ROOF_THICKNESS,
         elevation: DEFAULT_WALL_HEIGHT,
       });
+      if (currentFloorLevel !== topFloorLevel) {
+        showNoticeMessage(t.designStudio.structuralBlock.roofNotOnTopFloor);
+      }
     } else if (tool === 'balcony') {
       await balconyCrud.create(projectId, buildingId, floorId, {
         boundary,
@@ -488,15 +602,24 @@ export default function DesignStudioPage() {
     });
   }
 
-  async function handleCreateStair(start: { x: number; y: number }, end: { x: number; y: number }) {
-    if (!buildingId || !floorId) return;
-    if (Math.hypot(end.x - start.x, end.y - start.y) < 0.3) return;
+  async function handleCreateStair(points: { x: number; y: number }[]) {
+    if (!buildingId || !floorId || points.length < 2) return;
+    const flights = [];
+    for (let i = 0; i < points.length - 1; i++) {
+      const start = points[i];
+      const end = points[i + 1];
+      if (Math.hypot(end.x - start.x, end.y - start.y) < 0.3) continue; // skip a degenerate flight
+      flights.push({
+        start,
+        end,
+        numberOfSteps: DEFAULT_STAIR_STEPS,
+        riserHeight: DEFAULT_STAIR_RISER_HEIGHT,
+      });
+    }
+    if (flights.length === 0) return;
     await stairCrud.create(projectId, buildingId, floorId, {
-      start,
-      end,
       width: DEFAULT_STAIR_WIDTH,
-      numberOfSteps: DEFAULT_STAIR_STEPS,
-      riserHeight: DEFAULT_STAIR_RISER_HEIGHT,
+      flights,
     });
   }
 
@@ -595,6 +718,7 @@ export default function DesignStudioPage() {
       width: useLibraryItem ? pendingLibraryItem!.defaultWidth : kind === 'DOOR' ? DEFAULT_DOOR_WIDTH : DEFAULT_WINDOW_WIDTH,
       height: useLibraryItem ? pendingLibraryItem!.defaultHeight : kind === 'DOOR' ? DEFAULT_DOOR_HEIGHT : DEFAULT_WINDOW_HEIGHT,
       sillHeight: kind === 'DOOR' ? 0 : DEFAULT_WINDOW_SILL_HEIGHT,
+      ...(kind === 'DOOR' ? { swingDirection: 'hingeStart-in' as const } : {}),
     });
   }
 
@@ -753,6 +877,15 @@ export default function DesignStudioPage() {
               >
                 {isAddingFloor ? '…' : `+ ${t.designStudio.addFloor}`}
               </button>
+              <button
+                type="button"
+                onClick={handlePublishToHub}
+                disabled={!buildingId || isPublishingToHub}
+                title={t.designStudio.publishToHub}
+                className="rounded-sheet border border-line-strong px-2 py-1 text-sm font-medium text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
+              >
+                {isPublishingToHub ? '…' : t.designStudio.publishToHub}
+              </button>
 
               <div className="flex items-center rounded-sheet border border-line-strong p-0.5 lg:hidden">
                 <button
@@ -799,6 +932,19 @@ export default function DesignStudioPage() {
         </div>
       )}
 
+      {noticeMessage && (
+        <div className="flex items-center justify-between gap-3 border-b border-line bg-signal-soft px-4 py-2 text-sm text-signal">
+          <span>{noticeMessage}</span>
+          <button
+            onClick={() => setNoticeMessage(null)}
+            aria-label={t.designStudio.closeAriaLabel}
+            className="shrink-0 font-medium"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto overflow-x-hidden bg-paper p-3 lg:flex-row lg:overflow-hidden">
         <div
           className={clsx(
@@ -835,10 +981,9 @@ export default function DesignStudioPage() {
             onCreateBeam={handleCreateBeam}
             onCreateColumn={handleCreateColumn}
             onCreateFooting={handleCreateFooting}
-            onCreateRectangle={handleCreateRectangle}
+            onCreatePolygon={handleCreatePolygon}
             onCreateRamp={handleCreateRamp}
             onCreateRailing={handleCreateRailing}
-            onCreateStair={handleCreateStair}
             onCreateCurtainWall={handleCreateCurtainWall}
             onCreateSkylight={handleCreateSkylight}
             onCreatePlacedObject={handleCreatePlacedObject}
@@ -849,6 +994,9 @@ export default function DesignStudioPage() {
             onCreateSectionLine={handleCreateSectionLine}
             onOpenElevation={handleOpenElevation}
             onMoveWallEndpoint={handleMoveWallEndpoint}
+            onUpdateDimension={(id, patch) =>
+              buildingId && floorId && dimensionCrud.update(projectId, buildingId, floorId, id, patch)
+            }
             northAngleDeg={currentBuilding?.northAngleDeg ?? 0}
           />
           {/* Phase C — Sheet annotation: lets the person set the
@@ -876,6 +1024,90 @@ export default function DesignStudioPage() {
                 }}
               />
               <span>°</span>
+            </div>
+          )}
+          {/* Floating Finish/Cancel bar for the polygon boundary tools
+              (Slab/Ceiling/Foundation/Roof/Balcony/Shaft/SiteBoundary) —
+              shown once a draw is in progress. "Finish as rectangle" only
+              appears at exactly 2 vertices (the fast path replacing the
+              old implicit 2-click auto-complete); "Finish shape" needs
+              3+ vertices, since fewer than that isn't a closed polygon.
+              Bottom-center placement keeps it clear of the north-angle
+              overlay (top-right) and the toolbar (top). */}
+          {POLYGON_BOUNDARY_TOOLS.includes(activeTool) && polygonDraft && polygonDraft.length > 0 && (
+            <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-sheet border border-line bg-white/95 px-3 py-2 text-sm shadow-sm">
+              <span className="text-ink-muted">
+                {formatTemplate(t.designStudio.polygonDraft.vertexCount, { n: polygonDraft.length })}
+              </span>
+              {polygonDraft.length === 2 && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    handleCreatePolygon(
+                      activeTool as
+                        | 'slab'
+                        | 'ceiling'
+                        | 'foundation'
+                        | 'roof'
+                        | 'balcony'
+                        | 'shaft'
+                        | 'siteBoundary',
+                      rectBoundary(polygonDraft[0], polygonDraft[1]),
+                    );
+                    setPolygonDraft(null);
+                  }}
+                >
+                  {t.designStudio.polygonDraft.finishRectangle}
+                </Button>
+              )}
+              {polygonDraft.length >= 3 && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => {
+                    handleCreatePolygon(
+                      activeTool as
+                        | 'slab'
+                        | 'ceiling'
+                        | 'foundation'
+                        | 'roof'
+                        | 'balcony'
+                        | 'shaft'
+                        | 'siteBoundary',
+                      polygonDraft,
+                    );
+                    setPolygonDraft(null);
+                  }}
+                >
+                  {t.designStudio.polygonDraft.finishShape}
+                </Button>
+              )}
+              <Button variant="secondary" size="sm" onClick={() => setPolygonDraft(null)}>
+                {t.designStudio.polygonDraft.cancel}
+              </Button>
+            </div>
+          )}
+          {activeTool === 'stair' && stairDraft && stairDraft.length > 0 && (
+            <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-sheet border border-line bg-white/95 px-3 py-2 text-sm shadow-sm">
+              <span className="text-ink-muted">
+                {formatTemplate(t.designStudio.stairDraft.pointCount, { n: stairDraft.length })}
+              </span>
+              {stairDraft.length >= 2 && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => {
+                    handleCreateStair(stairDraft);
+                    setStairDraft(null);
+                  }}
+                >
+                  {t.designStudio.stairDraft.finish}
+                </Button>
+              )}
+              <Button variant="secondary" size="sm" onClick={() => setStairDraft(null)}>
+                {t.designStudio.stairDraft.cancel}
+              </Button>
             </div>
           )}
           <PropertiesPanel

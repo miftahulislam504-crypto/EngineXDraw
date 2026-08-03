@@ -71,6 +71,55 @@ export function pointAtParameter(wall: Wall, t: number): Point2D {
   };
 }
 
+/** Standard architectural door symbol geometry, in plan-view meters.
+ * Shared by FloorPlanCanvas (2D swing-arc symbol) and Live3DView (the
+ * open-leaf plane inside the now-real wall cutout) so both views agree
+ * on exactly where the hinge and open leaf tip land, instead of each
+ * re-deriving the same trig by hand and risking the two disagreeing.
+ * Returns the hinge point, the far jamb (where the leaf's tip sits when
+ * fully closed, flush with the wall line), and the open-position tip
+ * (leaf swung a full 90° off the wall — the conventional way to draw
+ * it). All three are plan points; callers project into pixels or into
+ * the 3D scene's X/Z as needed. */
+export function doorSwingGeometry(
+  wall: { start: Point2D; end: Point2D },
+  opening: { positionOnWall: number; width: number; swingDirection?: string },
+) {
+  const center = pointAtParameter(wall as Wall, opening.positionOnWall);
+  const dx = wall.end.x - wall.start.x;
+  const dy = wall.end.y - wall.start.y;
+  const len = Math.hypot(dx, dy) || 1e-6;
+  const ux = dx / len;
+  const uy = dy / len;
+  const nx = -uy;
+  const ny = ux;
+  const half = opening.width / 2;
+
+  const direction = opening.swingDirection ?? 'hingeStart-in';
+  const hingeAtStart = direction.startsWith('hingeStart');
+  const swingOut = direction.endsWith('-out'); // 'out' = -normal side, 'in' = +normal side
+
+  // Hinge sits at whichever edge of the opening the direction picks,
+  // walking along the wall's own start->end direction.
+  const hinge: Point2D = hingeAtStart
+    ? { x: center.x - ux * half, y: center.y - uy * half }
+    : { x: center.x + ux * half, y: center.y + uy * half };
+  // The far jamb — where the leaf tip lands when fully closed (flat
+  // against the wall line) — the arc's other endpoint.
+  const farJamb: Point2D = hingeAtStart
+    ? { x: center.x + ux * opening.width, y: center.y + uy * opening.width }
+    : { x: center.x - ux * opening.width, y: center.y - uy * opening.width };
+  const sideSign = swingOut ? -1 : 1;
+  // Leaf tip when open 90°: from the hinge, one door-width out along the
+  // wall's normal, on whichever face swingDirection selects.
+  const openTip: Point2D = {
+    x: hinge.x + nx * sideSign * opening.width,
+    y: hinge.y + ny * sideSign * opening.width,
+  };
+
+  return { center, hinge, farJamb, openTip };
+}
+
 export function nearestParameterOnWall(wall: Wall, point: Point2D): number {
   const dx = wall.end.x - wall.start.x;
   const dy = wall.end.y - wall.start.y;

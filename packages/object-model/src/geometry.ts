@@ -42,6 +42,15 @@ export interface Wall {
 
 export type OpeningKind = 'DOOR' | 'WINDOW';
 
+/** Which quadrant the door leaf/swing arc is drawn in, relative to the
+ * wall's start->end direction and the wall's two faces. 'hingeStart'/
+ * 'hingeEnd' picks which side of the opening the hinge is on (along the
+ * wall); 'in'/'out' picks which face of the wall the leaf swings toward.
+ * Meaningless for WINDOW (ignored there). Optional so existing Opening
+ * documents written before this field existed remain valid — the plan
+ * symbol falls back to 'hingeStart-in' when absent. */
+export type DoorSwingDirection = 'hingeStart-in' | 'hingeStart-out' | 'hingeEnd-in' | 'hingeEnd-out';
+
 export interface Opening {
   id: string;
   floorId: string;
@@ -56,6 +65,8 @@ export interface Opening {
    * opening's position among same-kind openings on the floor, the same
    * "computed unless overridden" pattern Dimension.label uses. */
   tag?: string;
+  /** DOOR only — see DoorSwingDirection above. Ignored for WINDOW. */
+  swingDirection?: DoorSwingDirection;
   createdAt: FirestoreTimestampLike;
 }
 
@@ -213,14 +224,51 @@ export interface Railing {
   updatedAt: FirestoreTimestampLike;
 }
 
+/** One straight run of steps, bottom to top. Direction of travel is
+ * start->end, same convention the old single-flight Stair used. */
+export interface StairFlight {
+  start: Point2D;
+  end: Point2D;
+  numberOfSteps: number;
+  riserHeight: number; // meters per step
+}
+
+/** True if consecutive flights change direction — with implicit-landing
+ * geometry, a landing is only real space between flights that turn; a
+ * straight run where flight N's end is flight N+1's start doesn't need
+ * one (there's nothing to land ON between two steps of the same run).
+ * Exported so FloorPlanCanvas/Live3DView can share this exact rule
+ * instead of each re-deriving it and possibly disagreeing on whether a
+ * given joint gets a landing drawn. */
+export function flightsTurnAtJoint(a: StairFlight, b: StairFlight): boolean {
+  const d1x = a.end.x - a.start.x;
+  const d1y = a.end.y - a.start.y;
+  const d2x = b.end.x - b.start.x;
+  const d2y = b.end.y - b.start.y;
+  const len1 = Math.hypot(d1x, d1y) || 1e-9;
+  const len2 = Math.hypot(d2x, d2y) || 1e-9;
+  // Same direction (dot product ~1 after normalizing) = straight run
+  // continuing, no landing needed. Anything else (90° turn, 180° switch-
+  // back) needs a landing to physically stand on while turning.
+  const dot = (d1x / len1) * (d2x / len2) + (d1y / len1) * (d2y / len2);
+  return dot < 0.98;
+}
+
 export interface Stair {
   id: string;
   floorId: string;
-  start: Point2D; // bottom of the flight, plan position
-  end: Point2D; // top of the flight, plan position — direction of travel is start->end
-  width: number; // meters, perpendicular to travel direction
-  numberOfSteps: number;
-  riserHeight: number; // meters per step
+  /** Meters, perpendicular to each flight's own direction of travel —
+   * one width for the whole stair, the standard assumption for a
+   * residential stair (landings included, matching the flights they
+   * connect) rather than letting each flight vary independently. */
+  width: number;
+  /** Ordered bottom-to-top. A single-entry array is exactly the old
+   * straight-single-flight stair; 2+ entries is an L-shaped (one turn)
+   * or U-shaped (two turns, typically 180°) stair. Consecutive flights
+   * don't need to share an endpoint — see landing geometry derivation
+   * in core-engine (deriveStairLandings) — but normally do for a
+   * straight-run continuation (see flightsTurnAtJoint). */
+  flights: StairFlight[];
   createdAt: FirestoreTimestampLike;
   updatedAt: FirestoreTimestampLike;
 }

@@ -37,6 +37,15 @@ export function subscribeToRooms(
   });
 }
 
+export async function getRoomsOnce(
+  projectId: string,
+  buildingId: string,
+  floorId: string,
+): Promise<Room[]> {
+  const snap = await getDocs(roomsCol(projectId, buildingId, floorId));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Room);
+}
+
 export async function updateRoom(
   projectId: string,
   buildingId: string,

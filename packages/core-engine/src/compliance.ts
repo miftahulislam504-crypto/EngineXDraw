@@ -12,6 +12,7 @@ import type {
 } from '@archibim/object-model';
 import { detectRooms, detectBuildingFootprint } from './rooms';
 import { distance, isPointInPolygon, pointToSegmentDistance } from './geometry-utils';
+import { stairReferencePoint } from './stairs';
 
 /**
  * Phase 5 — Building Intelligence rule engine.
@@ -160,22 +161,68 @@ export function checkGroundCoverage(
   ];
 }
 
-/** The four edges of an axis-aligned SiteBoundary rectangle as segments,
- * derived from its bounding extremes rather than trusting stored point
- * order (robust to whichever corner the user dragged from). */
+/** The polygon edge (as a real boundary segment, not a synthetic
+ * bounding-box edge) that best represents each cardinal direction, for
+ * an arbitrary SiteBoundary polygon — not just an axis-aligned
+ * rectangle. For a true rectangle this picks exactly its 4 real edges
+ * (equivalent to the old bounding-box version, since a rectangle's
+ * edges already coincide with its bounding box). For any other shape
+ * (a skewed quadrilateral, or a polygon drawn via the multi-vertex tool)
+ * it picks, for each direction, whichever real edge's outward-facing
+ * normal points most toward that direction — a meaningful nearest-real-
+ * edge approximation rather than a bounding-box edge that might not
+ * touch the plot at all.
+ *
+ * "Outward" is determined per-edge by testing a point just off the
+ * edge's midpoint against isPointInPolygon, rather than assuming a
+ * fixed winding order — the 2-click rectangle path (rectBoundary in the
+ * design page) doesn't guarantee consistent CW/CCW winding depending on
+ * which corner was dragged first, so trusting a winding convention here
+ * would silently flip front/rear for some rectangles and not others. */
 function siteBoundaryEdges(boundary: Point2D[]): Record<SiteBoundaryEdge, [Point2D, Point2D]> {
-  const xs = boundary.map((p) => p.x);
-  const ys = boundary.map((p) => p.y);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  return {
-    top: [{ x: minX, y: minY }, { x: maxX, y: minY }],
-    bottom: [{ x: minX, y: maxY }, { x: maxX, y: maxY }],
-    left: [{ x: minX, y: minY }, { x: minX, y: maxY }],
-    right: [{ x: maxX, y: minY }, { x: maxX, y: maxY }],
+  const n = boundary.length;
+  const cardinalDirections: Record<SiteBoundaryEdge, Point2D> = {
+    top: { x: 0, y: -1 },
+    bottom: { x: 0, y: 1 },
+    left: { x: -1, y: 0 },
+    right: { x: 1, y: 0 },
   };
+
+  const edgesWithOutwardNormal: { a: Point2D; b: Point2D; normal: Point2D }[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = boundary[i];
+    const b = boundary[(i + 1) % n];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1e-9;
+    let nx = -dy / len;
+    let ny = dx / len;
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const probe = { x: mid.x + nx * 1e-3, y: mid.y + ny * 1e-3 };
+    // If the probe (a tiny step off the edge along this normal) is
+    // still inside the polygon, this normal points inward — flip it.
+    if (isPointInPolygon(probe, boundary)) {
+      nx = -nx;
+      ny = -ny;
+    }
+    edgesWithOutwardNormal.push({ a, b, normal: { x: nx, y: ny } });
+  }
+
+  const result = {} as Record<SiteBoundaryEdge, [Point2D, Point2D]>;
+  for (const key of Object.keys(cardinalDirections) as SiteBoundaryEdge[]) {
+    const dir = cardinalDirections[key];
+    let best = edgesWithOutwardNormal[0];
+    let bestScore = -Infinity;
+    for (const e of edgesWithOutwardNormal) {
+      const score = e.normal.x * dir.x + e.normal.y * dir.y;
+      if (score > bestScore) {
+        bestScore = score;
+        best = e;
+      }
+    }
+    result[key] = [best.a, best.b];
+  }
+  return result;
 }
 
 const OPPOSITE_EDGE: Record<SiteBoundaryEdge, SiteBoundaryEdge> = {
@@ -199,20 +246,23 @@ export interface GeometricSetback {
 
 /**
  * Real clearance from a building footprint to a drawn SiteBoundary
- * rectangle's edges — front/rear/side determined by which edge is
- * designated as facing the road (SiteBoundary.frontEdge). Requires the
- * footprint to actually sit inside the boundary; a footprint that
- * crosses or sits outside it will still produce a number (nearest-edge
- * distance), just not a meaningful "clearance", since that's a modeling
- * mistake (building drawn outside the plot) rather than a setback
- * violation this function's job is to catch.
+ * polygon's edges — front/rear/side determined by which of the plot's
+ * real edges is closest to facing each cardinal direction (see
+ * siteBoundaryEdges), with SiteBoundary.frontEdge picking which
+ * direction is the road-facing one. Works for any polygon shape, not
+ * just an axis-aligned rectangle. Requires the footprint to actually
+ * sit inside the boundary; a footprint that crosses or sits outside it
+ * will still produce a number (nearest-edge distance), just not a
+ * meaningful "clearance", since that's a modeling mistake (building
+ * drawn outside the plot) rather than a setback violation this
+ * function's job is to catch.
  */
 export function computeGeometricSetback(
   footprintBoundary: Point2D[],
   siteBoundary: Point2D[],
   frontEdge: SiteBoundaryEdge,
 ): GeometricSetback | null {
-  if (siteBoundary.length < 4 || footprintBoundary.length < 3) return null;
+  if (siteBoundary.length < 3 || footprintBoundary.length < 3) return null;
   const edges = siteBoundaryEdges(siteBoundary);
 
   function clearanceTo(edge: SiteBoundaryEdge): number {
@@ -510,7 +560,7 @@ export function checkEscapeRoute(walls: Wall[], openings: Opening[], stairs: Sta
   }
 
   for (const stair of stairs) {
-    const mid: Point2D = { x: (stair.start.x + stair.end.x) / 2, y: (stair.start.y + stair.end.y) / 2 };
+    const mid = stairReferencePoint(stair);
     let roomIndex = detected.findIndex((r) => isPointInPolygon(mid, r.boundary));
     if (roomIndex === -1) {
       let bestDist = Infinity;

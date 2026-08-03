@@ -83,6 +83,13 @@ export function subscribeToFloors(
   });
 }
 
+export async function getFloorsOnce(projectId: string, buildingId: string): Promise<Floor[]> {
+  const snap = await getDocs(floorsCol(projectId, buildingId));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as Floor)
+    .sort((a, b) => a.level - b.level);
+}
+
 /** Adds one new floor above the building's current highest floor —
  * `createBuilding` only ever seeds the Ground Floor (level 0), so this is
  * the only way additional floors (First Floor, Second Floor, …) get
@@ -238,7 +245,9 @@ export async function updateOpening(
   buildingId: string,
   floorId: string,
   openingId: string,
-  patch: Partial<Pick<Opening, 'width' | 'height' | 'sillHeight' | 'positionOnWall' | 'tag'>>,
+  patch: Partial<
+    Pick<Opening, 'width' | 'height' | 'sillHeight' | 'positionOnWall' | 'tag' | 'swingDirection'>
+  >,
 ) {
   await updateDoc(doc(openingsCol(projectId, buildingId, floorId), openingId), patch);
 }
@@ -252,6 +261,15 @@ export async function getWallsOnce(
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Wall);
 }
 
+export async function getOpeningsOnce(
+  projectId: string,
+  buildingId: string,
+  floorId: string,
+): Promise<Opening[]> {
+  const snap = await getDocs(query(openingsCol(projectId, buildingId, floorId)));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Opening);
+}
+
 // ─── Columns ─────────────────────────────────────────────
 
 export function subscribeToColumns(
@@ -263,6 +281,15 @@ export function subscribeToColumns(
   return onSnapshot(columnsCol(projectId, buildingId, floorId), (snap) => {
     onChange(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Column));
   });
+}
+
+export async function getColumnsOnce(
+  projectId: string,
+  buildingId: string,
+  floorId: string,
+): Promise<Column[]> {
+  const snap = await getDocs(columnsCol(projectId, buildingId, floorId));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Column);
 }
 
 export async function createColumn(
@@ -313,6 +340,15 @@ export function subscribeToBeams(
   return onSnapshot(beamsCol(projectId, buildingId, floorId), (snap) => {
     onChange(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Beam));
   });
+}
+
+export async function getBeamsOnce(
+  projectId: string,
+  buildingId: string,
+  floorId: string,
+): Promise<Beam[]> {
+  const snap = await getDocs(beamsCol(projectId, buildingId, floorId));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Beam);
 }
 
 export async function createBeam(
@@ -423,6 +459,10 @@ function makeElementCrud<T extends { id: string }>(collectionName: string) {
       return onSnapshot(col(projectId, buildingId, floorId), (snap) => {
         onChange(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as T));
       });
+    },
+    async getOnce(projectId: string, buildingId: string, floorId: string): Promise<T[]> {
+      const snap = await getDocs(col(projectId, buildingId, floorId));
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as T);
     },
     async create(
       projectId: string,

@@ -71,12 +71,107 @@ export function isPointSupported(
   return walls.some((w) => pointToSegmentDistance(point, w.start, w.end) <= w.thickness / 2 + tolerance);
 }
 
-/** True if every corner of a rectangular boundary (Slab/Roof/Ceiling —
- * drawn corner1/corner2 click-drag, so always a 4-point axis-aligned
- * rectangle) lands on a column or wall. */
+/** How far a point sits from the nearest thing that could support it —
+ * the smaller of (distance to nearest column center) and (distance to
+ * nearest wall centerline, wall half-thickness already subtracted out
+ * so a point sitting right at the wall's face reads as ~0, not off by
+ * half the wall's thickness). Returns Infinity if there are no columns
+ * or walls at all on the floor yet, so a caller can tell "nothing to
+ * support this" apart from "close but not quite" without a separate
+ * flag. Same tolerance-independent distance isPointSupported already
+ * computes internally — pulled out here so the create-time gate can
+ * report *how far off* a failed corner is, not just that it failed. */
+export function nearestSupportDistance(point: Point2D, columns: Column[], walls: Wall[]): number {
+  let nearest = Infinity;
+  for (const c of columns) {
+    const d = distance(c.center, point);
+    if (d < nearest) nearest = d;
+  }
+  for (const w of walls) {
+    const d = Math.max(0, pointToSegmentDistance(point, w.start, w.end) - w.thickness / 2);
+    if (d < nearest) nearest = d;
+  }
+  return nearest;
+}
+
+/** True if every vertex of a boundary (Slab/Roof — drawn as a polygon,
+ * either the fast 2-click rectangle or a custom multi-vertex shape via
+ * the same tool) lands on a column or wall. Works for any vertex count,
+ * not just 4-point rectangles. */
 export function isBoundarySupported(boundary: Point2D[], columns: Column[], walls: Wall[]): boolean {
   if (boundary.length === 0) return false;
   return boundary.every((corner) => isPointSupported(corner, columns, walls));
+}
+
+/** How far a boundary EDGE (not a single point) sits from running
+ * alongside a wall — the minimum, over every wall, of the larger of
+ * that edge's two endpoint-to-wall-line distances. A small result means
+ * the whole edge tracks close to some wall's line, not just one corner
+ * of it — the distinction that matters for a cantilever: a corner
+ * touching a wall isn't a real anchor if the rest of that edge drifts
+ * away from it. */
+function edgeDistanceToNearestWall(a: Point2D, b: Point2D, walls: Wall[]): number {
+  let best = Infinity;
+  for (const w of walls) {
+    const halfT = w.thickness / 2;
+    const dA = Math.max(0, pointToSegmentDistance(a, w.start, w.end) - halfT);
+    const dB = Math.max(0, pointToSegmentDistance(b, w.start, w.end) - halfT);
+    const d = Math.max(dA, dB); // the edge only "tracks" the wall as well as its worse-matching endpoint
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+/** True if a Balcony has at least one boundary edge anchored along a
+ * wall — the structural point of a cantilever balcony (it projects out
+ * from a supporting wall/slab edge rather than needing columns
+ * underneath, which is why Balcony is deliberately NOT run through
+ * isBoundarySupported the way Slab/Roof are). A balcony with every edge
+ * floating away from every wall isn't anchored to anything and would
+ * have no real means of support, cantilevered or otherwise. */
+export function isBalconySupported(
+  boundary: Point2D[],
+  walls: Wall[],
+  tolerance = CORNER_SUPPORT_TOLERANCE_M,
+): boolean {
+  if (boundary.length < 3 || walls.length === 0) return false;
+  for (let i = 0; i < boundary.length; i++) {
+    const a = boundary[i];
+    const b = boundary[(i + 1) % boundary.length];
+    if (edgeDistanceToNearestWall(a, b, walls) <= tolerance) return true;
+  }
+  return false;
+}
+
+export interface BoundaryCornerSupport {
+  corner: Point2D;
+  /** 1-based position in the boundary array — matches how a person
+   * would naturally point at "corner 1, corner 2..." rather than a
+   * zero-based index, for use directly in a user-facing message. */
+  index: number;
+  supported: boolean;
+  /** How far this corner sits from the nearest column/wall, in meters.
+   * Infinity when there is no column or wall anywhere on the floor. */
+  distanceMeters: number;
+}
+
+/** Same pass/fail check as isBoundarySupported, but returns per-corner
+ * detail — which corner(s) failed and by how far — instead of
+ * collapsing straight to a boolean. Used by the create-time gate to
+ * report something a person can actually act on ("corner 2 is 0.34m
+ * from the nearest wall") instead of a flat "can't place this" with no
+ * way to tell whether they were close or wildly off. */
+export function checkBoundarySupport(
+  boundary: Point2D[],
+  columns: Column[],
+  walls: Wall[],
+): BoundaryCornerSupport[] {
+  return boundary.map((corner, i) => ({
+    corner,
+    index: i + 1,
+    supported: isPointSupported(corner, columns, walls),
+    distanceMeters: nearestSupportDistance(corner, columns, walls),
+  }));
 }
 
 /** True if both ends of a beam land on a column or wall. */

@@ -292,7 +292,7 @@ export function PlanarBoxMesh({
   roughness,
   metalness,
 }: {
-  boundary: { x: number; y: number }[];
+  boundary: { x: number; y: number }[] | undefined | null;
   thickness: number;
   elevation: number;
   color: string;
@@ -313,9 +313,10 @@ export function PlanarBoxMesh({
   // Foundation/Roof/Balcony can be custom polygons (an L-shaped roof
   // would fill in as its full rectangular bounding box instead).
   const geometry = useMemo(() => {
-    if (boundary.length < 3) {
-      // Degenerate input — fall back to a tiny flat box rather than
-      // crashing ExtrudeGeometry on an empty/invalid shape.
+    if (!Array.isArray(boundary) || boundary.length < 3) {
+      // Degenerate/missing input — fall back to a tiny flat box rather
+      // than crashing ExtrudeGeometry (or the .length read above) on an
+      // empty/undefined/invalid shape.
       const geo = new THREE.BoxGeometry(0.05, thickness, 0.05);
       return geo;
     }

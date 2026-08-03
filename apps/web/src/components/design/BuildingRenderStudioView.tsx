@@ -25,24 +25,25 @@ import {
 
 export interface BuildingRenderStudioViewProps {
   floors: Floor[];
-  floorElements: Record<string, FloorElements>;
-  siteBoundary?: SiteBoundary | null;
+  floorElements: Record < string,
+  FloorElements > ;
+  siteBoundary ? : SiteBoundary | null;
   materialTheme: MaterialTheme;
   environmentPreset: EnvironmentPreset;
   qualityMode: 'draft' | 'high';
   autoRotate: boolean;
-  height?: number;
+  height ? : number;
   /** Fires once the underlying WebGL canvas element exists, so the page
    * can grab it for canvas.captureStream()-based video recording
    * ("Walkthrough Video") without this component needing to know
    * anything about recording itself. */
-  onCanvasReady?: (canvas: HTMLCanvasElement) => void;
+  onCanvasReady ? : (canvas: HTMLCanvasElement) => void;
   /** Phase A — Elevation/Render material fidelity: same resolved-material
    * source as Live3DView/BuildingElevationView. When a wall/roof has no
    * assigned material this falls back to materialTheme's flat color, so
    * existing projects with no per-element materials set still render
    * exactly as before. */
-  libraryItems?: LibraryItem[];
+  libraryItems ? : LibraryItem[];
 }
 
 /** A fixed, pleasant key-light angle for presentation rendering —
@@ -69,7 +70,7 @@ export function BuildingRenderStudioView({
 }: BuildingRenderStudioViewProps) {
   const baseElevations = useMemo(() => computeFloorBaseElevations(floors), [floors]);
   const materialLookup = useMemo(() => buildMaterialLookup(libraryItems), [libraryItems]);
-
+  
   const bounds = useMemo(() => {
     let minX = Infinity;
     let maxX = -Infinity;
@@ -90,7 +91,7 @@ export function BuildingRenderStudioView({
         maxTop = Math.max(maxTop, base + w.height);
       }
     }
-    if (siteBoundary) {
+    if (siteBoundary && Array.isArray(siteBoundary.boundary)) {
       for (const p of siteBoundary.boundary) {
         minX = Math.min(minX, p.x);
         maxX = Math.max(maxX, p.x);
@@ -107,18 +108,18 @@ export function BuildingRenderStudioView({
       maxTop,
     };
   }, [floors, floorElements, baseElevations, siteBoundary]);
-
+  
   const groundHalfSize = Math.max(DEFAULT_GROUND_HALF_SIZE, bounds.spanX, bounds.spanZ) * 1.5;
-
+  
   const sunDir = useMemo(() => sunDirectionVector(STUDIO_KEY_LIGHT), []);
   const lightPosition: [number, number, number] = [
     bounds.centerX + sunDir.x * SUN_DISTANCE,
     sunDir.y * SUN_DISTANCE,
     bounds.centerZ + sunDir.z * SUN_DISTANCE,
   ];
-
+  
   const shadowMapSize = qualityMode === 'high' ? 2048 : 512;
-
+  
   return (
     <div style={{ height }} className="overflow-hidden rounded-sheet border border-line bg-[#DCE6F0]">
       <Canvas
@@ -151,7 +152,7 @@ export function BuildingRenderStudioView({
           <meshStandardMaterial color={materialTheme.groundColor} />
         </mesh>
 
-        {siteBoundary && (
+        {siteBoundary && Array.isArray(siteBoundary.boundary) && siteBoundary.boundary.length >= 3 && (
           <Line
             points={[...siteBoundary.boundary, siteBoundary.boundary[0]].map((p) => [p.x, 0.01, p.y] as [number, number, number])}
             color="#1C8A5E"

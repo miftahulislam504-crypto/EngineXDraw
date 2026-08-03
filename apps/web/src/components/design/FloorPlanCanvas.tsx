@@ -1,5 +1,6 @@
 'use client';
 
+import type React from 'react';
 import { useState, useCallback, useEffect, useMemo, useRef, Fragment } from 'react';
 import clsx from 'clsx';
 import { Stage, Layer, Line, Circle, Rect, Text, Group, Arc, Arrow } from 'react-konva';
@@ -1352,7 +1353,7 @@ export function FloorPlanCanvas({
             const wallAngleDeg = (Math.atan2(gapBPx.y - gapAPx.y, gapBPx.x - gapAPx.x) * 180) / Math.PI;
             const gapLengthPx = Math.hypot(gapBPx.x - gapAPx.x, gapBPx.y - gapAPx.y);
 
-            let symbol: JSX.Element;
+            let symbol: React.JSX.Element;
             if (isDoor) {
               const { hinge, farJamb, openTip } = doorSwingGeometry(wall, opening);
               const hingePx = toPixels(hinge);

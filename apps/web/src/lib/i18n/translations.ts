@@ -337,6 +337,14 @@ export interface Translations {
     saveBuilding: string;
     cancel: string;
     addBuildingError: string;
+    syncingFromHub: string;
+    syncedFromHub: string;
+    resyncFromHub: string;
+    resyncConfirmTitle: string;
+    resyncConfirmBody: string;
+    resyncConfirmAction: string;
+    hubSyncFailed: string;
+    addBuildingManually: string;
   };
   elevations: {
     pageTitle: string;

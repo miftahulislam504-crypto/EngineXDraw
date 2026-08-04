@@ -445,6 +445,15 @@ export const en: Translations = {
     saveBuilding: 'Add Building',
     cancel: 'Cancel',
     addBuildingError: "Couldn't add the building. Please try again.",
+    syncingFromHub: 'Setting up your building from Hub…',
+    syncedFromHub: 'Synced from Hub',
+    resyncFromHub: 'Re-sync from Hub',
+    resyncConfirmTitle: 'Re-sync building from Hub?',
+    resyncConfirmBody:
+      'This replaces this building\u2019s floor count and dimensions with the latest values from Hub. Walls and drawings on existing floors are kept; only floors and building-level numbers are updated.',
+    resyncConfirmAction: 'Re-sync',
+    hubSyncFailed: "Couldn't load building information from Hub.",
+    addBuildingManually: '+ Add building manually',
   },
   elevations: {
     pageTitle: 'Elevations',

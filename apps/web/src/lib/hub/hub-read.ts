@@ -8,6 +8,15 @@
 // ecosystem plan: Hub owns Project/Site/Building info, apps only consume
 // it). Draw's own write-back is a separate, additive path — see
 // hub-write.ts (exportArchitecturalModel / publishArchitecturalModel).
+//
+// buildExportPayload is also the source for projects.ts's
+// seedBuildingFromHub / resyncBuildingFromHub — opening a Hub-created
+// project auto-creates its first Building + Floors from this same
+// payload instead of asking the person to re-type numFloors/floorHeight/
+// etc. that Hub already collected. This file stays read-only either way;
+// the buildings/floors it seeds live in Draw's own
+// projects/{id}/buildings subcollection, not in Hub's
+// building_information document.
 
 import { doc, getDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase-client';

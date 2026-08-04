@@ -10,6 +10,9 @@ import {
   subscribeToBuildings,
   subscribeToMembers,
   createBuilding,
+  getHubBuildingSeed,
+  seedBuildingFromHub,
+  resyncBuildingFromHub,
 } from '@/lib/projects';
 import { useI18nStore, formatTemplate, type Translations } from '@/lib/i18n';
 
@@ -25,7 +28,7 @@ export default function ProjectDetailPage() {
   const { t, locale } = useI18nStore();
 
   const [project, setProject] = useState<(Project & { id: string }) | null | undefined>(undefined);
-  const [buildings, setBuildings] = useState<Building[]>([]);
+  const [buildings, setBuildings] = useState<Building[] | undefined>(undefined);
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [isAddingBuilding, setIsAddingBuilding] = useState(false);
   const [isSavingBuilding, setIsSavingBuilding] = useState(false);
@@ -34,6 +37,15 @@ export default function ProjectDetailPage() {
   const [newBuildingFloors, setNewBuildingFloors] = useState('1');
   const [newBuildingType, setNewBuildingType] = useState('');
   const [newBuildingArea, setNewBuildingArea] = useState('');
+
+  // Hub auto-sync: whether this project even has building_information in
+  // Hub to sync from (null = checked, nothing there; undefined = haven't
+  // checked yet), whether a sync is currently running, and whether the
+  // "replace this building's numbers with Hub's" confirm dialog is open.
+  const [hubHasBuildingInfo, setHubHasBuildingInfo] = useState<boolean | undefined>(undefined);
+  const [isSyncingFromHub, setIsSyncingFromHub] = useState(false);
+  const [hubSyncError, setHubSyncError] = useState<string | null>(null);
+  const [showResyncConfirm, setShowResyncConfirm] = useState(false);
 
   useEffect(() => {
     const unsub1 = subscribeToProject(projectId, setProject);
@@ -45,6 +57,63 @@ export default function ProjectDetailPage() {
       unsub3();
     };
   }, [projectId]);
+
+  // Check once whether Hub has building_information for this project —
+  // used to decide whether "no buildings yet" should auto-sync from Hub
+  // or fall back to the manual form (only projects set up before Hub's
+  // Building Information step existed, or created outside Hub, would ever
+  // hit the fallback).
+  useEffect(() => {
+    let cancelled = false;
+    getHubBuildingSeed(projectId)
+      .then((info) => {
+        if (!cancelled) setHubHasBuildingInfo(info !== null);
+      })
+      .catch(() => {
+        if (!cancelled) setHubHasBuildingInfo(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  // Auto-create: once we know both "this project has no buildings yet"
+  // and "Hub has building_information to seed from", run the sync
+  // automatically — no button, no form, matching the ask that opening a
+  // Hub-created project shouldn't ask the person to re-enter what Hub
+  // already collected.
+  useEffect(() => {
+    if (buildings === undefined || hubHasBuildingInfo === undefined) return;
+    if (buildings.length > 0 || !hubHasBuildingInfo) return;
+    setIsSyncingFromHub(true);
+    setHubSyncError(null);
+    seedBuildingFromHub(projectId)
+      .catch((err) => {
+        console.error('seedBuildingFromHub failed:', err);
+        setHubSyncError(t.projectDetail.hubSyncFailed);
+      })
+      .finally(() => setIsSyncingFromHub(false));
+    // Deliberately excludes `t` — only projectId/buildings/hubHasBuildingInfo
+    // should retrigger the sync itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, buildings, hubHasBuildingInfo]);
+
+  async function handleResyncFromHub() {
+    setShowResyncConfirm(false);
+    setIsSyncingFromHub(true);
+    setHubSyncError(null);
+    try {
+      const hubBuilding = buildings?.find((b) => b.source === 'hub');
+      if (hubBuilding) {
+        await resyncBuildingFromHub(projectId, hubBuilding.id);
+      }
+    } catch (err) {
+      console.error('resyncBuildingFromHub failed:', err);
+      setHubSyncError(t.projectDetail.hubSyncFailed);
+    } finally {
+      setIsSyncingFromHub(false);
+    }
+  }
 
   if (project === undefined) {
     return <p className="font-mono text-sm text-ink-muted">{t.common.loading}</p>;
@@ -77,6 +146,16 @@ export default function ProjectDetailPage() {
       setIsSavingBuilding(false);
     }
   }
+
+  const buildingList = buildings ?? [];
+  // Waiting on either the buildings subscription's first snapshot or the
+  // one-time Hub check means "don't know yet whether to show manual entry
+  // or auto-sync" — render a neutral loading row instead of flashing the
+  // manual form for a moment before auto-sync kicks in.
+  const stillDeciding = buildings === undefined || hubHasBuildingInfo === undefined;
+  const showManualForm =
+    !stillDeciding && buildingList.length === 0 && !hubHasBuildingInfo && !isSyncingFromHub;
+  const primaryHubBuilding = buildingList.find((b) => b.source === 'hub');
 
   return (
     <div className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
@@ -119,17 +198,53 @@ export default function ProjectDetailPage() {
 
           <div className="mb-3 mt-6 flex items-center justify-between">
             <h2 className="font-mono text-[11px] uppercase tracking-wide text-ink-faint">
-              {formatTemplate(t.projectDetail.buildings, { n: buildings.length })}
+              {formatTemplate(t.projectDetail.buildings, { n: buildingList.length })}
             </h2>
-            {!isAddingBuilding && (
-              <button
-                onClick={() => setIsAddingBuilding(true)}
-                className="font-mono text-[11px] uppercase tracking-wide text-accent hover:text-accent-dark"
-              >
-                {t.projectDetail.addBuilding}
-              </button>
-            )}
+            <div className="flex items-center gap-3">
+              {primaryHubBuilding && !isSyncingFromHub && (
+                <button
+                  onClick={() => setShowResyncConfirm(true)}
+                  className="font-mono text-[11px] uppercase tracking-wide text-ink-faint hover:text-accent"
+                >
+                  {t.projectDetail.resyncFromHub}
+                </button>
+              )}
+              {showManualForm && !isAddingBuilding && (
+                <button
+                  onClick={() => setIsAddingBuilding(true)}
+                  className="font-mono text-[11px] uppercase tracking-wide text-accent hover:text-accent-dark"
+                >
+                  {t.projectDetail.addBuilding}
+                </button>
+              )}
+            </div>
           </div>
+
+          {isSyncingFromHub && (
+            <div className="mb-4 flex items-center gap-2 rounded-sheet border border-line bg-surface p-4 text-sm text-ink-muted">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+              {t.projectDetail.syncingFromHub}
+            </div>
+          )}
+
+          {hubSyncError && (
+            <p className="mb-4 text-sm text-danger">{hubSyncError}</p>
+          )}
+
+          {showResyncConfirm && (
+            <div className="mb-4 flex flex-col gap-3 rounded-sheet border border-line bg-surface p-4">
+              <h3 className="font-display text-sm font-medium text-ink">
+                {t.projectDetail.resyncConfirmTitle}
+              </h3>
+              <p className="text-sm text-ink-muted">{t.projectDetail.resyncConfirmBody}</p>
+              <div className="flex gap-2">
+                <Button onClick={handleResyncFromHub}>{t.projectDetail.resyncConfirmAction}</Button>
+                <Button variant="secondary" onClick={() => setShowResyncConfirm(false)}>
+                  {t.projectDetail.cancel}
+                </Button>
+              </div>
+            </div>
+          )}
 
           {isAddingBuilding && (
             <form
@@ -188,12 +303,19 @@ export default function ProjectDetailPage() {
           )}
 
           <div className="flex flex-col gap-2">
-            {buildings.map((b) => (
+            {buildingList.map((b) => (
               <div
                 key={b.id}
                 className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-sheet border border-line bg-surface px-4 py-3 text-sm"
               >
-                <span className="min-w-0 truncate font-medium text-ink">{b.name}</span>
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="min-w-0 truncate font-medium text-ink">{b.name}</span>
+                  {b.source === 'hub' && (
+                    <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-accent">
+                      {t.projectDetail.syncedFromHub}
+                    </span>
+                  )}
+                </div>
                 <span className="shrink-0 font-mono text-xs text-ink-muted">
                   {b.numberOfFloors} {t.projectDetail.floorLabel}
                   {locale === 'en' && b.numberOfFloors !== 1 ? 's' : ''}
@@ -201,8 +323,16 @@ export default function ProjectDetailPage() {
                 </span>
               </div>
             ))}
-            {buildings.length === 0 && (
+            {!stillDeciding && !isSyncingFromHub && buildingList.length === 0 && (
               <p className="text-sm text-ink-muted">{t.projectDetail.noBuildings}</p>
+            )}
+            {hubSyncError && buildingList.length === 0 && !isAddingBuilding && (
+              <button
+                onClick={() => setIsAddingBuilding(true)}
+                className="self-start font-mono text-[11px] uppercase tracking-wide text-accent hover:text-accent-dark"
+              >
+                {t.projectDetail.addBuildingManually}
+              </button>
             )}
           </div>
         </section>

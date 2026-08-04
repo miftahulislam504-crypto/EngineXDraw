@@ -445,6 +445,15 @@ export const bn: Translations = {
     saveBuilding: 'ভবন যোগ করুন',
     cancel: 'বাতিল',
     addBuildingError: 'ভবন যোগ করা যায়নি। আবার চেষ্টা করুন।',
+    syncingFromHub: 'Hub থেকে আপনার ভবন সেট করা হচ্ছে…',
+    syncedFromHub: 'Hub থেকে সিঙ্ক করা',
+    resyncFromHub: 'Hub থেকে পুনরায় সিঙ্ক করুন',
+    resyncConfirmTitle: 'Hub থেকে ভবন পুনরায় সিঙ্ক করবেন?',
+    resyncConfirmBody:
+      'এতে এই ভবনের ফ্লোর সংখ্যা ও মাপ Hub-এর সর্বশেষ মান দিয়ে আপডেট হবে। বিদ্যমান ফ্লোরের ওয়াল ও ড্রয়িং অক্ষত থাকবে; শুধু ফ্লোর ও ভবন-লেভেলের সংখ্যা আপডেট হবে।',
+    resyncConfirmAction: 'পুনরায় সিঙ্ক করুন',
+    hubSyncFailed: 'Hub থেকে ভবনের তথ্য লোড করা যায়নি।',
+    addBuildingManually: '+ ম্যানুয়ালি ভবন যোগ করুন',
   },
   elevations: {
     pageTitle: 'এলিভেশন',

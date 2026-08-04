@@ -90,6 +90,25 @@ export async function getFloorsOnce(projectId: string, buildingId: string): Prom
     .sort((a, b) => a.level - b.level);
 }
 
+/** Shared "level -> display name" rule used everywhere a floor gets its
+ * name assigned automatically: Ground Floor at level 0, First/Second/Third
+ * above it, "Floor N" beyond that, and "Basement"/"Basement N" below
+ * ground — the same convention Hub uses for basementCount so a building
+ * synced from Hub reads the same way here as it does there. */
+export function floorLevelName(level: number): string {
+  if (level === 0) return 'Ground Floor';
+  if (level > 0) {
+    return level === 1
+      ? 'First Floor'
+      : level === 2
+        ? 'Second Floor'
+        : level === 3
+          ? 'Third Floor'
+          : `Floor ${level}`;
+  }
+  return level === -1 ? 'Basement' : `Basement ${Math.abs(level)}`;
+}
+
 /** Adds one new floor above the building's current highest floor —
  * `createBuilding` only ever seeds the Ground Floor (level 0), so this is
  * the only way additional floors (First Floor, Second Floor, …) get
@@ -104,20 +123,10 @@ export async function createFloor(
 ) {
   const topLevel = existingFloors.reduce((max, f) => Math.max(max, f.level), -1);
   const nextLevel = topLevel + 1;
-  const name =
-    nextLevel === 0
-      ? 'Ground Floor'
-      : nextLevel === 1
-        ? 'First Floor'
-        : nextLevel === 2
-          ? 'Second Floor'
-          : nextLevel === 3
-            ? 'Third Floor'
-            : `Floor ${nextLevel}`;
   const floorRef = await addDoc(floorsCol(projectId, buildingId), {
     buildingId,
     level: nextLevel,
-    name,
+    name: floorLevelName(nextLevel),
     floorToFloorHeight: 3.05,
     createdAt: serverTimestamp(),
   });

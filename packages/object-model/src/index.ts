@@ -110,6 +110,12 @@ export interface Building {
   numberOfFloors: number;
   buildingType?: string;
   totalAreaSqm?: number;
+  /** Set to 'hub' when this building was auto-created from CivilOS Hub's
+   * building_information (see projects.ts's seedBuildingFromHub) rather
+   * than typed manually via the Add Building form. Purely informational —
+   * used by the UI to show "Synced from Hub" instead of an edit-heavy
+   * manual-entry affordance; nothing reads it to change behavior. */
+  source?: 'hub' | 'manual';
   /** Phase C — Sheet annotation: degrees clockwise from world +Y (the
    * floor plan's "up" screen direction) to true north. Optional and
    * defaults to 0 wherever unset — meaning "plan up already is north",

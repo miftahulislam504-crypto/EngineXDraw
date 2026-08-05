@@ -5,7 +5,6 @@
 Turborepo monorepo implementing **Phase 1** (Foundation), **Phase 2** (Core Modeling Engine — 21/22 object types), and **Phase 3** (Data Intelligence Layer: Room Detection, Property System, Library System), on a Firebase backend (Auth, Firestore, Storage, Cloud Functions).
 
 ## তৈরি হয়েছে (What's built
-
 ```
 archibim-platform/
   apps/web/            Next.js app

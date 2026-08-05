@@ -4,7 +4,15 @@ import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import clsx from 'clsx';
-import { Button, PageHeader } from '@archibim/shared-ui';
+import { Button } from '@archibim/shared-ui';
+import {
+  Building2 as BuildingIcon,
+  Layers,
+  Plus,
+  UploadCloud,
+  LayoutGrid,
+  Box as Box3DIcon,
+} from 'lucide-react';
 import type {
   Balcony,
   Beam,
@@ -82,6 +90,7 @@ import {
   snapToNearestColumn,
 } from '@archibim/core-engine';
 import { subscribeToBuildings, updateBuilding } from '@/lib/projects';
+import { useDesignHistoryStore } from '@/lib/design-history';
 import { buildExportPayload } from '@/lib/hub/hub-read';
 import { publishArchitecturalModel } from '@/lib/hub/hub-write';
 import type { HubExportPayload } from '@/lib/hub/export.types';
@@ -373,6 +382,29 @@ export default function DesignStudioPage() {
     return () => unsubs.forEach((unsub) => unsub());
   }, [projectId, buildingId, floorId]);
 
+  // Phase 7 — floor-below reference overlay. The floor immediately
+  // below the one being edited, by `level` within the same building
+  // (not necessarily adjacent in `floors` array order, so this finds
+  // it by value rather than assuming an index relationship). Null when
+  // editing the bottom-most floor — nothing to show underneath it.
+  const belowFloorId =
+    floors.find((f) => f.level === currentFloorLevel - 1)?.id ?? null;
+  const [belowFloorWalls, setBelowFloorWalls] = useState<Wall[]>([]);
+  const [belowFloorColumns, setBelowFloorColumns] = useState<Column[]>([]);
+
+  useEffect(() => {
+    if (!buildingId || !belowFloorId) {
+      setBelowFloorWalls([]);
+      setBelowFloorColumns([]);
+      return;
+    }
+    const unsubs = [
+      subscribeToWalls(projectId, buildingId, belowFloorId, setBelowFloorWalls),
+      subscribeToColumns(projectId, buildingId, belowFloorId, setBelowFloorColumns),
+    ];
+    return () => unsubs.forEach((unsub) => unsub());
+  }, [projectId, buildingId, belowFloorId]);
+
   // Smart Room System: re-detect rooms whenever the wall set settles.
   // Debounced so a drag-in-progress doesn't fire a Firestore write per frame.
   const reconcileTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -393,6 +425,14 @@ export default function DesignStudioPage() {
 
   async function rejoinAfter(newWall: { id: string; start: { x: number; y: number }; end: { x: number; y: number } }) {
     if (!buildingId || !floorId) return;
+    // Note: any other walls this snaps into alignment (changed here via
+    // updateWallsBatch) are not individually recorded in undo history —
+    // only the wall the person actually drew/dragged is. Undoing that
+    // one wall's creation/move won't un-snap whatever else moved to
+    // meet it. Covering that would mean snapshotting every wall in
+    // `changed` before this batch write, which the moderate value of
+    // "undo a rare cascading snap" doesn't currently justify against
+    // the added complexity.
     const existingEndpoints = walls
       .filter((w) => w.id !== newWall.id)
       .map((w) => ({ id: w.id, start: w.start, end: w.end }));
@@ -403,16 +443,30 @@ export default function DesignStudioPage() {
     }
   }
 
+  const recordHistory = useDesignHistoryStore((s) => s.record);
+  const clearHistory = useDesignHistoryStore((s) => s.clear);
+
+  // A fresh undo/redo stack per floor — an undo stack built while
+  // editing Ground Floor has no sensible meaning once the person
+  // switches to First Floor (different walls, different ids entirely),
+  // so carrying it over would let Undo silently act on the wrong
+  // floor's elements. Same reasoning for switching buildings.
+  useEffect(() => {
+    clearHistory();
+  }, [buildingId, floorId, clearHistory]);
+
   async function handleCreateWall(start: { x: number; y: number }, end: { x: number; y: number }) {
     if (!buildingId || !floorId) return;
     if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
-    await createWall(projectId, buildingId, floorId, {
+    const data = {
       start,
       end,
       thickness: DEFAULT_WALL_THICKNESS,
       height: DEFAULT_WALL_HEIGHT,
-      type: 'INTERIOR',
-    });
+      type: 'INTERIOR' as const,
+    };
+    const id = await createWall(projectId, buildingId, floorId, data);
+    recordHistory({ action: 'create', kind: 'wall', id, data });
     await rejoinAfter({ id: '__pending__', start, end });
   }
 
@@ -423,13 +477,15 @@ export default function DesignStudioPage() {
       showBlockMessage(t.designStudio.structuralBlock.floatingBeamEnd);
       return;
     }
-    await createBeam(projectId, buildingId, floorId, {
+    const data = {
       start,
       end,
       width: DEFAULT_BEAM_WIDTH,
       depth: DEFAULT_BEAM_DEPTH,
       elevation: DEFAULT_WALL_HEIGHT - DEFAULT_BEAM_DEPTH,
-    });
+    };
+    const id = await createBeam(projectId, buildingId, floorId, data);
+    recordHistory({ action: 'create', kind: 'beam', id, data });
   }
 
   async function handleCreateColumn(center: { x: number; y: number }) {
@@ -443,13 +499,15 @@ export default function DesignStudioPage() {
       showBlockMessage(t.designStudio.structuralBlock.columnWithoutFooting);
       return;
     }
-    await createColumn(projectId, buildingId, floorId, {
+    const data = {
       center: snapped,
-      shape: 'RECTANGULAR',
+      shape: 'RECTANGULAR' as const,
       width: DEFAULT_COLUMN_WIDTH,
       depth: DEFAULT_COLUMN_DEPTH,
       height: DEFAULT_COLUMN_HEIGHT,
-    });
+    };
+    const id = await createColumn(projectId, buildingId, floorId, data);
+    recordHistory({ action: 'create', kind: 'column', id, data });
   }
 
   async function handleCreateFooting(center: { x: number; y: number }) {
@@ -459,13 +517,15 @@ export default function DesignStudioPage() {
     // past the first, since columns are gated on having a footing) lines
     // up exactly rather than needing pixel-perfect placement.
     const snapped = snapToNearestColumn(center, columns);
-    await footingCrud.create(projectId, buildingId, floorId, {
+    const data = {
       center: snapped,
       width: DEFAULT_FOOTING_WIDTH,
       depth: DEFAULT_FOOTING_DEPTH,
       thickness: DEFAULT_FOOTING_THICKNESS,
       elevation: -1.2 - DEFAULT_FOOTING_THICKNESS,
-    });
+    };
+    const id = await footingCrud.create(projectId, buildingId, floorId, data);
+    recordHistory({ action: 'create', kind: 'footing', id, data });
   }
 
   function rectBoundary(corner1: { x: number; y: number }, corner2: { x: number; y: number }) {
@@ -521,85 +581,88 @@ export default function DesignStudioPage() {
     }
 
     if (tool === 'slab') {
-      await createSlab(projectId, buildingId, floorId, {
-        boundary,
-        thickness: DEFAULT_SLAB_THICKNESS,
-        elevation: 0,
-      });
+      const data = { boundary, thickness: DEFAULT_SLAB_THICKNESS, elevation: 0 };
+      const id = await createSlab(projectId, buildingId, floorId, data);
+      recordHistory({ action: 'create', kind: 'slab', id, data });
     } else if (tool === 'ceiling') {
-      await ceilingCrud.create(projectId, buildingId, floorId, {
+      const data = {
         boundary,
         thickness: DEFAULT_CEILING_THICKNESS,
         elevation: DEFAULT_WALL_HEIGHT - DEFAULT_CEILING_THICKNESS,
-      });
+      };
+      const id = await ceilingCrud.create(projectId, buildingId, floorId, data);
+      recordHistory({ action: 'create', kind: 'ceiling', id, data });
     } else if (tool === 'foundation') {
-      await foundationCrud.create(projectId, buildingId, floorId, {
+      const data = {
         boundary,
         thickness: DEFAULT_FOUNDATION_THICKNESS,
         elevation: -DEFAULT_FOUNDATION_THICKNESS - 0.3,
-      });
+      };
+      const id = await foundationCrud.create(projectId, buildingId, floorId, data);
+      recordHistory({ action: 'create', kind: 'foundation', id, data });
     } else if (tool === 'roof') {
-      await roofCrud.create(projectId, buildingId, floorId, {
-        boundary,
-        thickness: DEFAULT_ROOF_THICKNESS,
-        elevation: DEFAULT_WALL_HEIGHT,
-      });
+      const data = { boundary, thickness: DEFAULT_ROOF_THICKNESS, elevation: DEFAULT_WALL_HEIGHT };
+      const id = await roofCrud.create(projectId, buildingId, floorId, data);
+      recordHistory({ action: 'create', kind: 'roof', id, data });
       if (currentFloorLevel !== topFloorLevel) {
         showNoticeMessage(t.designStudio.structuralBlock.roofNotOnTopFloor);
       }
     } else if (tool === 'balcony') {
-      await balconyCrud.create(projectId, buildingId, floorId, {
-        boundary,
-        thickness: DEFAULT_BALCONY_THICKNESS,
-        elevation: 0,
-      });
+      const data = { boundary, thickness: DEFAULT_BALCONY_THICKNESS, elevation: 0 };
+      const id = await balconyCrud.create(projectId, buildingId, floorId, data);
+      recordHistory({ action: 'create', kind: 'balcony', id, data });
     } else if (tool === 'shaft') {
       // Shaft is building-level (spans multiple floors), unlike every
       // other rectangle tool here — defaults to just the current floor's
       // level; the person expands startLevel/endLevel afterward in
       // PropertiesPanel once they know how many floors it should span.
-      await createShaft(projectId, buildingId, {
+      const data = {
         boundary,
-        shaftType: 'ELEVATOR',
+        shaftType: 'ELEVATOR' as const,
         startLevel: currentFloorLevel,
         endLevel: currentFloorLevel,
-      });
+      };
+      const id = await createShaft(projectId, buildingId, data);
+      recordHistory({ action: 'create', kind: 'shaft', id, data });
     } else if (tool === 'siteBoundary') {
       // A building has at most one plot boundary — drawing a new one
       // replaces whichever one was there before, rather than piling up
-      // rectangles the person has to manually clean up.
+      // rectangles the person has to manually clean up. The old one's
+      // removal isn't separately undoable here (undoing the new
+      // boundary's creation just removes it, leaving no boundary at
+      // all, not the previous one back) — reconstructing the previous
+      // boundary would need its own history entry, which this
+      // replace-in-place flow doesn't currently record.
       if (siteBoundary) {
         await deleteSiteBoundary(projectId, buildingId, siteBoundary.id);
       }
-      await createSiteBoundary(projectId, buildingId, {
-        boundary,
-        frontEdge: 'top',
-      });
+      const data = { boundary, frontEdge: 'top' as const };
+      const id = await createSiteBoundary(projectId, buildingId, data);
+      recordHistory({ action: 'create', kind: 'siteBoundary', id, data });
     }
   }
 
   async function handleCreateRamp(start: { x: number; y: number }, end: { x: number; y: number }) {
     if (!buildingId || !floorId) return;
     if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
-    await rampCrud.create(projectId, buildingId, floorId, {
+    const data = {
       start,
       end,
       startElevation: 0,
       endElevation: DEFAULT_RAMP_RISE,
       width: DEFAULT_RAMP_WIDTH,
       thickness: DEFAULT_RAMP_THICKNESS,
-    });
+    };
+    const id = await rampCrud.create(projectId, buildingId, floorId, data);
+    recordHistory({ action: 'create', kind: 'ramp', id, data });
   }
 
   async function handleCreateRailing(start: { x: number; y: number }, end: { x: number; y: number }) {
     if (!buildingId || !floorId) return;
     if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
-    await railingCrud.create(projectId, buildingId, floorId, {
-      start,
-      end,
-      height: DEFAULT_RAILING_HEIGHT,
-      postSpacing: DEFAULT_RAILING_POST_SPACING,
-    });
+    const data = { start, end, height: DEFAULT_RAILING_HEIGHT, postSpacing: DEFAULT_RAILING_POST_SPACING };
+    const id = await railingCrud.create(projectId, buildingId, floorId, data);
+    recordHistory({ action: 'create', kind: 'railing', id, data });
   }
 
   async function handleCreateStair(points: { x: number; y: number }[]) {
@@ -617,39 +680,37 @@ export default function DesignStudioPage() {
       });
     }
     if (flights.length === 0) return;
-    await stairCrud.create(projectId, buildingId, floorId, {
-      width: DEFAULT_STAIR_WIDTH,
-      flights,
-    });
+    const data = { width: DEFAULT_STAIR_WIDTH, flights };
+    const id = await stairCrud.create(projectId, buildingId, floorId, data);
+    recordHistory({ action: 'create', kind: 'stair', id, data });
   }
 
   async function handleCreateCurtainWall(start: { x: number; y: number }, end: { x: number; y: number }) {
     if (!buildingId || !floorId) return;
     if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
-    await curtainWallCrud.create(projectId, buildingId, floorId, {
+    const data = {
       start,
       end,
       height: DEFAULT_CURTAIN_WALL_HEIGHT,
       thickness: DEFAULT_CURTAIN_WALL_THICKNESS,
       mullionSpacing: DEFAULT_MULLION_SPACING,
-    });
+    };
+    const id = await curtainWallCrud.create(projectId, buildingId, floorId, data);
+    recordHistory({ action: 'create', kind: 'curtainWall', id, data });
   }
 
   async function handleCreateSkylight(roofId: string, center: { x: number; y: number }) {
     if (!buildingId || !floorId) return;
-    await skylightCrud.create(projectId, buildingId, floorId, {
-      roofId,
-      center,
-      width: DEFAULT_SKYLIGHT_WIDTH,
-      depth: DEFAULT_SKYLIGHT_DEPTH,
-    });
+    const data = { roofId, center, width: DEFAULT_SKYLIGHT_WIDTH, depth: DEFAULT_SKYLIGHT_DEPTH };
+    const id = await skylightCrud.create(projectId, buildingId, floorId, data);
+    recordHistory({ action: 'create', kind: 'skylight', id, data });
   }
 
   async function handleCreatePlacedObject(category: PlacedObjectCategory, center: { x: number; y: number }) {
     if (!buildingId || !floorId) return;
     const useLibraryItem = pendingLibraryItem && LIBRARY_CATEGORY_FOR_PLACED[category] === pendingLibraryItem.category;
     const defaults = PLACED_OBJECT_DEFAULTS[category];
-    await placedObjectCrud.create(projectId, buildingId, floorId, {
+    const data = {
       category,
       center,
       label: useLibraryItem ? pendingLibraryItem!.name : defaults.label,
@@ -657,43 +718,39 @@ export default function DesignStudioPage() {
       width: useLibraryItem ? pendingLibraryItem!.defaultWidth : defaults.width,
       depth: useLibraryItem ? (pendingLibraryItem!.defaultDepth ?? defaults.depth) : defaults.depth,
       height: useLibraryItem ? pendingLibraryItem!.defaultHeight : defaults.height,
-    });
+    };
+    const id = await placedObjectCrud.create(projectId, buildingId, floorId, data);
+    recordHistory({ action: 'create', kind: 'placedObject', id, data });
   }
 
   async function handleCreateDimension(start: { x: number; y: number }, end: { x: number; y: number }) {
     if (!buildingId || !floorId) return;
     if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
-    await dimensionCrud.create(projectId, buildingId, floorId, {
-      start,
-      end,
-      offset: 0.4,
-    });
+    const data = { start, end, offset: 0.4 };
+    const id = await dimensionCrud.create(projectId, buildingId, floorId, data);
+    recordHistory({ action: 'create', kind: 'dimension', id, data });
   }
 
   async function handleCreateNote(position: { x: number; y: number }) {
     if (!buildingId || !floorId) return;
-    await noteCrud.create(projectId, buildingId, floorId, {
-      position,
-      text: 'Note',
-    });
+    const data = { position, text: 'Note' };
+    const id = await noteCrud.create(projectId, buildingId, floorId, data);
+    recordHistory({ action: 'create', kind: 'note', id, data });
   }
 
   async function handleCreateGridLine(orientation: 'vertical' | 'horizontal', position: number) {
     if (!buildingId || !floorId) return;
-    await gridLineCrud.create(projectId, buildingId, floorId, {
-      orientation,
-      position,
-    });
+    const data = { orientation, position };
+    const id = await gridLineCrud.create(projectId, buildingId, floorId, data);
+    recordHistory({ action: 'create', kind: 'gridLine', id, data });
   }
 
   async function handleCreateSectionLine(start: { x: number; y: number }, end: { x: number; y: number }) {
     if (!buildingId || !floorId) return;
     if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
-    await sectionLineCrud.create(projectId, buildingId, floorId, {
-      start,
-      end,
-      viewDirection: 'left',
-    });
+    const data = { start, end, viewDirection: 'left' as const };
+    const id = await sectionLineCrud.create(projectId, buildingId, floorId, data);
+    recordHistory({ action: 'create', kind: 'sectionLine', id, data });
   }
 
   function handleViewSection(sectionLineId: string) {
@@ -711,7 +768,7 @@ export default function DesignStudioPage() {
   ) {
     if (!buildingId || !floorId) return;
     const useLibraryItem = pendingLibraryItem && pendingLibraryItem.category === kind;
-    await createOpening(projectId, buildingId, floorId, {
+    const data = {
       wallId,
       kind,
       positionOnWall,
@@ -719,7 +776,9 @@ export default function DesignStudioPage() {
       height: useLibraryItem ? pendingLibraryItem!.defaultHeight : kind === 'DOOR' ? DEFAULT_DOOR_HEIGHT : DEFAULT_WINDOW_HEIGHT,
       sillHeight: kind === 'DOOR' ? 0 : DEFAULT_WINDOW_SILL_HEIGHT,
       ...(kind === 'DOOR' ? { swingDirection: 'hingeStart-in' as const } : {}),
-    });
+    };
+    const id = await createOpening(projectId, buildingId, floorId, data);
+    recordHistory({ action: 'create', kind: 'opening', id, data });
   }
 
   async function handleMoveWallEndpoint(
@@ -728,8 +787,18 @@ export default function DesignStudioPage() {
     point: { x: number; y: number },
   ) {
     if (!buildingId || !floorId) return;
-    await updateWall(projectId, buildingId, floorId, wallId, { [end]: point });
     const wall = walls.find((w) => w.id === wallId);
+    const before = wall ? { [end]: wall[end] } : null;
+    await updateWall(projectId, buildingId, floorId, wallId, { [end]: point });
+    if (wall && before) {
+      recordHistory({
+        action: 'update',
+        kind: 'wall',
+        id: wallId,
+        before,
+        after: { [end]: point },
+      });
+    }
     if (!wall) return;
     const updated = end === 'start' ? { ...wall, start: point } : { ...wall, end: point };
     await rejoinAfter({ id: wallId, start: updated.start, end: updated.end });
@@ -789,6 +858,45 @@ export default function DesignStudioPage() {
       }
     }
 
+    // Snapshot the exact object being deleted, in the same shape
+    // create() expects (no id/floorId/timestamps) — this is what undo
+    // replays through create() to bring it back. Looked up here, right
+    // before the delete calls below, rather than trusting anything
+    // captured earlier in this function, so it reflects the object as
+    // it actually was at the moment of deletion.
+    const deletedData: Record<string, unknown> | undefined = (() => {
+      const strip = (obj: Record<string, unknown> | undefined) => {
+        if (!obj) return undefined;
+        const { id: _id, floorId: _floorId, buildingId: _buildingId, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = obj as any;
+        return rest;
+      };
+      switch (kind) {
+        case 'wall': return strip(walls.find((x) => x.id === id) as any);
+        case 'opening': return strip(openings.find((x) => x.id === id) as any);
+        case 'column': return strip(columns.find((x) => x.id === id) as any);
+        case 'beam': return strip(beams.find((x) => x.id === id) as any);
+        case 'slab': return strip(slabs.find((x) => x.id === id) as any);
+        case 'ceiling': return strip(ceilings.find((x) => x.id === id) as any);
+        case 'foundation': return strip(foundations.find((x) => x.id === id) as any);
+        case 'footing': return strip(footings.find((x) => x.id === id) as any);
+        case 'roof': return strip(roofs.find((x) => x.id === id) as any);
+        case 'ramp': return strip(ramps.find((x) => x.id === id) as any);
+        case 'railing': return strip(railings.find((x) => x.id === id) as any);
+        case 'stair': return strip(stairs.find((x) => x.id === id) as any);
+        case 'balcony': return strip(balconies.find((x) => x.id === id) as any);
+        case 'curtainWall': return strip(curtainWalls.find((x) => x.id === id) as any);
+        case 'skylight': return strip(skylights.find((x) => x.id === id) as any);
+        case 'placedObject': return strip(placedObjects.find((x) => x.id === id) as any);
+        case 'dimension': return strip(dimensions.find((x) => x.id === id) as any);
+        case 'note': return strip(notes.find((x) => x.id === id) as any);
+        case 'gridLine': return strip(gridLines.find((x) => x.id === id) as any);
+        case 'sectionLine': return strip(sectionLines.find((x) => x.id === id) as any);
+        case 'shaft': return strip(shafts.find((x) => x.id === id) as any);
+        case 'siteBoundary': return strip(siteBoundary && siteBoundary.id === id ? (siteBoundary as any) : undefined);
+        default: return undefined;
+      }
+    })();
+
     if (kind === 'wall') await deleteWall(projectId, buildingId, floorId, id);
     if (kind === 'opening') await deleteOpening(projectId, buildingId, floorId, id);
     if (kind === 'column') await deleteColumn(projectId, buildingId, floorId, id);
@@ -811,6 +919,9 @@ export default function DesignStudioPage() {
     if (kind === 'sectionLine') await sectionLineCrud.remove(projectId, buildingId, floorId, id);
     if (kind === 'shaft') await deleteShaft(projectId, buildingId, id);
     if (kind === 'siteBoundary') await deleteSiteBoundary(projectId, buildingId, id);
+    if (deletedData) {
+      recordHistory({ action: 'delete', kind, id, data: deletedData });
+    }
     setSelection(null);
   }
 
@@ -830,86 +941,107 @@ export default function DesignStudioPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-line bg-surface px-3 py-3 sm:px-6">
-        <PageHeader
-          title={t.designStudio.pageTitle}
-          action={
-            <div className="flex flex-wrap items-center gap-2">
-              {pendingLibraryItem && (
-                <span className="rounded-sheet bg-accent-soft px-2 py-1 font-mono text-[11px] text-accent-dark">
-                  {formatTemplate(t.designStudio.usingLibraryItem, { name: pendingLibraryItem.name })}
-                  <button className="ml-2" onClick={() => setPendingLibraryItem(null)}>
-                    ✕
-                  </button>
-                </span>
-              )}
-              <select
-                value={buildingId ?? ''}
-                onChange={(e) => {
-                  setBuildingId(e.target.value);
-                  setFloorId(null);
-                }}
-                className="min-w-0 max-w-full rounded-sheet border border-line-strong px-2 py-1 text-sm"
-              >
-                {buildings.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={floorId ?? ''}
-                onChange={(e) => setFloorId(e.target.value)}
-                className="min-w-0 max-w-full rounded-sheet border border-line-strong px-2 py-1 text-sm"
-              >
-                {floors.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={handleAddFloor}
-                disabled={!buildingId || isAddingFloor}
-                title={t.designStudio.addFloor}
-                className="rounded-sheet border border-line-strong px-2 py-1 text-sm font-medium text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
-              >
-                {isAddingFloor ? '…' : `+ ${t.designStudio.addFloor}`}
+      <div className="border-b border-line bg-surface px-2 py-1.5 sm:px-3">
+        <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto">
+          {pendingLibraryItem && (
+            <span className="flex shrink-0 items-center rounded-sheet bg-accent-soft px-2 py-1 font-mono text-[11px] text-accent-dark">
+              {formatTemplate(t.designStudio.usingLibraryItem, { name: pendingLibraryItem.name })}
+              <button className="ml-1.5" onClick={() => setPendingLibraryItem(null)} aria-label={t.designStudio.closeAriaLabel}>
+                ✕
               </button>
-              <button
-                type="button"
-                onClick={handlePublishToHub}
-                disabled={!buildingId || isPublishingToHub}
-                title={t.designStudio.publishToHub}
-                className="rounded-sheet border border-line-strong px-2 py-1 text-sm font-medium text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
-              >
-                {isPublishingToHub ? '…' : t.designStudio.publishToHub}
-              </button>
+            </span>
+          )}
 
-              <div className="flex items-center rounded-sheet border border-line-strong p-0.5 lg:hidden">
-                <button
-                  onClick={() => setMobileViewMode('2d')}
-                  className={clsx(
-                    'rounded-sheet px-2.5 py-1 text-xs font-medium transition-colors',
-                    mobileViewMode === '2d' ? 'bg-ink text-white' : 'text-ink-muted hover:text-ink',
-                  )}
-                >
-                  {t.designStudio.view2D}
-                </button>
-                <button
-                  onClick={() => setMobileViewMode('3d')}
-                  className={clsx(
-                    'rounded-sheet px-2.5 py-1 text-xs font-medium transition-colors',
-                    mobileViewMode === '3d' ? 'bg-ink text-white' : 'text-ink-muted hover:text-ink',
-                  )}
-                >
-                  {t.designStudio.view3D}
-                </button>
-              </div>
-            </div>
-          }
-        />
+          <div className="flex shrink-0 items-center gap-1 rounded-sheet border border-line-strong px-1.5 py-1">
+            <BuildingIcon size={14} className="shrink-0 text-ink-faint" aria-hidden />
+            <select
+              value={buildingId ?? ''}
+              onChange={(e) => {
+                setBuildingId(e.target.value);
+                setFloorId(null);
+              }}
+              aria-label={t.designStudio.buildingSelectLabel}
+              className="min-w-0 max-w-[7rem] border-none bg-transparent p-0 text-xs focus:outline-none sm:max-w-[10rem]"
+            >
+              {buildings.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-1 rounded-sheet border border-line-strong px-1.5 py-1">
+            <Layers size={14} className="shrink-0 text-ink-faint" aria-hidden />
+            <select
+              value={floorId ?? ''}
+              onChange={(e) => setFloorId(e.target.value)}
+              aria-label={t.designStudio.floorSelectLabel}
+              className="min-w-0 max-w-[6rem] border-none bg-transparent p-0 text-xs focus:outline-none sm:max-w-[8rem]"
+            >
+              {floors.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleAddFloor}
+            disabled={!buildingId || isAddingFloor}
+            title={t.designStudio.addFloor}
+            aria-label={t.designStudio.addFloor}
+            className="flex shrink-0 items-center justify-center rounded-sheet border border-line-strong p-1.5 text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
+          >
+            {isAddingFloor ? (
+              <span className="text-xs">…</span>
+            ) : (
+              <Plus size={14} aria-hidden />
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={handlePublishToHub}
+            disabled={!buildingId || isPublishingToHub}
+            title={t.designStudio.publishToHub}
+            aria-label={t.designStudio.publishToHub}
+            className="flex shrink-0 items-center justify-center rounded-sheet border border-line-strong p-1.5 text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
+          >
+            {isPublishingToHub ? (
+              <span className="text-xs">…</span>
+            ) : (
+              <UploadCloud size={14} aria-hidden />
+            )}
+          </button>
+
+          <div className="ml-auto flex shrink-0 items-center rounded-sheet border border-line-strong p-0.5 lg:hidden">
+            <button
+              onClick={() => setMobileViewMode('2d')}
+              title={t.designStudio.view2D}
+              aria-label={t.designStudio.view2D}
+              className={clsx(
+                'flex items-center justify-center rounded-sheet p-1.5 transition-colors',
+                mobileViewMode === '2d' ? 'bg-ink text-white' : 'text-ink-muted hover:text-ink',
+              )}
+            >
+              <LayoutGrid size={14} aria-hidden />
+            </button>
+            <button
+              onClick={() => setMobileViewMode('3d')}
+              title={t.designStudio.view3D}
+              aria-label={t.designStudio.view3D}
+              className={clsx(
+                'flex items-center justify-center rounded-sheet p-1.5 transition-colors',
+                mobileViewMode === '3d' ? 'bg-ink text-white' : 'text-ink-muted hover:text-ink',
+              )}
+            >
+              <Box3DIcon size={14} aria-hidden />
+            </button>
+          </div>
+        </div>
       </div>
 
       <Toolbar
@@ -917,6 +1049,10 @@ export default function DesignStudioPage() {
         onOpenRooms={() => setShowRooms(true)}
         onOpenLibrary={() => setShowLibrary(true)}
         roomCount={rooms.length}
+        projectId={projectId}
+        buildingId={buildingId}
+        floorId={floorId}
+        hasFloorBelow={belowFloorId != null}
       />
 
       {blockMessage && (
@@ -945,7 +1081,7 @@ export default function DesignStudioPage() {
         </div>
       )}
 
-      <div className="flex flex-1 flex-col gap-3 overflow-y-auto overflow-x-hidden bg-paper p-3 lg:flex-row lg:overflow-hidden">
+      <div className="flex flex-1 flex-col gap-1.5 overflow-y-auto overflow-x-hidden bg-paper p-1.5 lg:flex-row lg:overflow-hidden">
         <div
           className={clsx(
             'relative min-h-[420px] flex-1 lg:min-h-0 lg:block',
@@ -977,6 +1113,8 @@ export default function DesignStudioPage() {
             shafts={shafts}
             siteBoundary={siteBoundary}
             currentFloorLevel={currentFloorLevel}
+            belowFloorWalls={belowFloorWalls}
+            belowFloorColumns={belowFloorColumns}
             onCreateWall={handleCreateWall}
             onCreateBeam={handleCreateBeam}
             onCreateColumn={handleCreateColumn}

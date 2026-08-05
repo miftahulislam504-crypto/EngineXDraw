@@ -2,9 +2,12 @@
 
 import { useEffect, useRef } from 'react';
 import clsx from 'clsx';
+import { Library, ListChecks, Maximize, Minus, Plus as PlusIcon, Redo2, RotateCcw, Trash2, Undo2, X, Layers2 } from 'lucide-react';
 import { useDesignStudioStore, type DesignTool } from '@/lib/design-studio-store';
+import { useDesignHistoryStore } from '@/lib/design-history';
 import { useI18nStore, formatTemplate } from '@/lib/i18n';
 import type { Translations } from '@/lib/i18n/translations';
+import { TOOL_ICONS, GROUP_ICONS } from './toolIcons';
 
 interface ToolGroup {
   groupKey: keyof Translations['designStudio']['toolGroups'];
@@ -26,13 +29,35 @@ export interface ToolbarProps {
   onOpenRooms?: () => void;
   onOpenLibrary?: () => void;
   roomCount?: number;
+  /** Needed to dispatch undo/redo's Firestore calls against the right
+   * scope — same three ids every element mutation in the design page
+   * already takes. Undo/redo buttons are hidden if any is missing
+   * (nothing to act on yet, e.g. before a floor is selected). */
+  projectId?: string;
+  buildingId?: string | null;
+  floorId?: string | null;
+  /** Whether the floor below actually has anything to show — the
+   * floor-below toggle button is disabled (not hidden, so its presence
+   * doesn't jump around as floors change) when this is false, e.g. on
+   * a building's ground floor. */
+  hasFloorBelow?: boolean;
 }
 
-export function Toolbar({ onDeleteSelection, onOpenRooms, onOpenLibrary, roomCount }: ToolbarProps) {
+export function Toolbar({
+  onDeleteSelection,
+  onOpenRooms,
+  onOpenLibrary,
+  roomCount,
+  projectId,
+  buildingId,
+  floorId,
+  hasFloorBelow,
+}: ToolbarProps) {
   const {
     activeTool,
     setActiveTool,
     selection,
+    setSelection,
     explodedView,
     toggleExplodedView,
     openToolGroup,
@@ -40,9 +65,37 @@ export function Toolbar({ onDeleteSelection, onOpenRooms, onOpenLibrary, roomCou
     pixelsPerMeter,
     setPixelsPerMeter,
     resetView,
+    setDrawStart,
+    setPolygonDraft,
+    setStairDraft,
+    showFloorBelow,
+    toggleShowFloorBelow,
   } = useDesignStudioStore();
   const { t } = useI18nStore();
   const containerRef = useRef<HTMLDivElement>(null);
+  const { past, future, undo, redo } = useDesignHistoryStore();
+
+  function handleEscape() {
+    // Same reset the Escape key already does (see FloorPlanCanvas's
+    // window keydown listener) — this button exists so the same
+    // "back out of whatever I'm mid-drawing" action is reachable on a
+    // phone, which has no physical Escape key.
+    setDrawStart(null);
+    setPolygonDraft(null);
+    setStairDraft(null);
+    setSelection(null);
+    setOpenToolGroup(null);
+  }
+
+  function handleUndo() {
+    if (!projectId || !buildingId || !floorId) return;
+    undo(projectId, buildingId, floorId);
+  }
+
+  function handleRedo() {
+    if (!projectId || !buildingId || !floorId) return;
+    redo(projectId, buildingId, floorId);
+  }
 
   // Close the open group's popover when clicking anywhere outside the toolbar.
   useEffect(() => {
@@ -57,20 +110,24 @@ export function Toolbar({ onDeleteSelection, onOpenRooms, onOpenLibrary, roomCou
   }, [openToolGroup, setOpenToolGroup]);
 
   const activeGroup = toolGroups.find((g) => g.tools.includes(activeTool));
+  const ActiveToolIcon = TOOL_ICONS[activeTool];
 
   return (
-    <div ref={containerRef} className="relative border-b border-line bg-surface px-4 py-2">
-      {/* Row 1: sections only */}
-      <div className="flex flex-wrap items-center gap-1.5">
+    <div ref={containerRef} className="relative border-b border-line bg-surface px-2 py-1.5">
+      {/* Row 1: tool group icons, scrollable if they don't all fit. */}
+      <div className="flex flex-nowrap items-center gap-1 overflow-x-auto pb-1">
         {toolGroups.map((group) => {
           const isActiveGroup = activeGroup?.groupKey === group.groupKey;
           const isOpen = openToolGroup === group.groupKey;
+          const GroupIcon = GROUP_ICONS[group.groupKey];
           return (
             <button
               key={group.groupKey}
               onClick={() => setOpenToolGroup(isOpen ? null : group.groupKey)}
+              title={t.designStudio.toolGroups[group.groupKey]}
+              aria-label={t.designStudio.toolGroups[group.groupKey]}
               className={clsx(
-                'rounded-sheet px-2.5 py-1 text-xs font-medium transition-colors',
+                'flex shrink-0 items-center justify-center rounded-sheet p-2 transition-colors',
                 isOpen
                   ? 'bg-ink text-white'
                   : isActiveGroup
@@ -78,47 +135,112 @@ export function Toolbar({ onDeleteSelection, onOpenRooms, onOpenLibrary, roomCou
                     : 'text-ink-muted hover:bg-paper hover:text-ink',
               )}
             >
-              {t.designStudio.toolGroups[group.groupKey]}
+              <GroupIcon size={16} aria-hidden />
             </button>
           );
         })}
 
-        <div className="mx-1 h-5 w-px bg-line" />
+        <div className="mx-0.5 h-6 w-px shrink-0 bg-line" />
 
         <button
           onClick={onOpenRooms}
-          className="rounded-sheet px-2.5 py-1 text-xs font-medium text-ink-muted hover:bg-paper hover:text-ink"
+          title={`${t.designStudio.roomsButton} ${typeof roomCount === 'number' ? `(${roomCount})` : ''}`}
+          aria-label={t.designStudio.roomsButton}
+          className="relative flex shrink-0 items-center justify-center rounded-sheet p-2 text-ink-muted transition-colors hover:bg-paper hover:text-ink"
         >
-          {t.designStudio.roomsButton} {typeof roomCount === 'number' ? `(${roomCount})` : ''}
+          <ListChecks size={16} aria-hidden />
+          {typeof roomCount === 'number' && roomCount > 0 && (
+            <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-[0.875rem] items-center justify-center rounded-full bg-accent px-0.5 font-mono text-[9px] leading-none text-white">
+              {roomCount}
+            </span>
+          )}
         </button>
 
         <button
           onClick={onOpenLibrary}
-          className="rounded-sheet px-2.5 py-1 text-xs font-medium text-ink-muted hover:bg-paper hover:text-ink"
+          title={t.designStudio.libraryButton}
+          aria-label={t.designStudio.libraryButton}
+          className="flex shrink-0 items-center justify-center rounded-sheet p-2 text-ink-muted transition-colors hover:bg-paper hover:text-ink"
         >
-          {t.designStudio.libraryButton}
+          <Library size={16} aria-hidden />
         </button>
 
         <button
           onClick={toggleExplodedView}
+          title={t.designStudio.explodedViewTooltip}
+          aria-label={t.designStudio.explodedView}
           className={clsx(
-            'rounded-sheet px-2.5 py-1 text-xs font-medium transition-colors',
+            'flex shrink-0 items-center justify-center rounded-sheet p-2 transition-colors',
             explodedView ? 'bg-accent-soft text-accent-dark' : 'text-ink-muted hover:bg-paper hover:text-ink',
           )}
-          title={t.designStudio.explodedViewTooltip}
         >
-          {t.designStudio.explodedView}
+          <Maximize size={16} aria-hidden />
         </button>
 
-        <div className="mx-1 h-5 w-px bg-line" />
+        <button
+          onClick={toggleShowFloorBelow}
+          disabled={!hasFloorBelow}
+          title={t.designStudio.showFloorBelowTooltip}
+          aria-label={t.designStudio.showFloorBelow}
+          className={clsx(
+            'flex shrink-0 items-center justify-center rounded-sheet p-2 transition-colors disabled:opacity-30',
+            showFloorBelow && hasFloorBelow
+              ? 'bg-accent-soft text-accent-dark'
+              : 'text-ink-muted hover:bg-paper hover:text-ink',
+          )}
+        >
+          <Layers2 size={16} aria-hidden />
+        </button>
+      </div>
 
-        <div className="flex items-center gap-0.5 rounded-sheet border border-line-strong px-0.5 py-0.5">
+      {/* Row 2: current tool indicator, undo/redo, esc, zoom, reset, delete. */}
+      <div className="flex flex-nowrap items-center gap-1 overflow-x-auto">
+        <span className="flex shrink-0 items-center gap-1 rounded-sheet bg-paper px-2 py-1 font-mono text-[10px] text-ink-muted">
+          <ActiveToolIcon size={12} aria-hidden />
+          {t.tools[activeTool]}
+        </span>
+
+        <div className="mx-0.5 h-5 w-px shrink-0 bg-line" />
+
+        <button
+          onClick={handleUndo}
+          disabled={past.length === 0}
+          title={t.designStudio.undoTooltip}
+          aria-label={t.designStudio.undoTooltip}
+          className="flex shrink-0 items-center justify-center rounded-sheet p-2 text-ink-muted transition-colors hover:bg-paper hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
+        >
+          <Undo2 size={15} aria-hidden />
+        </button>
+
+        <button
+          onClick={handleRedo}
+          disabled={future.length === 0}
+          title={t.designStudio.redoTooltip}
+          aria-label={t.designStudio.redoTooltip}
+          className="flex shrink-0 items-center justify-center rounded-sheet p-2 text-ink-muted transition-colors hover:bg-paper hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
+        >
+          <Redo2 size={15} aria-hidden />
+        </button>
+
+        <button
+          onClick={handleEscape}
+          title={t.designStudio.escTooltip}
+          aria-label={t.designStudio.escTooltip}
+          className="flex shrink-0 items-center justify-center rounded-sheet border border-line-strong p-1.5 text-ink-muted transition-colors hover:bg-paper hover:text-ink"
+        >
+          <X size={14} aria-hidden />
+        </button>
+
+        <div className="mx-0.5 h-5 w-px shrink-0 bg-line" />
+
+        <div className="flex shrink-0 items-center gap-0.5 rounded-sheet border border-line-strong px-0.5 py-0.5">
           <button
             onClick={() => setPixelsPerMeter(pixelsPerMeter - pixelsPerMeter * 0.15)}
             title={t.designStudio.zoomOutTooltip}
-            className="rounded-sheet px-2 py-0.5 text-sm font-medium text-ink-muted hover:bg-paper hover:text-ink"
+            aria-label={t.designStudio.zoomOutTooltip}
+            className="flex items-center justify-center rounded-sheet p-1.5 text-ink-muted hover:bg-paper hover:text-ink"
           >
-            −
+            <Minus size={13} aria-hidden />
           </button>
           <span className="min-w-[3ch] text-center font-mono text-[10px] text-ink-faint">
             {Math.round((pixelsPerMeter / 40) * 100)}%
@@ -126,54 +248,64 @@ export function Toolbar({ onDeleteSelection, onOpenRooms, onOpenLibrary, roomCou
           <button
             onClick={() => setPixelsPerMeter(pixelsPerMeter + pixelsPerMeter * 0.15)}
             title={t.designStudio.zoomInTooltip}
-            className="rounded-sheet px-2 py-0.5 text-sm font-medium text-ink-muted hover:bg-paper hover:text-ink"
+            aria-label={t.designStudio.zoomInTooltip}
+            className="flex items-center justify-center rounded-sheet p-1.5 text-ink-muted hover:bg-paper hover:text-ink"
           >
-            +
+            <PlusIcon size={13} aria-hidden />
           </button>
         </div>
 
         <button
           onClick={resetView}
           title={t.designStudio.resetViewTooltip}
-          className="rounded-sheet px-2.5 py-1 text-xs font-medium text-ink-muted hover:bg-paper hover:text-ink"
+          aria-label={t.designStudio.resetView}
+          className="flex shrink-0 items-center justify-center rounded-sheet p-2 text-ink-muted transition-colors hover:bg-paper hover:text-ink"
         >
-          {t.designStudio.resetView}
+          <RotateCcw size={15} aria-hidden />
         </button>
 
         {selection && (
           <button
             onClick={onDeleteSelection}
-            className="rounded-sheet px-2.5 py-1 text-xs font-medium text-danger hover:bg-danger-soft"
+            title={formatTemplate(t.designStudio.deleteSelection, { kind: t.selectionKinds[selection.kind] })}
+            aria-label={formatTemplate(t.designStudio.deleteSelection, { kind: t.selectionKinds[selection.kind] })}
+            className="flex shrink-0 items-center justify-center rounded-sheet p-2 text-danger transition-colors hover:bg-danger-soft"
           >
-            {formatTemplate(t.designStudio.deleteSelection, { kind: t.selectionKinds[selection.kind] })}
+            <Trash2 size={15} aria-hidden />
           </button>
         )}
+
+        <span className="ml-1 truncate font-mono text-[10px] text-ink-faint">{t.hints[activeTool]}</span>
       </div>
 
-      <div className="mt-1 font-mono text-[11px] text-ink-faint">{t.hints[activeTool]}</div>
-
-      {/* Row 2: floating popover with the open group's tools */}
+      {/* Floating popover with the open group's tools — icon grid. */}
       {openToolGroup && (
-        <div className="absolute left-4 top-full z-30 mt-1.5 flex flex-wrap gap-1 rounded-sheet border border-line-strong bg-surface p-2 shadow-lg">
+        <div className="absolute left-2 top-full z-30 mt-1.5 grid grid-cols-4 gap-1 rounded-sheet border border-line-strong bg-surface p-2 shadow-lg sm:grid-cols-6">
           {toolGroups
             .find((g) => g.groupKey === openToolGroup)
-            ?.tools.map((toolId) => (
-              <button
-                key={toolId}
-                onClick={() => {
-                  setActiveTool(toolId);
-                  setOpenToolGroup(null);
-                }}
-                className={clsx(
-                  'whitespace-nowrap rounded-sheet px-2.5 py-1 text-xs font-medium transition-colors',
-                  activeTool === toolId
-                    ? 'bg-ink text-white'
-                    : 'text-ink-muted hover:bg-paper hover:text-ink',
-                )}
-              >
-                {t.tools[toolId]}
-              </button>
-            ))}
+            ?.tools.map((toolId) => {
+              const ToolIcon = TOOL_ICONS[toolId];
+              return (
+                <button
+                  key={toolId}
+                  onClick={() => {
+                    setActiveTool(toolId);
+                    setOpenToolGroup(null);
+                  }}
+                  title={t.tools[toolId]}
+                  aria-label={t.tools[toolId]}
+                  className={clsx(
+                    'flex flex-col items-center gap-1 whitespace-nowrap rounded-sheet px-2 py-1.5 text-[10px] font-medium transition-colors',
+                    activeTool === toolId
+                      ? 'bg-ink text-white'
+                      : 'text-ink-muted hover:bg-paper hover:text-ink',
+                  )}
+                >
+                  <ToolIcon size={16} aria-hidden />
+                  <span className="max-w-[4rem] truncate">{t.tools[toolId]}</span>
+                </button>
+              );
+            })}
         </div>
       )}
     </div>

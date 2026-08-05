@@ -37,20 +37,48 @@ export function stairTotalSteps(stair: Stair): number {
   return stair.flights.reduce((sum, f) => sum + f.numberOfSteps, 0);
 }
 
-/** A landing's footprint between two consecutive turning flights, plus
- * which flights it connects — for rendering (2D plan + 3D) and for the
- * escape-route/footprint checks that need the stair's full occupied
- * area, not just its flights' centerlines. */
+/** A landing's footprint, plus which flight(s) it connects — for
+ * rendering (2D plan + 3D) and for the escape-route/footprint checks
+ * that need the stair's full occupied area, not just its flights'
+ * centerlines.
+ *
+ * `kind: 'turn'` is the original mid-run case: real floor space between
+ * two flights that change direction (see flightsTurnAtJoint) — nothing
+ * to stand on between two steps of the same straight run, so a
+ * non-turning joint never gets one of these.
+ *
+ * `kind: 'bottom' | 'top'` is the platform at either END of the stair —
+ * where a person actually starts climbing (bottom) or steps off onto
+ * the floor (top). Every stair gets both of these regardless of how
+ * many flights it has or whether any of them turn; a single straight
+ * flight (the common case drawn with one click-click, same gesture as
+ * a wall) still needs a place to stand at the top before stepping onto
+ * the floor, which is what was missing — see FloorPlanCanvas's stair
+ * tool and the design page's screenshot report. flightIndexBefore/After
+ * point at the one adjoining flight for these; the other index is -1
+ * since there's no flight on that side. */
 export interface StairLanding {
+  kind: 'turn' | 'bottom' | 'top';
   boundary: Point2D[];
   /** Elevation (meters above the stair's own floor level) of the
    * landing's walking surface — the top of flight[flightIndexBefore],
    * i.e. where someone stands after climbing that flight and before
-   * starting the next one. */
+   * starting the next one. The bottom landing is elevation 0 (the
+   * stair's own floor level); the top landing is the stair's total
+   * rise (the floor above). */
   elevation: number;
   flightIndexBefore: number;
   flightIndexAfter: number;
 }
+
+/** Depth (meters, along the direction of travel) of the platform added
+ * at each end of a stair. BNBC 2020 and most residential codes want a
+ * landing at least as deep as the stair is wide; using the stair's own
+ * width as the depth keeps this proportional (a wider stair gets a
+ * proportionally deeper landing) while matching that minimum exactly
+ * rather than a fixed number that would be oversized for a narrow
+ * stair or undersized for a wide one. */
+const MIN_END_LANDING_DEPTH = 0.9; // meters — floor below which a platform reads as unusably small even for a narrow stair
 
 /** Builds the landing footprint between flight[i] and flight[i+1], for
  * every consecutive pair whose direction actually changes (see
@@ -80,6 +108,39 @@ export interface StairLanding {
  * flight[i]'s end when they turn (see FloorPlanCanvas's stair tool). */
 export function deriveStairLandings(stair: Stair): StairLanding[] {
   const landings: StairLanding[] = [];
+  if (stair.flights.length === 0) return landings;
+
+  const half = stair.width / 2;
+  const endLandingDepth = Math.max(MIN_END_LANDING_DEPTH, stair.width);
+
+  // Bottom landing: a platform at the very start of flight 0, in the
+  // direction opposite travel (so it sits before the first step, not
+  // overlapping it) — where a person stands before starting to climb.
+  const first = stair.flights[0];
+  {
+    const dx = first.end.x - first.start.x;
+    const dy = first.end.y - first.start.y;
+    const len = Math.hypot(dx, dy) || 1e-9;
+    const ux = dx / len;
+    const uy = dy / len;
+    const nx = -uy;
+    const ny = ux;
+    const backX = first.start.x - ux * endLandingDepth;
+    const backY = first.start.y - uy * endLandingDepth;
+    landings.push({
+      kind: 'bottom',
+      boundary: [
+        { x: first.start.x + nx * half, y: first.start.y + ny * half },
+        { x: first.start.x - nx * half, y: first.start.y - ny * half },
+        { x: backX - nx * half, y: backY - ny * half },
+        { x: backX + nx * half, y: backY + ny * half },
+      ],
+      elevation: 0,
+      flightIndexBefore: -1,
+      flightIndexAfter: 0,
+    });
+  }
+
   let elevationSoFar = 0;
   for (let i = 0; i < stair.flights.length - 1; i++) {
     const a = stair.flights[i];
@@ -95,7 +156,6 @@ export function deriveStairLandings(stair: Stair): StairLanding[] {
     // Perpendicular to the gap direction — the landing's width axis.
     const px = -gy;
     const py = gx;
-    const half = stair.width / 2;
 
     const corners: Point2D[] = [
       { x: a.end.x + px * half, y: a.end.y + py * half },
@@ -105,12 +165,44 @@ export function deriveStairLandings(stair: Stair): StairLanding[] {
     ];
 
     landings.push({
+      kind: 'turn',
       boundary: corners,
       elevation: elevationSoFar,
       flightIndexBefore: i,
       flightIndexAfter: i + 1,
     });
   }
+
+  // Top landing: a platform at the very end of the last flight, in the
+  // direction travel continues — where a person steps off onto the
+  // floor above. This is the one that was missing for a plain
+  // single-flight stair (the common case): without it, the stair just
+  // stops at the last step with nowhere solid drawn to step onto.
+  const last = stair.flights[stair.flights.length - 1];
+  {
+    const dx = last.end.x - last.start.x;
+    const dy = last.end.y - last.start.y;
+    const len = Math.hypot(dx, dy) || 1e-9;
+    const ux = dx / len;
+    const uy = dy / len;
+    const nx = -uy;
+    const ny = ux;
+    const frontX = last.end.x + ux * endLandingDepth;
+    const frontY = last.end.y + uy * endLandingDepth;
+    landings.push({
+      kind: 'top',
+      boundary: [
+        { x: last.end.x + nx * half, y: last.end.y + ny * half },
+        { x: last.end.x - nx * half, y: last.end.y - ny * half },
+        { x: frontX - nx * half, y: frontY - ny * half },
+        { x: frontX + nx * half, y: frontY + ny * half },
+      ],
+      elevation: stairTotalRise(stair),
+      flightIndexBefore: stair.flights.length - 1,
+      flightIndexAfter: -1,
+    });
+  }
+
   return landings;
 }
 

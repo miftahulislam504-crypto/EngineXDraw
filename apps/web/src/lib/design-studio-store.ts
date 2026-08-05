@@ -135,6 +135,16 @@ interface DesignStudioState {
   /** Mobile/narrow-screen view mode: which of the 2D canvas / 3D view is shown full-size. */
   mobileViewMode: '2d' | '3d';
   setMobileViewMode: (mode: '2d' | '3d') => void;
+
+  /** Whether the floor immediately below the one being edited is drawn
+   * as a faint reference (walls + columns only, since those are what
+   * this floor's own walls/columns need to line up with — see the
+   * design page's belowFloorWalls/belowFloorColumns props). Off by
+   * default: it's a reference aid for the specific moment of starting a
+   * new floor on top of an existing one, not something that should
+   * visually clutter every session by default. */
+  showFloorBelow: boolean;
+  toggleShowFloorBelow: () => void;
 }
 
 export const useDesignStudioStore = create<DesignStudioState>((set) => ({
@@ -173,4 +183,7 @@ export const useDesignStudioStore = create<DesignStudioState>((set) => ({
 
   mobileViewMode: '2d',
   setMobileViewMode: (mode) => set({ mobileViewMode: mode }),
+
+  showFloorBelow: false,
+  toggleShowFloorBelow: () => set((s) => ({ showFloorBelow: !s.showFloorBelow })),
 }));

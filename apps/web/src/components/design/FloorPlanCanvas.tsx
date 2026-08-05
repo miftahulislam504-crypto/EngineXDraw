@@ -75,6 +75,14 @@ export interface FloorPlanCanvasProps {
   shafts: Shaft[];
   siteBoundary: SiteBoundary | null;
   currentFloorLevel: number;
+  /** Walls/columns from the floor directly below the one currently
+   * being edited, drawn as a faint dashed reference layer (never
+   * interactive — no click/select/drag) so the person can line up new
+   * walls and columns with what's already load-bearing underneath
+   * them, instead of guessing or measuring by eye. Empty/omitted when
+   * there is no floor below, or when the person has the toggle off. */
+  belowFloorWalls?: Wall[];
+  belowFloorColumns?: Column[];
   onCreateWall: (start: Point2D, end: Point2D) => void;
   onCreateBeam: (start: Point2D, end: Point2D) => void;
   onCreateColumn: (center: Point2D) => void;
@@ -182,6 +190,8 @@ export function FloorPlanCanvas({
   shafts,
   siteBoundary,
   currentFloorLevel,
+  belowFloorWalls,
+  belowFloorColumns,
   onCreateWall,
   onCreateBeam,
   onCreateColumn,
@@ -221,6 +231,7 @@ export function FloorPlanCanvas({
     setPixelsPerMeter,
     panOffset,
     setPanOffset,
+    showFloorBelow,
   } = useDesignStudioStore();
 
   const [snappedCursor, setSnappedCursor] = useState<Point2D | null>(null);
@@ -299,6 +310,19 @@ export function FloorPlanCanvas({
 
   const handleStageMouseDown = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+      // A second finger touching down starts a pinch, not a pan — bail
+      // out before the pan-start logic below claims it, and stop the
+      // browser's native zoom gesture from engaging at the same time
+      // (some browsers begin their own pinch handling right at
+      // touchstart, not just on the first touchmove).
+      const nativeEvt = e.evt as TouchEvent;
+      if (nativeEvt.touches && nativeEvt.touches.length >= 2) {
+        if (nativeEvt.cancelable) nativeEvt.preventDefault();
+        isPanningRef.current = false;
+        panStartRef.current = null;
+        setIsPanning(false);
+        return;
+      }
       if (activeTool !== 'select') return;
       // Only start a pan if the empty stage/background was hit, not a
       // shape (wall, endpoint handle, placed object, etc.) — those need
@@ -421,6 +445,15 @@ export function FloorPlanCanvas({
     // it takes priority over the single-finger pan/draw logic below.
     const nativeEvt = e.evt as TouchEvent;
     if (nativeEvt.touches && nativeEvt.touches.length === 2) {
+      // Stop the browser's own native pinch-zoom from firing alongside
+      // this — without this, a two-finger pinch meant for the canvas's
+      // own zoom (via pixelsPerMeter, below) also zoomed the whole page
+      // at the same time, since nothing told the browser this gesture
+      // was already being handled. touch-action: none on the container
+      // (see the Stage wrapper below) stops most of this at the CSS
+      // level, but Safari in particular still needs the JS-level
+      // preventDefault as a second line of defense.
+      if (nativeEvt.cancelable) nativeEvt.preventDefault();
       const stage = e.target.getStage();
       const rect = stage?.container().getBoundingClientRect();
       if (stage && rect) {
@@ -709,7 +742,7 @@ export function FloorPlanCanvas({
   }
 
   return (
-    <div ref={containerRef} className="h-full w-full min-h-[320px] min-w-0">
+    <div ref={containerRef} className="h-full w-full min-h-[320px] min-w-0 touch-none overscroll-none">
       <Stage
         width={width}
         height={height}
@@ -730,9 +763,9 @@ export function FloorPlanCanvas({
         onTap={readOnly ? undefined : handleStageClick}
         className={
           readOnly
-            ? 'rounded-sheet border border-line bg-white'
+            ? 'touch-none rounded-sheet border border-line bg-white'
             : clsx(
-                'rounded-sheet border border-line bg-white',
+                'touch-none rounded-sheet border border-line bg-white',
                 isPanning ? 'cursor-grabbing' : activeTool === 'select' ? 'cursor-grab' : 'cursor-crosshair',
               )
         }
@@ -744,6 +777,55 @@ export function FloorPlanCanvas({
           <Line points={[0, origin.y, width, origin.y]} stroke="#D8DEE9" strokeWidth={1.5} />
           <Line points={[origin.x, 0, origin.x, height]} stroke="#D8DEE9" strokeWidth={1.5} />
         </Layer>
+
+        {/* Floor-below reference layer (Phase 7) — walls/columns from the
+            floor directly underneath, faint and dashed, never
+            interactive. Purpose is purely visual alignment while
+            drawing this floor's own walls/columns on top of what
+            already carries load beneath them — see the toggle in
+            Toolbar and belowFloorWalls/belowFloorColumns in page.tsx
+            for how this floor's data gets here. Sits in its own
+            non-listening layer between the grid and the real elements
+            so it never intercepts a click/tap meant for this floor's
+            own geometry. */}
+        {showFloorBelow && (belowFloorWalls?.length || belowFloorColumns?.length) ? (
+          <Layer listening={false}>
+            {(belowFloorWalls ?? []).map((w) => {
+              const a = toPixels(w.start);
+              const b = toPixels(w.end);
+              return (
+                <Line
+                  key={`ghost-wall-${w.id}`}
+                  points={[a.x, a.y, b.x, b.y]}
+                  stroke="#9AA3B2"
+                  strokeWidth={Math.max(2, w.thickness * pixelsPerMeter)}
+                  dash={[6, 5]}
+                  opacity={0.35}
+                  lineCap="round"
+                />
+              );
+            })}
+            {(belowFloorColumns ?? []).map((c) => {
+              const center = toPixels(c.center);
+              const halfW = (c.width * pixelsPerMeter) / 2;
+              const halfD = (c.depth * pixelsPerMeter) / 2;
+              return (
+                <Rect
+                  key={`ghost-column-${c.id}`}
+                  x={center.x - halfW}
+                  y={center.y - halfD}
+                  width={halfW * 2}
+                  height={halfD * 2}
+                  stroke="#9AA3B2"
+                  strokeWidth={1.5}
+                  dash={[4, 3]}
+                  opacity={0.35}
+                  fill="rgba(154,163,178,0.12)"
+                />
+              );
+            })}
+          </Layer>
+        ) : null}
 
         <Layer>
           {rooms.map((room) => {

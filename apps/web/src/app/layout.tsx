@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Space_Grotesk, Inter, JetBrains_Mono, Noto_Sans_Bengali } from 'next/font/google';
 import './globals.css';
 import { I18nHydrator } from '@/components/I18nHydrator';
@@ -34,6 +34,21 @@ const notoSansBengali = Noto_Sans_Bengali({
 export const metadata: Metadata = {
   title: 'EngineX Draw',
   description: 'Think the building, not the drawing.',
+};
+
+// Pins the whole app's page-level zoom at 1x and disables the browser's
+// native pinch-to-zoom gesture. Without this, a two-finger pinch meant
+// to zoom the Design Studio's drawing canvas (which has its own
+// internal zoom, driven by pixelsPerMeter) instead zoomed the entire
+// page — toolbar, header and all — leaving the person stuck zoomed in
+// on the whole app rather than just the drawing. The canvas keeps its
+// own zoom via FloorPlanCanvas's wheel/pinch handling, which works
+// against pixelsPerMeter regardless of this page-level lock.
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default function RootLayout({

@@ -175,6 +175,8 @@ export interface Translations {
     deleteSelection: string; // use {kind} as placeholder — kind is a translated selectionKinds value
     closeAriaLabel: string;
     northLabel: string; // label next to the north-angle input overlaid on the floor plan (Phase C)
+    buildingSelectLabel: string; // aria-label for the icon-only building selector in the compact header
+    floorSelectLabel: string; // aria-label for the icon-only floor selector in the compact header
     view2D: string;
     view3D: string;
     addFloor: string;
@@ -183,6 +185,11 @@ export interface Translations {
     publishToHubFailure: string; // use {error} placeholder
     resetView: string;
     resetViewTooltip: string;
+    undoTooltip: string; // aria-label/tooltip for the Toolbar's Undo button (Phase 6)
+    redoTooltip: string; // aria-label/tooltip for the Toolbar's Redo button (Phase 6)
+    escTooltip: string; // aria-label/tooltip for the Toolbar's Esc/Stop button — clears any in-progress draw and the current selection (Phase 6)
+    showFloorBelow: string; // aria-label for the Toolbar's floor-below reference toggle (Phase 7)
+    showFloorBelowTooltip: string; // tooltip explaining the floor-below reference toggle (Phase 7)
     zoomInTooltip: string;
     zoomOutTooltip: string;
     structuralBlock: {

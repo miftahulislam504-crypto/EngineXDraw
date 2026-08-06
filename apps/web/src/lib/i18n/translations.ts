@@ -383,6 +383,8 @@ export interface Translations {
     noSectionLinesYet: string;
     scaleLabel: string;
     scaleLabelPlaceholder: string;
+    suggestScale: string;
+    suggestScaleNeedsWalls: string;
     drawnBy: string;
     date: string;
     create: string;

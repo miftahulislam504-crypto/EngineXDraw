@@ -492,6 +492,8 @@ export const en: Translations = {
     noSectionLinesYet: 'No section lines yet — draw one in the Design Studio first.',
     scaleLabel: 'Scale',
     scaleLabelPlaceholder: 'e.g. 1:100',
+    suggestScale: 'Suggest',
+    suggestScaleNeedsWalls: 'Draw walls on this floor first to get a scale suggestion.',
     drawnBy: 'Drawn by',
     date: 'Date',
     create: 'Create Sheet',

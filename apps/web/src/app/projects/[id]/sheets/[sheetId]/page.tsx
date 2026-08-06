@@ -109,32 +109,38 @@ export default function SheetDetailPage() {
   const floorPlanFloorLevel = floors.find((f) => f.id === sheet?.floorId)?.level ?? 0;
 
   const canExport = sheet?.viewportType === 'floorPlan' ? !!stage : !!canvasEl;
+  const [isExporting, setIsExporting] = useState(false);
 
-  function handleExport() {
+  async function handleExport() {
     if (!sheet) return;
-    if (sheet.viewportType === 'floorPlan') {
-      if (!stage) return;
-      // toDataURL is captured at 2x for print sharpness — its actual
-      // pixel dimensions are 2x the Stage's own width()/height(), so the
-      // dimensions passed here must match, or the true-scale computation
-      // in exportSheetToPdf would read every pixel as covering half the
-      // real-world distance it actually does (a silent 2x scale error).
-      const pixelRatio = 2;
-      exportSheetToPdf(sheet, {
-        dataUrl: stage.toDataURL({ pixelRatio }),
-        width: stage.width() * pixelRatio,
-        height: stage.height() * pixelRatio,
-        metersPerPixel: stagePixelsPerMeter ? 1 / (stagePixelsPerMeter * pixelRatio) : undefined,
+    setIsExporting(true);
+    try {
+      if (sheet.viewportType === 'floorPlan') {
+        if (!stage) return;
+        // toDataURL is captured at 2x for print sharpness — its actual
+        // pixel dimensions are 2x the Stage's own width()/height(), so the
+        // dimensions passed here must match, or the true-scale computation
+        // in exportSheetToPdf would read every pixel as covering half the
+        // real-world distance it actually does (a silent 2x scale error).
+        const pixelRatio = 2;
+        await exportSheetToPdf(sheet, {
+          dataUrl: stage.toDataURL({ pixelRatio }),
+          width: stage.width() * pixelRatio,
+          height: stage.height() * pixelRatio,
+          metersPerPixel: stagePixelsPerMeter ? 1 / (stagePixelsPerMeter * pixelRatio) : undefined,
+        });
+        return;
+      }
+      if (!canvasEl) return;
+      await exportSheetToPdf(sheet, {
+        dataUrl: canvasEl.toDataURL('image/png'),
+        width: canvasEl.width,
+        height: canvasEl.height,
+        metersPerPixel: canvasMetersPerPixel,
       });
-      return;
+    } finally {
+      setIsExporting(false);
     }
-    if (!canvasEl) return;
-    exportSheetToPdf(sheet, {
-      dataUrl: canvasEl.toDataURL('image/png'),
-      width: canvasEl.width,
-      height: canvasEl.height,
-      metersPerPixel: canvasMetersPerPixel,
-    });
   }
 
   return (
@@ -147,8 +153,8 @@ export default function SheetDetailPage() {
         }
         title={sheet?.name ?? '…'}
         action={
-          <Button onClick={handleExport} disabled={!canExport || !sheet}>
-            {t.sheetsPage.exportPdf}
+          <Button onClick={handleExport} disabled={!canExport || !sheet || isExporting}>
+            {isExporting ? t.common.loading : t.sheetsPage.exportPdf}
           </Button>
         }
       />

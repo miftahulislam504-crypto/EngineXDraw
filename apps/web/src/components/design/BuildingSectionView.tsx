@@ -42,12 +42,19 @@ export interface BuildingSectionViewProps {
   libraryItems?: LibraryItem[];
 }
 
+/** See the identical bridge in BuildingElevationView.tsx for why
+ * dividing by gl.getPixelRatio() is required here — in short, `1/zoom`
+ * is world-units per CSS pixel, but sheet-export.ts needs world-units
+ * per BACKING-buffer pixel (canvasEl.width/height, what toDataURL()
+ * actually captures), which differ by exactly the renderer's pixel
+ * ratio on any screen with devicePixelRatio > 1. */
 function CanvasRefBridge({ onReady }: { onReady?: (canvas: HTMLCanvasElement, metersPerPixel: number) => void }) {
   const { gl, camera } = useThree();
   const lastReported = useRef<number | null>(null);
   useFrame(() => {
     const zoom = (camera as THREE.OrthographicCamera).zoom || 1;
-    const metersPerPixel = 1 / zoom;
+    const pixelRatio = gl.getPixelRatio() || 1;
+    const metersPerPixel = 1 / zoom / pixelRatio;
     if (lastReported.current === null || Math.abs(lastReported.current - metersPerPixel) > 1e-6) {
       lastReported.current = metersPerPixel;
       onReady?.(gl.domElement, metersPerPixel);

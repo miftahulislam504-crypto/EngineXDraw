@@ -4,11 +4,12 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button, Input, PageHeader } from '@archibim/shared-ui';
-import type { Floor, SectionLine, Sheet, SheetSize, SheetViewportType } from '@archibim/object-model';
+import type { Floor, SectionLine, Sheet, SheetSize, SheetViewportType, Wall } from '@archibim/object-model';
 import { subscribeToBuildings } from '@/lib/projects';
-import { subscribeToFloors, sectionLineCrud } from '@/lib/floors';
+import { subscribeToFloors, subscribeToWalls, sectionLineCrud } from '@/lib/floors';
 import { subscribeToSheets, createSheet, deleteSheet, generateStandardSheetSet } from '@/lib/sheets';
 import { useI18nStore } from '@/lib/i18n';
+import { suggestScale, formatScaleLabel, computeWallsFootprintSpan } from '@/lib/scale-suggestion';
 
 const SIZES: SheetSize[] = ['A4', 'A3', 'A1'];
 const DIRECTIONS = ['N', 'E', 'S', 'W'] as const;
@@ -35,6 +36,7 @@ export default function SheetsPage() {
   const [date, setDate] = useState('');
   const [isGeneratingSet, setIsGeneratingSet] = useState(false);
   const [generateResult, setGenerateResult] = useState<{ created: number; skipped: number } | null>(null);
+  const [selectedFloorWalls, setSelectedFloorWalls] = useState<Wall[]>([]);
 
   useEffect(() => {
     return subscribeToBuildings(projectId, (bs) => {
@@ -64,6 +66,17 @@ export default function SheetsPage() {
     if (!buildingId) return;
     return subscribeToSheets(projectId, buildingId, setSheets);
   }, [projectId, buildingId]);
+
+  // Scoped to just the floor currently picked in the "New Sheet" form —
+  // only needed to power the scale-suggestion button below, so there's
+  // no reason to subscribe to every floor's walls up front.
+  useEffect(() => {
+    if (!buildingId || !floorId || viewportType !== 'floorPlan') {
+      setSelectedFloorWalls([]);
+      return;
+    }
+    return subscribeToWalls(projectId, buildingId, floorId, setSelectedFloorWalls);
+  }, [projectId, buildingId, floorId, viewportType]);
 
   const allSectionLines = floors.flatMap((floor) =>
     (sectionLinesByFloor[floor.id] ?? []).map((line) => ({ floor, line })),
@@ -285,12 +298,37 @@ export default function SheetsPage() {
                 </label>
               ))}
 
-            <Input
-              label={t.sheetsPage.scaleLabel}
-              value={scaleLabel}
-              onChange={(e) => setScaleLabel(e.target.value)}
-              placeholder={t.sheetsPage.scaleLabelPlaceholder}
-            />
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-end gap-2">
+                <div className="min-w-0 flex-1">
+                  <Input
+                    label={t.sheetsPage.scaleLabel}
+                    value={scaleLabel}
+                    onChange={(e) => setScaleLabel(e.target.value)}
+                    placeholder={t.sheetsPage.scaleLabelPlaceholder}
+                  />
+                </div>
+                {viewportType === 'floorPlan' && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={selectedFloorWalls.length === 0}
+                    onClick={() => {
+                      const span = computeWallsFootprintSpan(selectedFloorWalls);
+                      if (!span) return;
+                      const ratio = suggestScale(span.widthM, span.depthM, size);
+                      setScaleLabel(formatScaleLabel(ratio));
+                    }}
+                  >
+                    {t.sheetsPage.suggestScale}
+                  </Button>
+                )}
+              </div>
+              {viewportType === 'floorPlan' && selectedFloorWalls.length === 0 && (
+                <p className="text-xs text-ink-faint">{t.sheetsPage.suggestScaleNeedsWalls}</p>
+              )}
+            </div>
             <Input label={t.sheetsPage.drawnBy} value={drawnBy} onChange={(e) => setDrawnBy(e.target.value)} />
             <Input label={t.sheetsPage.date} value={date} onChange={(e) => setDate(e.target.value)} placeholder="YYYY-MM-DD" />
 

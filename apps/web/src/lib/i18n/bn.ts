@@ -492,6 +492,8 @@ export const bn: Translations = {
     noSectionLinesYet: 'এখনো কোনো সেকশন লাইন নেই — প্রথমে ডিজাইন স্টুডিওতে একটা আঁকুন।',
     scaleLabel: 'স্কেল',
     scaleLabelPlaceholder: 'যেমন 1:100',
+    suggestScale: 'সাজেস্ট করুন',
+    suggestScaleNeedsWalls: 'স্কেল সাজেশন পেতে আগে এই ফ্লোরে দেয়াল আঁকুন।',
     drawnBy: 'আঁকিয়েছেন',
     date: 'তারিখ',
     create: 'শিট তৈরি করুন',

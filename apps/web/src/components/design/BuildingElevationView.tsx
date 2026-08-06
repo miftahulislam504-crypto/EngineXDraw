@@ -57,16 +57,29 @@ export interface BuildingElevationViewProps {
 }
 
 /** Reports the live canvas element plus how many world-units (meters, in
- * this app's convention) one screen pixel represents for the current
- * orthographic camera zoom — see OrthographicCamera's own frustum setup
- * (left/right/top/bottom = canvas size in CSS pixels, sized by drei) for
- * why `1 / zoom` is exactly that conversion, not an approximation. */
+ * this app's convention) one CAPTURED pixel represents — i.e. one pixel
+ * of the canvas's actual backing buffer (canvasEl.width/height, what
+ * toDataURL() reads), not one CSS/logical pixel.
+ *
+ * `1 / zoom` from OrthographicCamera gives world-units per CSS pixel
+ * (drei sizes the frustum to the canvas's CSS width/height). But this
+ * Canvas renders at `dpr={[1, 1.5]}` — the renderer can back the same
+ * CSS size with up to 1.5x as many actual pixels depending on the
+ * device's pixel ratio. Dividing by gl.getPixelRatio() converts
+ * world-units-per-CSS-pixel into world-units-per-BACKING-pixel, which
+ * is the number sheet-export.ts actually needs since it multiplies by
+ * image.width/height (the captured canvas's real pixel dimensions, always
+ * CSS size * pixel ratio). Skipping this division was silently wrong on
+ * any screen with devicePixelRatio > 1: true-scale placement either
+ * undersized the drawing or rejected it as "doesn't fit" and fell back
+ * to aspect-fit. */
 function CanvasRefBridge({ onReady }: { onReady?: (canvas: HTMLCanvasElement, metersPerPixel: number) => void }) {
   const { gl, camera } = useThree();
   const lastReported = useRef<number | null>(null);
   useFrame(() => {
     const zoom = (camera as THREE.OrthographicCamera).zoom || 1;
-    const metersPerPixel = 1 / zoom;
+    const pixelRatio = gl.getPixelRatio() || 1;
+    const metersPerPixel = 1 / zoom / pixelRatio;
     // Compare with a small epsilon rather than strict equality — zoom is
     // a float that OrbitControls nudges continuously while the person is
     // actively dragging/scrolling, so exact equality would still fire

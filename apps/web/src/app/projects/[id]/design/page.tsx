@@ -942,82 +942,89 @@ export default function DesignStudioPage() {
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-line bg-surface px-2 py-1.5 sm:px-3">
-        <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto">
-          {pendingLibraryItem && (
-            <span className="flex shrink-0 items-center rounded-sheet bg-accent-soft px-2 py-1 font-mono text-[11px] text-accent-dark">
-              {formatTemplate(t.designStudio.usingLibraryItem, { name: pendingLibraryItem.name })}
-              <button className="ml-1.5" onClick={() => setPendingLibraryItem(null)} aria-label={t.designStudio.closeAriaLabel}>
-                ✕
-              </button>
-            </span>
-          )}
+        <div className="flex flex-nowrap items-center gap-1.5">
+          <div className="flex flex-1 flex-nowrap items-center gap-1.5 overflow-x-auto">
+            {pendingLibraryItem && (
+              <span className="flex shrink-0 items-center rounded-sheet bg-accent-soft px-2 py-1 font-mono text-[11px] text-accent-dark">
+                {formatTemplate(t.designStudio.usingLibraryItem, { name: pendingLibraryItem.name })}
+                <button className="ml-1.5" onClick={() => setPendingLibraryItem(null)} aria-label={t.designStudio.closeAriaLabel}>
+                  ✕
+                </button>
+              </span>
+            )}
 
-          <div className="flex shrink-0 items-center gap-1 rounded-sheet border border-line-strong px-1.5 py-1">
-            <BuildingIcon size={14} className="shrink-0 text-ink-faint" aria-hidden />
-            <select
-              value={buildingId ?? ''}
-              onChange={(e) => {
-                setBuildingId(e.target.value);
-                setFloorId(null);
-              }}
-              aria-label={t.designStudio.buildingSelectLabel}
-              className="min-w-0 max-w-[7rem] border-none bg-transparent p-0 text-xs focus:outline-none sm:max-w-[10rem]"
+            <div className="flex shrink-0 items-center gap-1 rounded-sheet border border-line-strong px-1.5 py-1">
+              <BuildingIcon size={14} className="shrink-0 text-ink-faint" aria-hidden />
+              <select
+                value={buildingId ?? ''}
+                onChange={(e) => {
+                  setBuildingId(e.target.value);
+                  setFloorId(null);
+                }}
+                aria-label={t.designStudio.buildingSelectLabel}
+                className="min-w-0 max-w-[7rem] border-none bg-transparent p-0 text-xs focus:outline-none sm:max-w-[10rem]"
+              >
+                {buildings.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-1 rounded-sheet border border-line-strong px-1.5 py-1">
+              <Layers size={14} className="shrink-0 text-ink-faint" aria-hidden />
+              <select
+                value={floorId ?? ''}
+                onChange={(e) => setFloorId(e.target.value)}
+                aria-label={t.designStudio.floorSelectLabel}
+                className="min-w-0 max-w-[6rem] border-none bg-transparent p-0 text-xs focus:outline-none sm:max-w-[8rem]"
+              >
+                {floors.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAddFloor}
+              disabled={!buildingId || isAddingFloor}
+              title={t.designStudio.addFloor}
+              aria-label={t.designStudio.addFloor}
+              className="flex shrink-0 items-center justify-center rounded-sheet border border-line-strong p-1.5 text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
             >
-              {buildings.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
+              {isAddingFloor ? (
+                <span className="text-xs">…</span>
+              ) : (
+                <Plus size={14} aria-hidden />
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={handlePublishToHub}
+              disabled={!buildingId || isPublishingToHub}
+              title={t.designStudio.publishToHub}
+              aria-label={t.designStudio.publishToHub}
+              className="flex shrink-0 items-center justify-center rounded-sheet border border-line-strong p-1.5 text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
+            >
+              {isPublishingToHub ? (
+                <span className="text-xs">…</span>
+              ) : (
+                <UploadCloud size={14} aria-hidden />
+              )}
+            </button>
           </div>
 
-          <div className="flex shrink-0 items-center gap-1 rounded-sheet border border-line-strong px-1.5 py-1">
-            <Layers size={14} className="shrink-0 text-ink-faint" aria-hidden />
-            <select
-              value={floorId ?? ''}
-              onChange={(e) => setFloorId(e.target.value)}
-              aria-label={t.designStudio.floorSelectLabel}
-              className="min-w-0 max-w-[6rem] border-none bg-transparent p-0 text-xs focus:outline-none sm:max-w-[8rem]"
-            >
-              {floors.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleAddFloor}
-            disabled={!buildingId || isAddingFloor}
-            title={t.designStudio.addFloor}
-            aria-label={t.designStudio.addFloor}
-            className="flex shrink-0 items-center justify-center rounded-sheet border border-line-strong p-1.5 text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
-          >
-            {isAddingFloor ? (
-              <span className="text-xs">…</span>
-            ) : (
-              <Plus size={14} aria-hidden />
-            )}
-          </button>
-
-          <button
-            type="button"
-            onClick={handlePublishToHub}
-            disabled={!buildingId || isPublishingToHub}
-            title={t.designStudio.publishToHub}
-            aria-label={t.designStudio.publishToHub}
-            className="flex shrink-0 items-center justify-center rounded-sheet border border-line-strong p-1.5 text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
-          >
-            {isPublishingToHub ? (
-              <span className="text-xs">…</span>
-            ) : (
-              <UploadCloud size={14} aria-hidden />
-            )}
-          </button>
-
-          <div className="ml-auto flex shrink-0 items-center rounded-sheet border border-line-strong p-0.5 lg:hidden">
+          {/* Pinned outside the scrolling row above (not just pushed
+              right with ml-auto inside it) so it can never end up
+              scrolled off-screen on a narrow phone when the building/
+              floor names are long — that was hiding this toggle
+              entirely on some screens. */}
+          <div className="flex shrink-0 items-center rounded-sheet border border-line-strong p-0.5 lg:hidden">
             <button
               onClick={() => setMobileViewMode('2d')}
               title={t.designStudio.view2D}

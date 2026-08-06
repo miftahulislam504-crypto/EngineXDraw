@@ -79,7 +79,12 @@ export function Toolbar({
     // Same reset the Escape key already does (see FloorPlanCanvas's
     // window keydown listener) — this button exists so the same
     // "back out of whatever I'm mid-drawing" action is reachable on a
-    // phone, which has no physical Escape key.
+    // phone, which has no physical Escape key. Dropping back to
+    // 'select' matters just as much as clearing the draft points: the
+    // draft alone being cleared but the tool staying armed meant the
+    // very next tap on the canvas just started drawing again, which is
+    // what made this button look like it wasn't doing anything.
+    setActiveTool('select');
     setDrawStart(null);
     setPolygonDraft(null);
     setStairDraft(null);

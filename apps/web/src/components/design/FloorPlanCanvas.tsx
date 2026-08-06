@@ -218,6 +218,7 @@ export function FloorPlanCanvas({
 }: FloorPlanCanvasProps) {
   const {
     activeTool,
+    setActiveTool,
     drawStart,
     setDrawStart,
     polygonDraft,
@@ -389,6 +390,13 @@ export function FloorPlanCanvas({
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
+        // Also drop back to the Select tool — without this, clearing
+        // the in-progress draft (drawStart/polygonDraft/stairDraft)
+        // wasn't enough on its own, since the tool itself stayed
+        // armed: the very next tap on the canvas immediately started a
+        // new wall/stair/etc. again, which is what made Escape look
+        // like it "didn't work" even though it had cleared the draft.
+        setActiveTool('select');
         setDrawStart(null);
         setPolygonDraft(null);
         setStairDraft(null);
@@ -397,7 +405,7 @@ export function FloorPlanCanvas({
     }
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setDrawStart, setPolygonDraft, setStairDraft, setSelection]);
+  }, [setActiveTool, setDrawStart, setPolygonDraft, setStairDraft, setSelection]);
 
   // Phase B — Scale-accurate sheet export: the Stage ref callback only
   // fires on mount/unmount, but pixelsPerMeter changes continuously as

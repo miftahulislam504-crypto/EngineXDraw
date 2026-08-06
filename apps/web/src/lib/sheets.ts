@@ -3,6 +3,7 @@
 import {
   collection,
   doc,
+  getDocs,
   onSnapshot,
   addDoc,
   updateDoc,
@@ -24,6 +25,15 @@ export function subscribeToSheets(
   return onSnapshot(sheetsCol(projectId, buildingId), (snap) => {
     onChange(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Sheet));
   });
+}
+
+/** One-time fetch counterpart to subscribeToSheets — used by the Hub
+ * export (hub-write.ts) to include Drawing Status/Revision info (sheet
+ * number, scale, drawnBy, date) in the architectural module, same
+ * snapshot-at-export-time reasoning as every other getOnce in this app. */
+export async function getSheetsOnce(projectId: string, buildingId: string): Promise<Sheet[]> {
+  const snap = await getDocs(sheetsCol(projectId, buildingId));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Sheet);
 }
 
 export function subscribeToSheet(

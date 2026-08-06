@@ -410,6 +410,18 @@ export function subscribeToSlabs(
   });
 }
 
+/** One-time fetch counterpart to subscribeToSlabs — same reasoning as
+ * every other getOnce here (see hub-write.ts's floorElements): a Hub
+ * export needs a snapshot at export time, not a live subscription. */
+export async function getSlabsOnce(
+  projectId: string,
+  buildingId: string,
+  floorId: string,
+): Promise<Slab[]> {
+  const snap = await getDocs(slabsCol(projectId, buildingId, floorId));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Slab);
+}
+
 export async function createSlab(
   projectId: string,
   buildingId: string,

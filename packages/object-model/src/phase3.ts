@@ -96,4 +96,19 @@ export interface LibraryItem {
   colorHex?: string; // e.g. '#4A4A4A' — the base color meshStandardMaterial uses
   roughness?: number; // 0 (mirror-like) .. 1 (fully matte); undefined = renderer default
   metalness?: number; // 0 (dielectric: brick/wood/stucco) .. 1 (metal); undefined = renderer default
+  // ─── Dead Load Source (Floor Loads) ────────────────────────────────
+  // Only meaningful for category 'MATERIAL' items, same optional/shared-
+  // type reasoning as the visual properties above. Lets a Wall/Slab/
+  // Ceiling/Roof that references this item via libraryItemId carry a
+  // real self-weight into the Hub export's Floor Loads section instead
+  // of a consumer (Structural/Estimate) having to guess or hardcode a
+  // density for "RCC" / "brick" / etc. Volume-based (kN/m³) covers solid
+  // materials like concrete/brick; area-based (kN/m²) covers thin
+  // applied finishes (tile, plaster coat, roofing membrane) where a
+  // per-volume figure isn't how the material is normally specified.
+  // Both optional and independent — set whichever matches how the
+  // material is conventionally rated; leave both unset for non-MATERIAL
+  // items or a MATERIAL item with no load data yet.
+  unitWeightKnM3?: number; // kN/m³ — volumetric self-weight (concrete, brick, timber, steel...)
+  unitWeightKnM2?: number; // kN/m² — area-rate self-weight for thin finish layers (tile, plaster, membrane...)
 }

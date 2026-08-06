@@ -123,6 +123,16 @@ export interface Slab {
   boundary: Point2D[];
   thickness: number; // meters
   elevation: number; // meters — bottom face height above floor level
+  // Dead Load Source (optional) — same Property-System pattern as Wall's
+  // materialLabel/libraryItemId: an optional override so existing slab
+  // documents remain valid, and so Structural/Estimate consumers reading
+  // the Hub export can attribute a slab's self-weight to a named material
+  // instead of assuming a fixed RCC density. libraryItemId, if set,
+  // should point at a LibraryItem with category 'MATERIAL' and its
+  // unitWeightKnM3 filled in; materialLabel is the free-text fallback
+  // when no catalog entry applies.
+  materialLabel?: string;
+  libraryItemId?: string;
   createdAt: FirestoreTimestampLike;
   updatedAt: FirestoreTimestampLike;
 }
@@ -152,6 +162,9 @@ export interface Ceiling {
   boundary: Point2D[];
   thickness: number;
   elevation: number; // meters above floor level — bottom face height
+  // Same optional Dead Load Source pair as Slab — see its comment above.
+  materialLabel?: string;
+  libraryItemId?: string;
   createdAt: FirestoreTimestampLike;
   updatedAt: FirestoreTimestampLike;
 }
@@ -361,6 +374,21 @@ export interface PlacedObject {
   width: number;
   depth: number;
   height: number;
+  // ─── Landscape Quantities (category === 'LANDSCAPE' only) ──────────
+  // Optional and only meaningful for LANDSCAPE-category placements — a
+  // single generic PlacedObject shape (see the module note above this
+  // type) still needs to report a quantity for Hub's Landscape
+  // Quantities section, so rather than a separate Landscape entity this
+  // stays the same placeholder-box shape with two optional fields that
+  // let it double as a countable/measurable landscape item:
+  // landscapeType distinguishes a discrete item (a tree, counted by
+  // quantity) from an area-coverage item (lawn/paving/water feature,
+  // measured by its width*depth footprint — quantity is left unset for
+  // those since the footprint area already is the quantity). Absent on
+  // every non-LANDSCAPE category and on landscape objects placed before
+  // this field existed.
+  landscapeType?: 'TREE' | 'SHRUB' | 'LAWN' | 'PAVING' | 'WATER_FEATURE' | 'OTHER';
+  quantity?: number; // discrete count — trees/shrubs; unset for area-coverage types (use width*depth instead)
   createdAt: FirestoreTimestampLike;
   updatedAt: FirestoreTimestampLike;
 }

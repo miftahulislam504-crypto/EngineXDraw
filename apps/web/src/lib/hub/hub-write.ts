@@ -22,6 +22,19 @@ import type {
   Roof,
   Column,
   Beam,
+  Slab,
+  Ceiling,
+  Foundation,
+  Footing,
+  Ramp,
+  Balcony,
+  CurtainWall,
+  Skylight,
+  Shaft,
+  SiteBoundary,
+  SectionLine,
+  Sheet,
+  PlacedObject,
 } from '@archibim/object-model';
 import type { GridLine } from '@archibim/object-model';
 import {
@@ -30,17 +43,54 @@ import {
   getOpeningsOnce,
   getColumnsOnce,
   getBeamsOnce,
+  getSlabsOnce,
   stairCrud,
   roofCrud,
   gridLineCrud,
+  ceilingCrud,
+  foundationCrud,
+  footingCrud,
+  rampCrud,
+  balconyCrud,
+  curtainWallCrud,
+  skylightCrud,
+  sectionLineCrud,
+  placedObjectCrud,
 } from '@/lib/floors';
 import { getRoomsOnce } from '@/lib/rooms';
+import { subscribeToShafts } from '@/lib/shafts';
+import { subscribeToSiteBoundary } from '@/lib/siteBoundary';
+import { getSheetsOnce } from '@/lib/sheets';
+import { getLibraryOnce } from '@/lib/library';
 import { computeFloorBaseElevations } from '@archibim/core-engine';
 import type { ProjectLevel, ProjectGrid, BuildingElementRef } from './contract.types';
 import { wrapContract } from './contract.types';
 import { uploadModuleData } from './module-data.firestore';
 import { linkDependency, getModuleVersion } from './dependency.firestore';
 import { emitEvent } from './event.firestore';
+
+/** shafts.ts and siteBoundary.ts only expose subscribe(), no getOnce —
+ * both wrap this same one-shot-via-subscription pattern (take the first
+ * snapshot, then immediately unsubscribe) so the Hub export can still
+ * get a point-in-time read without adding a live listener that outlives
+ * this function call. */
+function getShaftsOnce(projectId: string, buildingId: string): Promise<Shaft[]> {
+  return new Promise((resolve) => {
+    const unsub = subscribeToShafts(projectId, buildingId, (shafts) => {
+      unsub();
+      resolve(shafts);
+    });
+  });
+}
+
+function getSiteBoundaryOnce(projectId: string, buildingId: string): Promise<SiteBoundary | null> {
+  return new Promise((resolve) => {
+    const unsub = subscribeToSiteBoundary(projectId, buildingId, (siteBoundary) => {
+      unsub();
+      resolve(siteBoundary);
+    });
+  });
+}
 
 /** One floor's worth of BuildingElementRefs — walls, openings, rooms,
  * stairs, roofs, columns, beams, all tagged with this floor's
@@ -51,7 +101,25 @@ async function floorElements(
   buildingId: string,
   floor: Floor,
 ): Promise<BuildingElementRef[]> {
-  const [walls, openings, rooms, stairs, roofs, columns, beams] = await Promise.all([
+  const [
+    walls,
+    openings,
+    rooms,
+    stairs,
+    roofs,
+    columns,
+    beams,
+    slabs,
+    ceilings,
+    foundations,
+    footings,
+    ramps,
+    balconies,
+    curtainWalls,
+    skylights,
+    sectionLines,
+    placedObjects,
+  ] = await Promise.all([
     getWallsOnce(projectId, buildingId, floor.id),
     getOpeningsOnce(projectId, buildingId, floor.id),
     getRoomsOnce(projectId, buildingId, floor.id),
@@ -59,6 +127,16 @@ async function floorElements(
     roofCrud.getOnce(projectId, buildingId, floor.id),
     getColumnsOnce(projectId, buildingId, floor.id),
     getBeamsOnce(projectId, buildingId, floor.id),
+    getSlabsOnce(projectId, buildingId, floor.id),
+    ceilingCrud.getOnce(projectId, buildingId, floor.id),
+    foundationCrud.getOnce(projectId, buildingId, floor.id),
+    footingCrud.getOnce(projectId, buildingId, floor.id),
+    rampCrud.getOnce(projectId, buildingId, floor.id),
+    balconyCrud.getOnce(projectId, buildingId, floor.id),
+    curtainWallCrud.getOnce(projectId, buildingId, floor.id),
+    skylightCrud.getOnce(projectId, buildingId, floor.id),
+    sectionLineCrud.getOnce(projectId, buildingId, floor.id),
+    placedObjectCrud.getOnce(projectId, buildingId, floor.id),
   ]);
 
   const refs: BuildingElementRef[] = [];
@@ -68,7 +146,17 @@ async function floorElements(
       id: w.id,
       type: 'wall',
       levelId: floor.id,
-      geometry: { start: w.start, end: w.end, thickness: w.thickness, height: w.height, wallType: w.type },
+      geometry: {
+        start: w.start,
+        end: w.end,
+        thickness: w.thickness,
+        height: w.height,
+        wallType: w.type,
+        // Finish Schedule / Dead Load Source
+        materialLabel: w.materialLabel,
+        libraryItemId: w.libraryItemId,
+        fireRatingMinutes: w.fireRatingMinutes,
+      },
     });
   }
   for (const o of openings as Opening[]) {
@@ -90,7 +178,16 @@ async function floorElements(
       id: r.id,
       type: 'room',
       levelId: floor.id,
-      geometry: { boundary: r.boundary, areaSqm: r.areaSqm, name: r.name, occupancyType: r.occupancyType },
+      geometry: {
+        boundary: r.boundary,
+        areaSqm: r.areaSqm,
+        name: r.name,
+        occupancyType: r.occupancyType,
+        // Finish Schedule — per-room floor/wall/ceiling finish labels
+        finishFloor: r.finishFloor,
+        finishWalls: r.finishWalls,
+        finishCeiling: r.finishCeiling,
+      },
     });
   }
   for (const s of stairs as Stair[]) {
@@ -106,7 +203,14 @@ async function floorElements(
       id: rf.id,
       type: 'roof',
       levelId: floor.id,
-      geometry: { boundary: rf.boundary, thickness: rf.thickness, elevation: rf.elevation },
+      geometry: {
+        boundary: rf.boundary,
+        thickness: rf.thickness,
+        elevation: rf.elevation,
+        // Finish Schedule / Dead Load Source
+        materialLabel: rf.materialLabel,
+        libraryItemId: rf.libraryItemId,
+      },
     });
   }
   for (const c of columns as Column[]) {
@@ -125,14 +229,170 @@ async function floorElements(
       geometry: { start: b.start, end: b.end, width: b.width, depth: b.depth },
     });
   }
+  for (const s of slabs as Slab[]) {
+    refs.push({
+      id: s.id,
+      type: 'slab',
+      levelId: floor.id,
+      geometry: {
+        boundary: s.boundary,
+        thickness: s.thickness,
+        elevation: s.elevation,
+        // Dead Load Source
+        materialLabel: s.materialLabel,
+        libraryItemId: s.libraryItemId,
+      },
+    });
+  }
+  for (const c of ceilings as Ceiling[]) {
+    refs.push({
+      id: c.id,
+      type: 'ceiling',
+      levelId: floor.id,
+      geometry: {
+        boundary: c.boundary,
+        thickness: c.thickness,
+        elevation: c.elevation,
+        // Finish Schedule / Dead Load Source
+        materialLabel: c.materialLabel,
+        libraryItemId: c.libraryItemId,
+      },
+    });
+  }
+  for (const f of foundations as Foundation[]) {
+    refs.push({
+      id: f.id,
+      type: 'foundation',
+      levelId: floor.id,
+      geometry: { boundary: f.boundary, thickness: f.thickness, elevation: f.elevation },
+    });
+  }
+  for (const f of footings as Footing[]) {
+    refs.push({
+      id: f.id,
+      type: 'footing',
+      levelId: floor.id,
+      geometry: {
+        center: f.center,
+        width: f.width,
+        depth: f.depth,
+        thickness: f.thickness,
+        elevation: f.elevation,
+      },
+    });
+  }
+  for (const r of ramps as Ramp[]) {
+    refs.push({
+      id: r.id,
+      type: 'ramp',
+      levelId: floor.id,
+      geometry: {
+        start: r.start,
+        end: r.end,
+        startElevation: r.startElevation,
+        endElevation: r.endElevation,
+        width: r.width,
+        thickness: r.thickness,
+      },
+    });
+  }
+  for (const b of balconies as Balcony[]) {
+    refs.push({
+      id: b.id,
+      type: 'balcony',
+      levelId: floor.id,
+      geometry: { boundary: b.boundary, thickness: b.thickness, elevation: b.elevation },
+    });
+  }
+  for (const cw of curtainWalls as CurtainWall[]) {
+    refs.push({
+      id: cw.id,
+      type: 'curtainWall',
+      levelId: floor.id,
+      geometry: {
+        start: cw.start,
+        end: cw.end,
+        height: cw.height,
+        thickness: cw.thickness,
+        mullionSpacing: cw.mullionSpacing,
+      },
+    });
+  }
+  for (const sk of skylights as Skylight[]) {
+    refs.push({
+      id: sk.id,
+      type: 'skylight',
+      levelId: floor.id,
+      geometry: { roofId: sk.roofId, center: sk.center, width: sk.width, depth: sk.depth },
+    });
+  }
+  for (const sl of sectionLines as SectionLine[]) {
+    refs.push({
+      id: sl.id,
+      type: 'sectionLine',
+      levelId: floor.id,
+      geometry: { start: sl.start, end: sl.end },
+    });
+  }
+  // Landscape Quantities — only LANDSCAPE-category PlacedObjects are
+  // relevant to this section; Furniture/Kitchen/Bathroom/Parking
+  // placements are skipped here since they're interior fit-out, not
+  // site development quantities.
+  for (const po of placedObjects as PlacedObject[]) {
+    if (po.category !== 'LANDSCAPE') continue;
+    refs.push({
+      id: po.id,
+      type: 'landscapeItem',
+      levelId: floor.id,
+      geometry: {
+        label: po.label,
+        landscapeType: po.landscapeType,
+        center: po.center,
+        width: po.width,
+        depth: po.depth,
+        footprintSqm: po.width * po.depth,
+        quantity: po.quantity,
+      },
+    });
+  }
 
   return refs;
 }
 
+/** Shaft/SiteBoundary/Sheet are building-scoped, not floor-scoped (see
+ * their doc comments in object-model — a shaft spans a level range
+ * rather than living on one floor, a site boundary and a sheet set both
+ * describe the building as a whole), so they're kept as their own
+ * top-level arrays rather than forced into per-floor BuildingElementRef
+ * entries the way Wall/Slab/Column etc. are. A Shaft's startLevel/
+ * endLevel already carries which floors it spans, which a single
+ * levelId field couldn't represent anyway. */
 export interface ArchitecturalExport {
   levels: ProjectLevel[];
   grids: ProjectGrid[];
   elements: BuildingElementRef[];
+  shafts: BuildingElementRef[];
+  siteBoundary: BuildingElementRef | null;
+  sheets: BuildingElementRef[];
+  materials: MaterialDeadLoadRef[];
+}
+
+/** Floor Loads (Dead Load Source) — the MATERIAL-category Library items
+ * actually referenced (by libraryItemId) from a Wall/Slab/Ceiling/Roof
+ * on this building, each carrying whichever of the two unit-weight
+ * ratings it was given (see LibraryItem's comment in object-model).
+ * Exported as its own small lookup table rather than duplicating the
+ * weight figures onto every element that references them — a consumer
+ * joins by id against the element's own libraryItemId field. Only
+ * referenced materials are included (not the whole global catalog), and
+ * only materials that actually carry load data are worth including at
+ * all; a MATERIAL item with neither weight field set contributes
+ * nothing a Dead Load calculation could use. */
+export interface MaterialDeadLoadRef {
+  libraryItemId: string;
+  name: string;
+  unitWeightKnM3?: number;
+  unitWeightKnM2?: number;
 }
 
 /** Builds the full multi-floor export for one building — every floor
@@ -174,7 +434,85 @@ export async function buildArchitecturalExport(
   const elementsPerFloor = await Promise.all(floors.map((f) => floorElements(projectId, buildingId, f)));
   const elements = elementsPerFloor.flat();
 
-  return { levels, grids, elements };
+  // levelId is set to startLevel here only so a consumer that assumes
+  // every BuildingElementRef has one doesn't break — the real span is
+  // in geometry.startLevel/endLevel, which carries the full range a
+  // per-floor levelId can't.
+  const rawShafts = await getShaftsOnce(projectId, buildingId);
+  const shafts: BuildingElementRef[] = (rawShafts as Shaft[]).map((s) => ({
+    id: s.id,
+    type: 'shaft',
+    levelId: floors.find((f) => f.level === s.startLevel)?.id ?? '',
+    geometry: {
+      boundary: s.boundary,
+      shaftType: s.shaftType,
+      startLevel: s.startLevel,
+      endLevel: s.endLevel,
+      label: s.label,
+    },
+  }));
+
+  const rawSiteBoundary = await getSiteBoundaryOnce(projectId, buildingId);
+  const siteBoundary: BuildingElementRef | null = rawSiteBoundary
+    ? {
+        id: rawSiteBoundary.id,
+        type: 'siteBoundary',
+        levelId: '',
+        geometry: { boundary: rawSiteBoundary.boundary, frontEdge: rawSiteBoundary.frontEdge },
+      }
+    : null;
+
+  // Drawing Status / Revision — one ref per Sheet, carrying its title-
+  // block fields (sheetNumber, scale, drawnBy, date) so a consumer can
+  // report on drawing set completeness/revision without needing this
+  // app's own Firestore schema.
+  const rawSheets = await getSheetsOnce(projectId, buildingId);
+  const sheets: BuildingElementRef[] = (rawSheets as Sheet[]).map((sh) => ({
+    id: sh.id,
+    type: 'sheet',
+    levelId: sh.floorId ?? '',
+    geometry: {
+      name: sh.name,
+      sheetNumber: sh.sheetNumber,
+      size: sh.size,
+      viewportType: sh.viewportType,
+      direction: sh.direction,
+      sectionLineId: sh.sectionLineId,
+      scaleLabel: sh.scaleLabel,
+      drawnBy: sh.drawnBy,
+      date: sh.date,
+    },
+  }));
+
+  // Floor Loads (Dead Load Source) — collect every libraryItemId
+  // actually referenced by an exported element (Wall/Slab/Ceiling/Roof),
+  // then resolve just those against the MATERIAL catalog. Filtering to
+  // referenced-and-load-bearing keeps this list small and directly
+  // usable — a consumer never has to cross-reference against items that
+  // aren't on this building or that have no weight rating at all.
+  const referencedMaterialIds = new Set<string>();
+  for (const el of elements) {
+    const libId = (el.geometry as Record<string, unknown> | undefined)?.libraryItemId;
+    if (typeof libId === 'string' && libId) referencedMaterialIds.add(libId);
+  }
+  let materials: MaterialDeadLoadRef[] = [];
+  if (referencedMaterialIds.size > 0) {
+    const catalog = await getLibraryOnce('MATERIAL');
+    materials = catalog
+      .filter(
+        (item) =>
+          referencedMaterialIds.has(item.id) &&
+          (item.unitWeightKnM3 !== undefined || item.unitWeightKnM2 !== undefined),
+      )
+      .map((item) => ({
+        libraryItemId: item.id,
+        name: item.name,
+        unitWeightKnM3: item.unitWeightKnM3,
+        unitWeightKnM2: item.unitWeightKnM2,
+      }));
+  }
+
+  return { levels, grids, elements, shafts, siteBoundary, sheets, materials };
 }
 
 /** The full Draw -> Hub write-back: builds the export, uploads it as
@@ -219,6 +557,10 @@ export async function publishArchitecturalModel(
       await emitEvent(projectId, 'ARCH_MODEL_UPDATED', 'architectural', {
         elementCount: exportData.elements.length,
         levelCount: exportData.levels.length,
+        shaftCount: exportData.shafts.length,
+        sheetCount: exportData.sheets.length,
+        hasSiteBoundary: exportData.siteBoundary !== null,
+        materialCount: exportData.materials.length,
       });
     } catch {
       /* non-critical — uploadModuleData's own bumpModuleVersion already emits MODULE_VERSION_BUMPED */

@@ -47,13 +47,27 @@ export function subscribeToSheet(
   });
 }
 
+/** Firestore's addDoc/updateDoc reject any field whose value is
+ * `undefined` (throws "Unsupported field value: undefined"), so before
+ * writing we drop those keys entirely rather than sending them through.
+ * Sheet has several optional fields (floorId, direction, sectionLineId,
+ * drawnBy, date) that are legitimately absent depending on viewportType,
+ * so this isn't a rare edge case — it happens on nearly every create. */
+function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  const out: Partial<T> = {};
+  for (const key in obj) {
+    if (obj[key] !== undefined) out[key] = obj[key];
+  }
+  return out;
+}
+
 export async function createSheet(
   projectId: string,
   buildingId: string,
   sheet: Omit<Sheet, 'id' | 'buildingId' | 'createdAt' | 'updatedAt'>,
 ) {
   const ref = await addDoc(sheetsCol(projectId, buildingId), {
-    ...sheet,
+    ...stripUndefined(sheet),
     buildingId,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -68,7 +82,7 @@ export async function updateSheet(
   patch: Partial<Pick<Sheet, 'name' | 'sheetNumber' | 'size' | 'scaleLabel' | 'drawnBy' | 'date'>>,
 ) {
   await updateDoc(doc(sheetsCol(projectId, buildingId), sheetId), {
-    ...patch,
+    ...stripUndefined(patch),
     updatedAt: serverTimestamp(),
   });
 }

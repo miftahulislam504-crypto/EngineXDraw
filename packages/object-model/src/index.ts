@@ -124,7 +124,56 @@ export interface Building {
    * elevations/sections are vertical cuts and don't have a compass
    * direction of their own. */
   northAngleDeg?: number;
+  /** Sheet title-block content (Phase 4, sidebar redesign) — the
+   * consulting-firm-style info block a real drawing set's title block
+   * carries (firm name/address, job no, client, location, sign-off
+   * roles, …). Set once per building here so every Sheet export uses
+   * the same values by default without retyping them per export; the
+   * export form may still override any field for a specific issuance
+   * (see BatchExportOverrides/CoverSheetExportData) without changing
+   * what's stored here. */
+  titleBlock?: TitleBlockInfo;
+  /** The "BUILDING NO :" sidebar field (e.g. "00") — kept separate from
+   * TitleBlockInfo because it identifies THIS building within the
+   * project, not the drawing firm, so it lives with the rest of
+   * Building's own identity fields (name, numberOfFloors, …) rather than
+   * the reusable-across-buildings company/firm info block. */
+  buildingNo?: string;
   createdAt: FirestoreTimestampLike;
+}
+
+/**
+ * All free text — this app has no opinion on what a firm's job-numbering
+ * scheme or sign-off role titles should look like, it just carries
+ * whatever the person types through to the printed sheet. Every field is
+ * optional so a building created before this existed, or one where the
+ * person just doesn't want a full title block yet, still exports fine —
+ * missing fields render as an em dash on the sheet rather than blocking
+ * export.
+ */
+export interface TitleBlockInfo {
+  companyName?: string;
+  /** Data URL or hosted URL of the firm's logo image, shown at the top
+   * of the sidebar block the way MICON's title block does — free text
+   * rather than a stricter upload flow, since this is describing WHERE
+   * the image is, not managing the image itself (no separate asset
+   * pipeline exists for this yet). */
+  companyLogoUrl?: string;
+  companyAddressLines?: string[];
+  companyPhone?: string;
+  companyEmail?: string;
+  jobNo?: string;
+  clientName?: string;
+  location?: string;
+  detailByName?: string;
+  detailByCredential?: string;
+  designByName?: string;
+  designByCredential?: string;
+  checkedByName?: string;
+  checkedByCredential?: string;
+  approvedByName?: string;
+  approvedByCredential?: string;
+  copyrightNotice?: string;
 }
 
 // ─── Core Project ────────────────────────────────────────

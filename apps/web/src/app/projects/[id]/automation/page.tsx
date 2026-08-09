@@ -16,6 +16,14 @@ import {
   buildDoorScheduleRows,
   buildWindowScheduleRows,
   buildRoomScheduleRows,
+  buildColumnScheduleRows,
+  buildBeamScheduleRows,
+  buildStairScheduleRows,
+  buildRailingScheduleRows,
+  buildFinishScheduleRows,
+  buildFoundationScheduleRows,
+  buildFootingScheduleRows,
+  buildGridLineScheduleRows,
   computeDesignStatistics,
   type StructuralCoordinationIssue,
 } from '@archibim/core-engine';
@@ -26,6 +34,7 @@ import {
   subscribeToFloorElements,
   subscribeToFloors,
   getSectionLineAutoLabel,
+  getGridLineAutoLabel,
   type FloorElements,
 } from '@/lib/floors';
 import { subscribeToShafts } from '@/lib/shafts';
@@ -137,6 +146,48 @@ export default function AutomationPage() {
   );
   const allOpenings = useMemo(
     () => floors.flatMap((f) => floorElements[f.id]?.openings ?? []),
+    [floors, floorElements],
+  );
+  const allColumns = useMemo(
+    () => floors.flatMap((f) => floorElements[f.id]?.columns ?? []),
+    [floors, floorElements],
+  );
+  const allBeams = useMemo(
+    () => floors.flatMap((f) => floorElements[f.id]?.beams ?? []),
+    [floors, floorElements],
+  );
+  const allStairs = useMemo(
+    () => floors.flatMap((f) => floorElements[f.id]?.stairs ?? []),
+    [floors, floorElements],
+  );
+  const allRailings = useMemo(
+    () => floors.flatMap((f) => floorElements[f.id]?.railings ?? []),
+    [floors, floorElements],
+  );
+  const allFoundations = useMemo(
+    () => floors.flatMap((f) => floorElements[f.id]?.foundations ?? []),
+    [floors, floorElements],
+  );
+  const allFootings = useMemo(
+    () => floors.flatMap((f) => floorElements[f.id]?.footings ?? []),
+    [floors, floorElements],
+  );
+  // Grid line labels ("1", "2", … / "A", "B", …) are numbered per floor
+  // (getGridLineAutoLabel only looks at same-orientation lines on ONE
+  // floor), so each floor's lines are resolved against their own floor's
+  // list before merging into the whole-building schedule — flattening
+  // first would let a later floor's "1" collide with an earlier floor's
+  // "1" instead of each floor keeping its own grid reference sequence.
+  const allGridLinesWithLabels = useMemo(
+    () =>
+      floors.flatMap((f) => {
+        const lines = floorElements[f.id]?.gridLines ?? [];
+        return lines.map((line) => ({
+          orientation: line.orientation,
+          position: line.position,
+          resolvedLabel: getGridLineAutoLabel(line, lines),
+        }));
+      }),
     [floors, floorElements],
   );
 
@@ -260,10 +311,89 @@ export default function AutomationPage() {
       { header: t.automation.scheduleColPerimeter, widthMm: 20 },
     ];
   }
+  function columnColumns(): ScheduleColumn[] {
+    return [
+      { header: t.automation.scheduleColTag, widthMm: 30 },
+      { header: t.automation.scheduleColShape, widthMm: 40 },
+      { header: t.automation.scheduleColWidth, widthMm: 40 },
+      { header: t.automation.scheduleColDepth, widthMm: 40 },
+      { header: t.automation.scheduleColHeight, widthMm: 30 },
+    ];
+  }
+  function beamColumns(): ScheduleColumn[] {
+    return [
+      { header: t.automation.scheduleColTag, widthMm: 30 },
+      { header: t.automation.scheduleColLength, widthMm: 40 },
+      { header: t.automation.scheduleColWidth, widthMm: 35 },
+      { header: t.automation.scheduleColDepth, widthMm: 35 },
+      { header: t.automation.scheduleColElevation, widthMm: 40 },
+    ];
+  }
+  function stairColumns(): ScheduleColumn[] {
+    return [
+      { header: t.automation.scheduleColTag, widthMm: 30 },
+      { header: t.automation.scheduleColWidth, widthMm: 35 },
+      { header: t.automation.scheduleColFlights, widthMm: 30 },
+      { header: t.automation.scheduleColSteps, widthMm: 30 },
+      { header: t.automation.scheduleColTotalRise, widthMm: 45 },
+    ];
+  }
+  function railingColumns(): ScheduleColumn[] {
+    return [
+      { header: t.automation.scheduleColTag, widthMm: 35 },
+      { header: t.automation.scheduleColLength, widthMm: 45 },
+      { header: t.automation.scheduleColHeight, widthMm: 45 },
+      { header: t.automation.scheduleColPostSpacing, widthMm: 45 },
+    ];
+  }
+  function finishColumns(): ScheduleColumn[] {
+    return [
+      { header: t.automation.scheduleColNumber, widthMm: 25 },
+      { header: t.automation.scheduleColName, widthMm: 40 },
+      { header: t.automation.scheduleColFinishFloor, widthMm: 45 },
+      { header: t.automation.scheduleColFinishWalls, widthMm: 45 },
+      { header: t.automation.scheduleColFinishCeiling, widthMm: 45 },
+    ];
+  }
+  function foundationColumns(): ScheduleColumn[] {
+    return [
+      { header: t.automation.scheduleColTag, widthMm: 35 },
+      { header: t.automation.scheduleColArea, widthMm: 45 },
+      { header: t.automation.scheduleColThickness, widthMm: 40 },
+      { header: t.automation.scheduleColElevation, widthMm: 40 },
+    ];
+  }
+  function footingColumns(): ScheduleColumn[] {
+    return [
+      { header: t.automation.scheduleColTag, widthMm: 30 },
+      { header: t.automation.scheduleColWidth, widthMm: 35 },
+      { header: t.automation.scheduleColDepth, widthMm: 35 },
+      { header: t.automation.scheduleColThickness, widthMm: 35 },
+      { header: t.automation.scheduleColElevation, widthMm: 35 },
+    ];
+  }
+  function gridLineColumns(): ScheduleColumn[] {
+    return [
+      { header: t.automation.scheduleColGridLabel, widthMm: 40 },
+      { header: t.automation.scheduleColOrientation, widthMm: 60 },
+      { header: t.automation.scheduleColPosition, widthMm: 60 },
+    ];
+  }
 
   const doorRows = useMemo(() => buildDoorScheduleRows(allOpenings), [allOpenings]);
   const windowRows = useMemo(() => buildWindowScheduleRows(allOpenings), [allOpenings]);
   const roomRows = useMemo(() => buildRoomScheduleRows(allRooms), [allRooms]);
+  const columnRows = useMemo(() => buildColumnScheduleRows(allColumns), [allColumns]);
+  const beamRows = useMemo(() => buildBeamScheduleRows(allBeams), [allBeams]);
+  const stairRows = useMemo(() => buildStairScheduleRows(allStairs), [allStairs]);
+  const railingRows = useMemo(() => buildRailingScheduleRows(allRailings), [allRailings]);
+  const finishRows = useMemo(() => buildFinishScheduleRows(allRooms), [allRooms]);
+  const foundationRows = useMemo(() => buildFoundationScheduleRows(allFoundations), [allFoundations]);
+  const footingRows = useMemo(() => buildFootingScheduleRows(allFootings), [allFootings]);
+  const gridLineRows = useMemo(
+    () => buildGridLineScheduleRows(allGridLinesWithLabels),
+    [allGridLinesWithLabels],
+  );
 
   function handleExportDoors() {
     exportScheduleToPdf(
@@ -296,6 +426,102 @@ export default function AutomationPage() {
         r.areaSqm.toFixed(1),
         r.perimeterM.toFixed(1),
       ]),
+    );
+  }
+  function handleExportColumns() {
+    exportScheduleToPdf(
+      t.automation.columnSchedule,
+      project?.projectName ?? '',
+      buildings.find((b) => b.id === buildingId)?.name ?? '',
+      columnColumns(),
+      columnRows.map((r) => [
+        r.tag,
+        t.automation.columnShapes[r.shape],
+        r.widthM.toFixed(2),
+        r.depthM.toFixed(2),
+        r.heightM.toFixed(2),
+      ]),
+    );
+  }
+  function handleExportBeams() {
+    exportScheduleToPdf(
+      t.automation.beamSchedule,
+      project?.projectName ?? '',
+      buildings.find((b) => b.id === buildingId)?.name ?? '',
+      beamColumns(),
+      beamRows.map((r) => [
+        r.tag,
+        r.lengthM.toFixed(2),
+        r.widthM.toFixed(2),
+        r.depthM.toFixed(2),
+        r.elevationM.toFixed(2),
+      ]),
+    );
+  }
+  function handleExportStairs() {
+    exportScheduleToPdf(
+      t.automation.stairSchedule,
+      project?.projectName ?? '',
+      buildings.find((b) => b.id === buildingId)?.name ?? '',
+      stairColumns(),
+      stairRows.map((r) => [
+        r.tag,
+        r.widthM.toFixed(2),
+        String(r.flightCount),
+        String(r.totalSteps),
+        r.totalRiseM.toFixed(2),
+      ]),
+    );
+  }
+  function handleExportRailings() {
+    exportScheduleToPdf(
+      t.automation.railingSchedule,
+      project?.projectName ?? '',
+      buildings.find((b) => b.id === buildingId)?.name ?? '',
+      railingColumns(),
+      railingRows.map((r) => [r.tag, r.lengthM.toFixed(2), r.heightM.toFixed(2), r.postSpacingM.toFixed(2)]),
+    );
+  }
+  function handleExportFinishes() {
+    exportScheduleToPdf(
+      t.automation.finishSchedule,
+      project?.projectName ?? '',
+      buildings.find((b) => b.id === buildingId)?.name ?? '',
+      finishColumns(),
+      finishRows.map((r) => [r.number, r.name, r.finishFloor, r.finishWalls, r.finishCeiling]),
+    );
+  }
+  function handleExportFoundations() {
+    exportScheduleToPdf(
+      t.automation.foundationSchedule,
+      project?.projectName ?? '',
+      buildings.find((b) => b.id === buildingId)?.name ?? '',
+      foundationColumns(),
+      foundationRows.map((r) => [r.tag, r.areaSqm.toFixed(1), r.thicknessM.toFixed(2), r.elevationM.toFixed(2)]),
+    );
+  }
+  function handleExportFootings() {
+    exportScheduleToPdf(
+      t.automation.footingSchedule,
+      project?.projectName ?? '',
+      buildings.find((b) => b.id === buildingId)?.name ?? '',
+      footingColumns(),
+      footingRows.map((r) => [
+        r.tag,
+        r.widthM.toFixed(2),
+        r.depthM.toFixed(2),
+        r.thicknessM.toFixed(2),
+        r.elevationM.toFixed(2),
+      ]),
+    );
+  }
+  function handleExportGridLines() {
+    exportScheduleToPdf(
+      t.automation.gridLineSchedule,
+      project?.projectName ?? '',
+      buildings.find((b) => b.id === buildingId)?.name ?? '',
+      gridLineColumns(),
+      gridLineRows.map((r) => [r.label, t.automation.gridOrientations[r.orientation], r.positionM.toFixed(2)]),
     );
   }
   function handleExportFullReport() {
@@ -521,6 +747,70 @@ export default function AutomationPage() {
                       {t.automation.roomSchedule} ({roomRows.length})
                     </span>
                     <Button variant="secondary" size="sm" onClick={handleExportRooms}>
+                      {t.automation.exportPdf}
+                    </Button>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-ink">
+                      {t.automation.columnSchedule} ({columnRows.length})
+                    </span>
+                    <Button variant="secondary" size="sm" onClick={handleExportColumns}>
+                      {t.automation.exportPdf}
+                    </Button>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-ink">
+                      {t.automation.beamSchedule} ({beamRows.length})
+                    </span>
+                    <Button variant="secondary" size="sm" onClick={handleExportBeams}>
+                      {t.automation.exportPdf}
+                    </Button>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-ink">
+                      {t.automation.stairSchedule} ({stairRows.length})
+                    </span>
+                    <Button variant="secondary" size="sm" onClick={handleExportStairs}>
+                      {t.automation.exportPdf}
+                    </Button>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-ink">
+                      {t.automation.railingSchedule} ({railingRows.length})
+                    </span>
+                    <Button variant="secondary" size="sm" onClick={handleExportRailings}>
+                      {t.automation.exportPdf}
+                    </Button>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-ink">
+                      {t.automation.finishSchedule} ({finishRows.length})
+                    </span>
+                    <Button variant="secondary" size="sm" onClick={handleExportFinishes}>
+                      {t.automation.exportPdf}
+                    </Button>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-ink">
+                      {t.automation.foundationSchedule} ({foundationRows.length})
+                    </span>
+                    <Button variant="secondary" size="sm" onClick={handleExportFoundations}>
+                      {t.automation.exportPdf}
+                    </Button>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-ink">
+                      {t.automation.footingSchedule} ({footingRows.length})
+                    </span>
+                    <Button variant="secondary" size="sm" onClick={handleExportFootings}>
+                      {t.automation.exportPdf}
+                    </Button>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-ink">
+                      {t.automation.gridLineSchedule} ({gridLineRows.length})
+                    </span>
+                    <Button variant="secondary" size="sm" onClick={handleExportGridLines}>
                       {t.automation.exportPdf}
                     </Button>
                   </div>

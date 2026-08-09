@@ -5,14 +5,19 @@ import { useParams } from 'next/navigation';
 import { Button, Input, PageHeader, SeverityBadge } from '@archibim/shared-ui';
 import type {
   Building,
+  Ceiling,
   ComplianceCategory,
   ComplianceIssue,
   Floor,
+  Foundation,
   Opening,
   Project,
   Ramp,
+  Roof,
   SiteBoundary,
   SiteInfo,
+  Slab,
+  Wall,
 } from '@archibim/object-model';
 import {
   checkAccessibility,
@@ -22,6 +27,7 @@ import {
   checkGroundCoverage,
   checkParking,
   checkSetback,
+  computeApproximateDeadLoad,
   computeGeometricSetback,
   detectBuildingFootprint,
 } from '@archibim/core-engine';
@@ -29,6 +35,7 @@ import { subscribeToBuildings, subscribeToProject } from '@/lib/projects';
 import { EMPTY_FLOOR_ELEMENTS, subscribeToFloorElements, subscribeToFloors, type FloorElements } from '@/lib/floors';
 import { subscribeToSiteBoundary } from '@/lib/siteBoundary';
 import { updateSiteInfo } from '@/lib/compliance';
+import { exportComplianceReportToPdf } from '@/lib/schedule-export';
 import { useI18nStore, formatTemplate } from '@/lib/i18n';
 
 const CATEGORY_ORDER: ComplianceCategory[] = [
@@ -120,8 +127,22 @@ export default function CompliancePage() {
   const currentBuilding = buildings.find((b) => b.id === buildingId);
   const allFloorsLoaded = floors.length > 0 && floors.every((f) => floorElements[f.id]);
 
-  const issues = useMemo<ComplianceIssue[]>(() => {
-    if (!currentBuilding || !allFloorsLoaded) return [];
+  /** One pass over every floor computing everything both the live issue
+   * list AND the exportable Compliance Report need — Built-up Area
+   * Summary (per-floor footprint) and the approximate Load Summary are
+   * new in this report, but they reuse the exact same per-floor
+   * detectBuildingFootprint/floorElements walk the issue list already
+   * did, so they're computed alongside it in one useMemo rather than a
+   * second loop over the same floors. */
+  const reportData = useMemo(() => {
+    if (!currentBuilding || !allFloorsLoaded) {
+      return {
+        issues: [] as ComplianceIssue[],
+        totalGfaSqm: 0,
+        builtUpAreaRows: [] as Array<{ floorName: string; footprintAreaSqm: number }>,
+        loadSummary: computeApproximateDeadLoad([], [], [], [], []),
+      };
+    }
 
     let totalGfaSqm = 0;
     let groundFootprintSqm = 0;
@@ -129,14 +150,21 @@ export default function CompliancePage() {
     let providedParkingSpaces = 0;
     const allOpenings: Opening[] = [];
     const allRamps: Ramp[] = [];
+    const allWalls: Wall[] = [];
+    const allSlabs: Slab[] = [];
+    const allRoofs: Roof[] = [];
+    const allFoundations: Foundation[] = [];
+    const allCeilings: Ceiling[] = [];
     const fireIssuesAllFloors: ComplianceIssue[] = [];
     const escapeRouteAllFloors: ComplianceIssue[] = [];
+    const builtUpAreaRows: Array<{ floorName: string; footprintAreaSqm: number }> = [];
 
     for (const floor of floors) {
       const elements = floorElements[floor.id] ?? EMPTY_FLOOR_ELEMENTS;
       const footprint = detectBuildingFootprint(elements.walls);
       const footprintArea = footprint?.areaSqm ?? 0;
       totalGfaSqm += footprintArea;
+      builtUpAreaRows.push({ floorName: floor.name, footprintAreaSqm: footprintArea });
       if (floor.level === 0) {
         groundFootprintSqm = footprintArea;
         groundFootprintBoundary = footprint?.boundary ?? null;
@@ -144,6 +172,11 @@ export default function CompliancePage() {
       providedParkingSpaces += elements.placedObjects.filter((o) => o.category === 'PARKING').length;
       allOpenings.push(...elements.openings);
       allRamps.push(...elements.ramps);
+      allWalls.push(...elements.walls);
+      allSlabs.push(...elements.slabs);
+      allRoofs.push(...elements.roofs);
+      allFoundations.push(...elements.foundations);
+      allCeilings.push(...elements.ceilings);
       fireIssuesAllFloors.push(...checkFireSeparation(elements.walls, elements.rooms));
       escapeRouteAllFloors.push(
         ...checkEscapeRoute(elements.walls, elements.openings, elements.stairs, elements.rooms).map((issue) => ({
@@ -197,8 +230,12 @@ export default function CompliancePage() {
       result.push({ id: 'ESCAPE_ROUTE:ESCAPE_ROUTE_OK:building', category: 'ESCAPE_ROUTE', severity: 'info', check: 'ESCAPE_ROUTE_OK', values: {} });
     }
 
-    return result;
+    const loadSummary = computeApproximateDeadLoad(allWalls, allSlabs, allRoofs, allFoundations, allCeilings);
+
+    return { issues: result, totalGfaSqm, builtUpAreaRows, loadSummary };
   }, [currentBuilding, allFloorsLoaded, floors, floorElements, project, siteBoundary]);
+
+  const { issues, totalGfaSqm, builtUpAreaRows, loadSummary } = reportData;
 
   async function handleSaveSiteInfo() {
     setIsSaving(true);
@@ -214,6 +251,47 @@ export default function CompliancePage() {
     } finally {
       setIsSaving(false);
     }
+  }
+
+  function handleExportComplianceReport() {
+    const landAreaSqm = project?.siteInfo?.landAreaSqm;
+    const roadWidthM = project?.siteInfo?.roadWidthM ?? 6.0;
+    const siteInfoLines = landAreaSqm
+      ? [
+          formatTemplate(t.compliance.reportSiteInfoLandArea, { n: landAreaSqm.toFixed(1) }),
+          formatTemplate(t.compliance.reportSiteInfoRoadWidth, { n: roadWidthM.toFixed(1) }),
+        ]
+      : [t.compliance.reportSiteInfoNotEntered];
+
+    const issuesByCategoryForExport = CATEGORY_ORDER.map((category) => ({
+      category,
+      categoryLabel: t.compliance.categories[category],
+      issues: issues.filter((i) => i.category === category),
+    }));
+
+    exportComplianceReportToPdf({
+      projectName: project?.projectName ?? '',
+      buildingName: currentBuilding?.name ?? '',
+      siteInfoLines,
+      issuesByCategory: issuesByCategoryForExport,
+      messageFor: (issue) => formatTemplate(t.compliance.messages[issue.check], issue.values),
+      builtUpAreaRows,
+      totalGfaSqm,
+      loadSummary,
+      loadSummaryLabels: {
+        concreteSelfWeight: t.compliance.reportLoadSummaryConcrete,
+        wallSelfWeight: t.compliance.reportLoadSummaryWalls,
+        totalApproxDeadLoad: t.compliance.reportLoadSummaryTotal,
+        approxDeadLoadPerSqm: t.compliance.reportLoadSummaryPerSqm,
+        disclaimer: t.compliance.reportLoadSummaryDisclaimer,
+        unavailable: t.compliance.reportLoadSummaryUnavailable,
+      },
+      builtUpAreaLabels: {
+        floor: t.compliance.reportBuiltUpAreaFloor,
+        footprintArea: t.compliance.reportBuiltUpAreaFootprint,
+        total: t.compliance.reportBuiltUpAreaTotal,
+      },
+    });
   }
 
   if (project === undefined) {
@@ -292,6 +370,16 @@ export default function CompliancePage() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {allFloorsLoaded && (
+              <div className="mt-8 rounded-sheet border border-line bg-surface p-4">
+                <h2 className="font-display text-lg font-medium text-ink">{t.compliance.reportTitle}</h2>
+                <p className="mt-1 text-sm text-ink-muted">{t.compliance.reportDescription}</p>
+                <Button className="mt-3" size="sm" onClick={handleExportComplianceReport}>
+                  {t.compliance.reportExport}
+                </Button>
               </div>
             )}
 

@@ -7,22 +7,29 @@
  */
 import type {
   Balcony,
+  Beam,
   Ceiling,
+  Column,
   Dimension,
+  Footing,
   Foundation,
+  GridLine,
   ModelIssue,
   ModelIssueElementType,
   Opening,
   OccupancyType,
   Point2D,
+  Railing,
   Roof,
   Room,
   Slab,
   SheetSize,
   SheetViewportType,
+  Stair,
   Wall,
 } from '@archibim/object-model';
 import { distance, polygonArea } from './geometry-utils';
+import { stairTotalRise, stairTotalSteps } from './stairs';
 
 // ─── Auto Model Cleanup ───────────────────────────────────────────────────
 
@@ -229,6 +236,189 @@ export function buildRoomScheduleRows(rooms: Room[]): RoomScheduleRow[] {
       occupancyType: r.occupancyType,
       areaSqm: r.areaSqm,
       perimeterM: r.perimeterM,
+    }));
+}
+
+/** Column tags are sequential per-building ("C1", "C2", …) rather than
+ * per-floor, since a real column schedule is read across the whole
+ * structure at once (matching a structural drawing set's column
+ * schedule sheet) — same reasoning as Door/Window tags being
+ * building-wide, not reset per floor. Sorted by floorId isn't
+ * meaningful here (floorId is an opaque doc id, not a level number), so
+ * row order follows input order, which callers already build
+ * floor-by-floor in level order (same flatMap pattern used everywhere
+ * else in lib/floors.ts's callers). */
+export interface ColumnScheduleRow {
+  tag: string;
+  shape: Column['shape'];
+  widthM: number;
+  depthM: number;
+  heightM: number;
+}
+
+export function buildColumnScheduleRows(columns: Column[]): ColumnScheduleRow[] {
+  return columns.map((c, index) => ({
+    tag: `C${index + 1}`,
+    shape: c.shape,
+    widthM: c.width,
+    depthM: c.depth,
+    heightM: c.height,
+  }));
+}
+
+export interface BeamScheduleRow {
+  tag: string;
+  lengthM: number;
+  widthM: number;
+  depthM: number;
+  elevationM: number;
+}
+
+export function buildBeamScheduleRows(beams: Beam[]): BeamScheduleRow[] {
+  return beams.map((b, index) => ({
+    tag: `B${index + 1}`,
+    lengthM: distance(b.start, b.end),
+    widthM: b.width,
+    depthM: b.depth,
+    elevationM: b.elevation,
+  }));
+}
+
+/** One row per Stair document (not per flight) — a schedule reads at
+ * the level of "which stair is this," with flight count/total
+ * rise/total steps as that stair's summary figures, the same
+ * granularity a real stair schedule sheet uses. Width is the stair's
+ * single whole-stair width field (see Stair.width's own comment on why
+ * it isn't per-flight). */
+export interface StairScheduleRow {
+  tag: string;
+  widthM: number;
+  flightCount: number;
+  totalSteps: number;
+  totalRiseM: number;
+}
+
+export function buildStairScheduleRows(stairs: Stair[]): StairScheduleRow[] {
+  return stairs.map((s, index) => ({
+    tag: `ST${index + 1}`,
+    widthM: s.width,
+    flightCount: s.flights.length,
+    totalSteps: stairTotalSteps(s),
+    totalRiseM: stairTotalRise(s),
+  }));
+}
+
+export interface RailingScheduleRow {
+  tag: string;
+  lengthM: number;
+  heightM: number;
+  postSpacingM: number;
+}
+
+export function buildRailingScheduleRows(railings: Railing[]): RailingScheduleRow[] {
+  return railings.map((r, index) => ({
+    tag: `RL${index + 1}`,
+    lengthM: distance(r.start, r.end),
+    heightM: r.height,
+    postSpacingM: r.postSpacing,
+  }));
+}
+
+/** A Finish Schedule reads room-by-room but only the three finish
+ * fields — everything a Room already has (area, occupancy, …) is the
+ * Room Schedule's job, this is deliberately the narrower "what's the
+ * floor/wall/ceiling finish in each room" table a real finish schedule
+ * sheet is. finishFloor/Walls/Ceiling are optional on Room (not every
+ * room has had a finish specified yet) — rendered as an empty string
+ * rather than "undefined" so an unset cell just reads blank on the
+ * printed sheet, matching how a real schedule leaves a not-yet-decided
+ * cell blank instead of writing "TBD" for every unfinished room. */
+export interface FinishScheduleRow {
+  number: string;
+  name: string;
+  finishFloor: string;
+  finishWalls: string;
+  finishCeiling: string;
+}
+
+export function buildFinishScheduleRows(rooms: Room[]): FinishScheduleRow[] {
+  return [...rooms]
+    .sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true }))
+    .map((r) => ({
+      number: r.number,
+      name: r.name,
+      finishFloor: r.finishFloor ?? '',
+      finishWalls: r.finishWalls ?? '',
+      finishCeiling: r.finishCeiling ?? '',
+    }));
+}
+
+/** Foundation is boundary-based (like Slab), so "size" reads as plan
+ * area rather than a width/depth pair — same reasoning polygonArea
+ * already applies to Auto Model Cleanup's DEGENERATE_BOUNDARY check. */
+export interface FoundationScheduleRow {
+  tag: string;
+  areaSqm: number;
+  thicknessM: number;
+  elevationM: number;
+}
+
+export function buildFoundationScheduleRows(foundations: Foundation[]): FoundationScheduleRow[] {
+  return foundations.map((f, index) => ({
+    tag: `F${index + 1}`,
+    areaSqm: polygonArea(f.boundary),
+    thicknessM: f.thickness,
+    elevationM: f.elevation,
+  }));
+}
+
+/** Footing is center+width/depth (like Column), so its schedule reads
+ * as a rectangular footprint, not a polygon area. */
+export interface FootingScheduleRow {
+  tag: string;
+  widthM: number;
+  depthM: number;
+  thicknessM: number;
+  elevationM: number;
+}
+
+export function buildFootingScheduleRows(footings: Footing[]): FootingScheduleRow[] {
+  return footings.map((f, index) => ({
+    tag: `FT${index + 1}`,
+    widthM: f.width,
+    depthM: f.depth,
+    thicknessM: f.thickness,
+    elevationM: f.elevation,
+  }));
+}
+
+/** Grid Line Reference: a plain position table (label, orientation,
+ * coordinate), not a spacing/bay-size calculation — the auto-label
+ * itself (getGridLineAutoLabel, apps/web/src/lib/floors.ts) already
+ * needs the full same-orientation list to compute, so this function
+ * takes each line's already-resolved label the same way
+ * buildSheetName-adjacent callers pass in a resolved sectionLine label
+ * to planAutoSheetSet, rather than re-deriving it here. Sorted
+ * vertical-then-horizontal, each group by position, matching how a
+ * real grid reference table reads (1, 2, 3… then A, B, C…). */
+export interface GridLineScheduleRow {
+  label: string;
+  orientation: GridLine['orientation'];
+  positionM: number;
+}
+
+export function buildGridLineScheduleRows(
+  gridLines: Array<{ orientation: GridLine['orientation']; position: number; resolvedLabel: string }>,
+): GridLineScheduleRow[] {
+  return [...gridLines]
+    .sort((a, b) => {
+      if (a.orientation !== b.orientation) return a.orientation === 'vertical' ? -1 : 1;
+      return a.position - b.position;
+    })
+    .map((l) => ({
+      label: l.resolvedLabel,
+      orientation: l.orientation,
+      positionM: l.position,
     }));
 }
 

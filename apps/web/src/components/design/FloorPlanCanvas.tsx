@@ -135,6 +135,14 @@ export interface FloorPlanCanvasProps {
    * about orientation (most of the design studio's own canvas usage)
    * don't get an overlay they didn't ask for. */
   northAngleDeg?: number;
+  /** The faint reference grid + origin cross-hair (see
+   * backgroundGridLines below) is a Design Studio editing aid — useful
+   * while placing/aligning elements, meaningless once a floor plan is
+   * captured for a printed Sheet, where it just shows up as unwanted
+   * background lines behind the drawing. Defaults to true (every
+   * existing Design Studio caller keeps its current look unchanged);
+   * Sheet capture call sites (SheetCapture.tsx) explicitly pass false. */
+  showBackgroundGrid?: boolean;
 }
 
 const ORIGIN_RATIO = 0.5; // meters (0,0) renders at the canvas center
@@ -215,6 +223,7 @@ export function FloorPlanCanvas({
   readOnly = false,
   onStageReady,
   northAngleDeg,
+  showBackgroundGrid = true,
 }: FloorPlanCanvasProps) {
   const {
     activeTool,
@@ -778,13 +787,15 @@ export function FloorPlanCanvas({
               )
         }
       >
-        <Layer listening={false}>
-          {backgroundGridLines.map((pts, i) => (
-            <Line key={i} points={pts} stroke="#EEF1F6" strokeWidth={1} />
-          ))}
-          <Line points={[0, origin.y, width, origin.y]} stroke="#D8DEE9" strokeWidth={1.5} />
-          <Line points={[origin.x, 0, origin.x, height]} stroke="#D8DEE9" strokeWidth={1.5} />
-        </Layer>
+        {showBackgroundGrid && (
+          <Layer listening={false}>
+            {backgroundGridLines.map((pts, i) => (
+              <Line key={i} points={pts} stroke="#EEF1F6" strokeWidth={1} />
+            ))}
+            <Line points={[0, origin.y, width, origin.y]} stroke="#D8DEE9" strokeWidth={1.5} />
+            <Line points={[origin.x, 0, origin.x, height]} stroke="#D8DEE9" strokeWidth={1.5} />
+          </Layer>
+        )}
 
         {/* Floor-below reference layer (Phase 7) — walls/columns from the
             floor directly underneath, faint and dashed, never

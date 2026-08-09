@@ -6,12 +6,16 @@ import type {
   Room,
   Opening,
   Ramp,
+  Roof,
+  Slab,
+  Ceiling,
+  Foundation,
   Stair,
   Point2D,
   SiteBoundaryEdge,
 } from '@archibim/object-model';
 import { detectRooms, detectBuildingFootprint } from './rooms';
-import { distance, isPointInPolygon, pointToSegmentDistance } from './geometry-utils';
+import { distance, isPointInPolygon, pointToSegmentDistance, polygonArea } from './geometry-utils';
 import { stairReferencePoint } from './stairs';
 
 /**
@@ -612,4 +616,69 @@ export function checkEscapeRoute(walls: Wall[], openings: Opening[], stairs: Sta
     issues.push({ id: 'ESCAPE_ROUTE:ESCAPE_ROUTE_OK:building', category: 'ESCAPE_ROUTE', severity: 'info', check: 'ESCAPE_ROUTE_OK', values: {} });
   }
   return issues;
+}
+
+// ─── Load Summary (Compliance Report, Phase 2) — approximate only ─────────
+// Honest scope limit stated once here: this platform has no structural
+// model (no rebar, no member design, no live/wind/seismic load cases —
+// those belong to the separate CivilOS Structural app), so there is no
+// real "Load Summary" this architectural app could produce. What follows
+// is a geometry-based SELF-WEIGHT approximation only — plan/boundary
+// area (or wall length) times thickness times a flat, commonly-cited
+// unit weight — good enough for an early-stage Compliance Report line
+// item ("roughly how much dead load is this design putting on its
+// foundations"), not a substitute for an actual structural dead-load
+// takeoff. Every element here already carries an optional
+// materialLabel/libraryItemId (see Slab's own comment on the Property-
+// System pattern), but resolving those against the Library catalog's
+// real unitWeightKnM3 needs an async Firestore read (see
+// MaterialDeadLoadRef in apps/web/src/lib/hub/hub-write.ts) that a pure
+// core-engine function can't perform — so this always uses the flat
+// default below regardless of whether an element has a material
+// override set, and says so in the exported label rather than silently
+// looking more precise than it is.
+export const APPROX_RCC_UNIT_WEIGHT_KN_M3 = 24; // reinforced concrete — common BNBC/IS-code default
+export const APPROX_BRICK_MASONRY_UNIT_WEIGHT_KN_M3 = 18.85; // solid brick masonry — common BNBC default
+
+export interface LoadSummary {
+  /** Slab + Roof + Foundation + Ceiling: boundary area × thickness × RCC unit weight. */
+  concreteSelfWeightKn: number;
+  /** Wall: length × height × thickness × brick masonry unit weight. */
+  wallSelfWeightKn: number;
+  totalApproxDeadLoadKn: number;
+  /** Same total, divided by the summed slab+roof plan area, as a rough
+   * kN/sqm figure a person can sanity-check against a typical RCC-frame
+   * building's actual total dead load (commonly 10–15 kN/sqm including
+   * superstructure) — null if there's no slab/roof area to divide by. */
+  approxDeadLoadKnPerSqm: number | null;
+}
+
+export function computeApproximateDeadLoad(
+  walls: Wall[],
+  slabs: Slab[],
+  roofs: Roof[],
+  foundations: Foundation[],
+  ceilings: Ceiling[],
+): LoadSummary {
+  const boundaryElements: Array<{ boundary: Point2D[]; thickness: number }> = [
+    ...slabs,
+    ...roofs,
+    ...foundations,
+    ...ceilings,
+  ];
+  const concreteSelfWeightKn = boundaryElements.reduce(
+    (sum, el) => sum + polygonArea(el.boundary) * el.thickness * APPROX_RCC_UNIT_WEIGHT_KN_M3,
+    0,
+  );
+
+  const wallSelfWeightKn = walls.reduce(
+    (sum, w) => sum + distance(w.start, w.end) * w.height * w.thickness * APPROX_BRICK_MASONRY_UNIT_WEIGHT_KN_M3,
+    0,
+  );
+
+  const totalApproxDeadLoadKn = concreteSelfWeightKn + wallSelfWeightKn;
+  const slabRoofAreaSqm = [...slabs, ...roofs].reduce((sum, el) => sum + polygonArea(el.boundary), 0);
+  const approxDeadLoadKnPerSqm = slabRoofAreaSqm > 1e-6 ? totalApproxDeadLoadKn / slabRoofAreaSqm : null;
+
+  return { concreteSelfWeightKn, wallSelfWeightKn, totalApproxDeadLoadKn, approxDeadLoadKnPerSqm };
 }

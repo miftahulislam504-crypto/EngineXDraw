@@ -4,8 +4,27 @@ export type SheetSize = 'A4' | 'A3' | 'A1';
 
 /**
  * Which kind of drawing a sheet's viewport shows.
+ *
+ * 'roofPlan' and 'sitePlan' both reuse the exact same FloorPlanCanvas
+ * capture pipeline 'floorPlan' already uses (same floorId field, same
+ * readOnly/onStageReady flow in the Sheet Manager) — they're kept as
+ * their own union members rather than folded into 'floorPlan' because
+ * they're semantically distinct sheets a real drawing set numbers and
+ * indexes separately (a Roof Plan and a ground-floor Plan are never the
+ * same sheet even when, incidentally, the same floor's model data would
+ * render both), and because a future pass may want Roof Plan to
+ * de-emphasize non-roof elements or Site Plan to emphasize
+ * SiteBoundary/parking/landscape — a distinction that needs to exist at
+ * the type level now even though today's renderer treats them the same
+ * as 'floorPlan'.
+ *
+ * 'coverSheet' is a different shape of sheet entirely: no captured
+ * drawing viewport at all, just project/building info plus a live
+ * Drawing Index built from every other Sheet in this building (see
+ * CoverSheetView) — so unlike every other variant here it uses none of
+ * floorId/direction/sectionLineId.
  */
-export type SheetViewportType = 'floorPlan' | 'elevation' | 'section';
+export type SheetViewportType = 'floorPlan' | 'elevation' | 'section' | 'roofPlan' | 'sitePlan' | 'coverSheet';
 
 /**
  * A printable sheet: a title block plus one drawing viewport. Floor Plan
@@ -20,7 +39,7 @@ export interface Sheet {
   sheetNumber: string; // e.g. "A-201"
   size: SheetSize;
   viewportType: SheetViewportType;
-  floorId?: string; // set when viewportType === 'floorPlan'
+  floorId?: string; // set when viewportType === 'floorPlan' | 'roofPlan' | 'sitePlan'
   direction?: 'N' | 'S' | 'E' | 'W'; // set when viewportType === 'elevation'
   sectionLineId?: string; // set when viewportType === 'section'
   /**

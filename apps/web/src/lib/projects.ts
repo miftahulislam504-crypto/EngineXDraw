@@ -273,7 +273,9 @@ export async function resyncBuildingFromHub(projectId: string, buildingId: strin
 export async function updateBuilding(
   projectId: string,
   buildingId: string,
-  patch: Partial<Pick<Building, 'name' | 'numberOfFloors' | 'buildingType' | 'totalAreaSqm' | 'northAngleDeg'>>,
+  patch: Partial<
+    Pick<Building, 'name' | 'numberOfFloors' | 'buildingType' | 'totalAreaSqm' | 'northAngleDeg' | 'titleBlock' | 'buildingNo'>
+  >,
 ) {
   const buildingRef = doc(db, 'projects', projectId, 'buildings', buildingId);
   await updateDoc(buildingRef, patch);

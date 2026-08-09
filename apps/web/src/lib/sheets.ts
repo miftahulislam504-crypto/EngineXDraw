@@ -91,6 +91,8 @@ export async function deleteSheet(projectId: string, buildingId: string, sheetId
   await deleteDoc(doc(sheetsCol(projectId, buildingId), sheetId));
 }
 
+const ELEVATION_ORDER_LENGTH = 4;
+
 /**
  * Phase D — Sheet Set workflow. Batch-creates the standard set of sheets
  * for a building in one call, instead of the person clicking through the
@@ -104,6 +106,19 @@ export async function deleteSheet(projectId: string, buildingId: string, sheetId
  *     in the Design Studio; this doesn't invent cuts on its own the way
  *     it can invent the 4 cardinal elevations, since there's no
  *     equivalent "obviously correct default" for where to cut a section
+ *   - One Roof Plan sheet (A401) per floor that actually has a Roof
+ *     element drawn on it — unlike Floor Plan, this doesn't default to
+ *     "every floor" (most floors have no roof at all; generating an
+ *     empty Roof Plan sheet for every level would just be noise)
+ *   - One Site Plan sheet (A501), tied to the ground floor (level 0) —
+ *     always generated once a ground floor exists, since a Site Plan
+ *     needs a footprint reference even on a building with no
+ *     SiteBoundary drawn yet (see the Site Plan viewport itself, which
+ *     falls back gracefully when siteBoundary is null)
+ *   - One Cover Sheet (A000, sorts first) — the only sheet in this set
+ *     with no floorId/direction/sectionLineId at all (see
+ *     SheetViewportType's own doc comment for why); always generated
+ *     exactly once per building, never once per floor
  *   - No cover render sheet: SheetViewportType has no 'render' variant
  *     (see sheets.ts's own type) — the photoreal Visualization view
  *     isn't a Sheet in this app's model, so it's out of scope here
@@ -123,6 +138,7 @@ export async function generateStandardSheetSet(
   buildingId: string,
   floors: Floor[],
   sectionLines: Array<{ floor: Floor; line: SectionLine }>,
+  roofFloors: Floor[],
   existingSheets: Sheet[],
   options: { size?: SheetSize; scaleLabel?: string; drawnBy?: string; date?: string } = {},
 ): Promise<{ created: number; skipped: number }> {
@@ -137,8 +153,14 @@ export async function generateStandardSheetSet(
     existingSheets.some((s) => s.viewportType === 'elevation' && s.direction === direction);
   const hasSectionSheet = (sectionLineId: string) =>
     existingSheets.some((s) => s.viewportType === 'section' && s.sectionLineId === sectionLineId);
+  const hasRoofPlanSheet = (floorId: string) =>
+    existingSheets.some((s) => s.viewportType === 'roofPlan' && s.floorId === floorId);
+  const hasSitePlanSheet = (floorId: string) =>
+    existingSheets.some((s) => s.viewportType === 'sitePlan' && s.floorId === floorId);
+  const hasCoverSheet = () => existingSheets.some((s) => s.viewportType === 'coverSheet');
 
   const toCreate: Array<Omit<Sheet, 'id' | 'buildingId' | 'createdAt' | 'updatedAt'>> = [];
+  let eligibleCount = floors.length + ELEVATION_ORDER_LENGTH + sectionLines.length;
 
   const sortedFloors = [...floors].sort((a, b) => a.level - b.level);
   sortedFloors.forEach((floor, index) => {
@@ -191,9 +213,61 @@ export async function generateStandardSheetSet(
     });
   });
 
+  const sortedRoofFloors = [...roofFloors].sort((a, b) => a.level - b.level);
+  sortedRoofFloors.forEach((floor, index) => {
+    if (hasRoofPlanSheet(floor.id)) return;
+    toCreate.push({
+      name: `${floor.name} Roof Plan`,
+      sheetNumber: `A4${String(index + 1).padStart(2, '0')}`,
+      size,
+      viewportType: 'roofPlan',
+      floorId: floor.id,
+      scaleLabel,
+      drawnBy,
+      date,
+    });
+  });
+  eligibleCount += roofFloors.length;
+
+  const groundFloor = sortedFloors.find((f) => f.level === 0);
+  if (groundFloor) {
+    eligibleCount += 1;
+    if (!hasSitePlanSheet(groundFloor.id)) {
+      toCreate.push({
+        name: 'Site Plan',
+        sheetNumber: 'A501',
+        size,
+        viewportType: 'sitePlan',
+        floorId: groundFloor.id,
+        scaleLabel,
+        drawnBy,
+        date,
+      });
+    }
+  }
+
+  if (floors.length > 0) {
+    eligibleCount += 1;
+    if (!hasCoverSheet()) {
+      toCreate.push({
+        name: 'Cover Sheet',
+        sheetNumber: 'A000',
+        size,
+        viewportType: 'coverSheet',
+        // No scale applies to a Cover Sheet (no drawing viewport) — kept
+        // as an empty string rather than the usual scaleLabel default so
+        // the title block doesn't print a misleading "1:100" next to a
+        // sheet with nothing drawn to that scale.
+        scaleLabel: '',
+        drawnBy,
+        date,
+      });
+    }
+  }
+
   for (const sheet of toCreate) {
     await createSheet(projectId, buildingId, sheet);
   }
 
-  return { created: toCreate.length, skipped: floors.length + ELEVATION_ORDER.length + sectionLines.length - toCreate.length };
+  return { created: toCreate.length, skipped: eligibleCount - toCreate.length };
 }

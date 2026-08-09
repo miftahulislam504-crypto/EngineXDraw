@@ -377,6 +377,9 @@ export interface Translations {
     viewportFloorPlan: string;
     viewportElevation: string;
     viewportSection: string;
+    viewportRoofPlan: string;
+    viewportSitePlan: string;
+    viewportCoverSheet: string;
     floor: string;
     direction: string;
     sectionLine: string;
@@ -399,6 +402,73 @@ export interface Translations {
     generateSetNoSectionsHint: string;
     generateSetResultCreated: string; // use {count} as placeholder
     generateSetResultNoneNew: string;
+
+    // Cover Sheet (viewportType === 'coverSheet')
+    coverSheetProjectLabel: string;
+    coverSheetClientLabel: string;
+    coverSheetLocationLabel: string;
+    coverSheetBuildingLabel: string;
+    coverSheetBuildingTypeLabel: string;
+    coverSheetFloorCountLabel: string;
+    coverSheetNotProvided: string;
+    coverSheetDrawingIndexTitle: string;
+    coverSheetIndexColSheetNumber: string;
+    coverSheetIndexColSheetName: string;
+    coverSheetIndexColViewportType: string;
+    coverSheetIndexEmptyState: string;
+    coverSheetRevisionTitle: string;
+    coverSheetRevisionColRev: string;
+    coverSheetRevisionColDate: string;
+    coverSheetRevisionColDescription: string;
+    coverSheetRevisionPlaceholder: string;
+
+    // Batch/Combined PDF export (Phase 4)
+    batchExportTitle: string;
+    batchExportDescription: string;
+    batchExportAction: string;
+    batchExportInProgress: string;
+    batchExportEmptyState: string;
+    batchExportSelectAll: string;
+    batchExportSelectNone: string;
+    batchExportSelectSheetLabel: string; // use {name}
+    batchExportDrawnByOverride: string;
+    batchExportDateOverride: string;
+    batchExportOverridePlaceholder: string;
+
+    // Sidebar title block (MICON-style redesign) — default text + shared labels
+    titleBlockStatusDefault: string;
+
+    // Title Block Settings (per-Building defaults, editable)
+    titleBlockSettingsTitle: string;
+    titleBlockSettingsDescription: string;
+    titleBlockSettingsToggle: string;
+    titleBlockSettingsSave: string;
+    titleBlockSettingsSaved: string;
+    titleBlockFieldCompanyName: string;
+    titleBlockFieldCompanyLogoUrl: string;
+    titleBlockFieldCompanyLogoUrlPlaceholder: string;
+    titleBlockFieldCompanyAddress: string;
+    titleBlockFieldCompanyAddressPlaceholder: string;
+    titleBlockFieldCompanyPhone: string;
+    titleBlockFieldCompanyEmail: string;
+    titleBlockFieldJobNo: string;
+    titleBlockFieldClientName: string;
+    titleBlockFieldLocation: string;
+    titleBlockFieldBuildingNo: string;
+    titleBlockFieldDetailByName: string;
+    titleBlockFieldDetailByCredential: string;
+    titleBlockFieldDesignByName: string;
+    titleBlockFieldDesignByCredential: string;
+    titleBlockFieldCheckedByName: string;
+    titleBlockFieldCheckedByCredential: string;
+    titleBlockFieldApprovedByName: string;
+    titleBlockFieldApprovedByCredential: string;
+    titleBlockFieldCopyrightNotice: string;
+    titleBlockFieldCopyrightNoticePlaceholder: string;
+
+    // Combined PDF export — per-export title block override
+    batchExportOverrideTitleBlockToggle: string;
+    batchExportOverrideTitleBlockDescription: string;
   };
   compliance: {
     pageTitle: string;
@@ -424,6 +494,24 @@ export interface Translations {
     gapsBody: string;
     categories: Record<ComplianceCategory, string>;
     messages: Record<ComplianceCheckType, string>;
+
+    reportTitle: string;
+    reportDescription: string;
+    reportExport: string;
+    reportSiteInfoLandArea: string; // use {n}
+    reportSiteInfoRoadWidth: string; // use {n}
+    reportSiteInfoNotEntered: string;
+    reportBuiltUpAreaTitle: string;
+    reportBuiltUpAreaFloor: string;
+    reportBuiltUpAreaFootprint: string;
+    reportBuiltUpAreaTotal: string;
+    reportLoadSummaryTitle: string;
+    reportLoadSummaryConcrete: string;
+    reportLoadSummaryWalls: string;
+    reportLoadSummaryTotal: string;
+    reportLoadSummaryPerSqm: string;
+    reportLoadSummaryUnavailable: string;
+    reportLoadSummaryDisclaimer: string;
   };
   environmental: {
     pageTitle: string;
@@ -523,6 +611,14 @@ export interface Translations {
     doorSchedule: string;
     windowSchedule: string;
     roomSchedule: string;
+    columnSchedule: string;
+    beamSchedule: string;
+    stairSchedule: string;
+    railingSchedule: string;
+    finishSchedule: string;
+    foundationSchedule: string;
+    footingSchedule: string;
+    gridLineSchedule: string;
     exportPdf: string;
     exportFullReport: string;
     scheduleColTag: string;
@@ -534,6 +630,23 @@ export interface Translations {
     scheduleColOccupancy: string;
     scheduleColArea: string;
     scheduleColPerimeter: string;
+    scheduleColShape: string;
+    scheduleColDepth: string;
+    scheduleColLength: string;
+    scheduleColElevation: string;
+    scheduleColFlights: string;
+    scheduleColSteps: string;
+    scheduleColTotalRise: string;
+    scheduleColPostSpacing: string;
+    scheduleColFinishFloor: string;
+    scheduleColFinishWalls: string;
+    scheduleColFinishCeiling: string;
+    scheduleColThickness: string;
+    scheduleColGridLabel: string;
+    scheduleColOrientation: string;
+    scheduleColPosition: string;
+    columnShapes: Record<'RECTANGULAR' | 'CIRCULAR', string>;
+    gridOrientations: Record<'vertical' | 'horizontal', string>;
     scheduleEmptyState: string;
 
     revisionTitle: string;

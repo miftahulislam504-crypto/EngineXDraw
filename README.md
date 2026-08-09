@@ -6,6 +6,7 @@ Turborepo monorepo implementing **Phase 1** (Foundation), **Phase 2** (Core Mode
 
 ## তৈরি হয়েছে (What's built
 ```
+
 archibim-platform/
   apps/web/            Next.js app
     .../login, register, dashboard, projects/new (wizard), projects/[id] (detail), dashboard/settings (2FA)

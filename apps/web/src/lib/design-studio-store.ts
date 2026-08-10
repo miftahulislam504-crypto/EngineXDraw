@@ -87,6 +87,33 @@ interface DesignStudioState {
   drawStart: Point2D | null;
   setDrawStart: (point: Point2D | null) => void;
 
+  /** Wall tool only: once the first point is placed, a length-input
+   * prompt asks for the exact distance to the second point (in meters)
+   * before the person aims a direction with the cursor/finger. Null
+   * means no length has been typed yet for the current wall segment
+   * (the prompt is showing, or the tool isn't 'wall'); once set, the
+   * live preview and the click that places the second point both
+   * project exactly this far from drawStart, along whatever direction
+   * the cursor indicates (see pointAtLockedLength in core-engine). Reset
+   * to null every time a new segment starts (after committing a wall,
+   * or when drawStart is cleared) so each segment's length is entered
+   * fresh — chaining into a second wall shouldn't silently reuse the
+   * first wall's length. */
+  pendingWallLength: number | null;
+  setPendingWallLength: (length: number | null) => void;
+
+  /** Wall tool only: when on, the second point is locked to strict
+   * 0°/90° (horizontal/vertical) from the first point regardless of
+   * where the cursor actually is — the common case for straight
+   * building walls. When off, the wall follows the cursor at whatever
+   * angle it's aimed, no snapping. Persists across segments/tool
+   * switches (a toolbar toggle, not a per-wall choice) since a person
+   * drawing a rectangular floor plan wants it on for the whole session,
+   * and someone drawing an angled facade wants it off for the whole
+   * session. */
+  orthoMode: boolean;
+  toggleOrthoMode: () => void;
+
   /** Vertices placed so far while drawing a polygon boundary (Slab,
    * Ceiling, Foundation, Roof, Balcony, Shaft, SiteBoundary — the tools
    * in RECTANGLE_TOOLS, despite the name; 2 clicks still gives the old
@@ -150,10 +177,26 @@ interface DesignStudioState {
 export const useDesignStudioStore = create<DesignStudioState>((set) => ({
   activeTool: 'select',
   setActiveTool: (tool) =>
-    set({ activeTool: tool, drawStart: null, polygonDraft: null, stairDraft: null, selection: null }),
+    set({
+      activeTool: tool,
+      drawStart: null,
+      pendingWallLength: null,
+      polygonDraft: null,
+      stairDraft: null,
+      selection: null,
+    }),
 
   drawStart: null,
-  setDrawStart: (point) => set({ drawStart: point }),
+  // Clearing drawStart (segment committed, or the draw was cancelled)
+  // also clears any typed length, so the next segment starts with a
+  // fresh length prompt instead of silently reusing the last one.
+  setDrawStart: (point) => set({ drawStart: point, pendingWallLength: null }),
+
+  pendingWallLength: null,
+  setPendingWallLength: (length) => set({ pendingWallLength: length }),
+
+  orthoMode: true,
+  toggleOrthoMode: () => set((s) => ({ orthoMode: !s.orthoMode })),
 
   polygonDraft: null,
   setPolygonDraft: (points) => set({ polygonDraft: points }),

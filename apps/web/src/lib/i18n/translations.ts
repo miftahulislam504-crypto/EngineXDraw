@@ -190,6 +190,15 @@ export interface Translations {
     escTooltip: string; // aria-label/tooltip for the Toolbar's Esc/Stop button — clears any in-progress draw and the current selection (Phase 6)
     showFloorBelow: string; // aria-label for the Toolbar's floor-below reference toggle (Phase 7)
     showFloorBelowTooltip: string; // tooltip explaining the floor-below reference toggle (Phase 7)
+    orthoMode: string; // aria-label for the Toolbar's Wall-tool Ortho (0°/90° lock) toggle
+    orthoModeTooltip: string; // tooltip explaining the Ortho toggle
+    wallLengthPrompt: {
+      label: string; // label on the length input shown right after the wall's first point is placed
+      placeholder: string; // placeholder text in the length input, e.g. "e.g. 3.5"
+      confirm: string; // button that locks in the typed length and starts aiming direction
+      cancel: string; // button that cancels the in-progress wall and clears drawStart
+      aimHint: string; // shown after length is locked, telling the person to now tap a direction
+    };
     zoomInTooltip: string;
     zoomOutTooltip: string;
     structuralBlock: {

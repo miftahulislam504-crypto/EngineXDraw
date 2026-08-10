@@ -38,6 +38,7 @@ import {
   findNearestWall,
   nearestParameterOnWall,
   pointAtParameter,
+  pointAtLockedLength,
   doorSwingGeometry,
   computeMiteredWallPolygons,
   isPointInPolygon,
@@ -230,6 +231,8 @@ export function FloorPlanCanvas({
     setActiveTool,
     drawStart,
     setDrawStart,
+    pendingWallLength,
+    orthoMode,
     polygonDraft,
     setPolygonDraft,
     stairDraft,
@@ -433,6 +436,19 @@ export function FloorPlanCanvas({
   const snapFromPointer = useCallback(
     (pos: Point2D) => {
       const cursorMeters = toMeters(pos);
+
+      // Wall tool with a typed length already locked in: the second
+      // point is pinned to exactly that distance from drawStart, along
+      // whatever direction the cursor is currently aimed (strict
+      // 0°/90° if Ortho mode is on, free angle otherwise). This
+      // intentionally bypasses the usual endpoint/wall-span/grid
+      // snapping below — the person already committed to an exact
+      // length by typing it, so snapping the distance to a nearby wall
+      // or grid point would silently override the number they entered.
+      if (activeTool === 'wall' && drawStart && pendingWallLength != null) {
+        return pointAtLockedLength(drawStart, cursorMeters, pendingWallLength, orthoMode);
+      }
+
       if (SNAP_AWARE_TOOLS.includes(activeTool)) {
         // Polygon and Stair tools track their in-progress points in
         // polygonDraft/stairDraft, not drawStart (drawStart stays null
@@ -454,7 +470,7 @@ export function FloorPlanCanvas({
       }
       return cursorMeters;
     },
-    [toMeters, activeTool, walls, gridSize, drawStart, polygonDraft],
+    [toMeters, activeTool, walls, gridSize, drawStart, polygonDraft, stairDraft, pendingWallLength, orthoMode],
   );
 
   function handleMouseMove(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
@@ -506,7 +522,13 @@ export function FloorPlanCanvas({
 
     const cursorMeters = toMeters(pos);
 
-    if (SNAP_AWARE_TOOLS.includes(activeTool)) {
+    // See snapFromPointer above — same length-lock bypass, kept here too
+    // since mousemove's live preview computes its own snap independently
+    // of the click handler rather than calling snapFromPointer.
+    if (activeTool === 'wall' && drawStart && pendingWallLength != null) {
+      setSnappedCursor(pointAtLockedLength(drawStart, cursorMeters, pendingWallLength, orthoMode));
+      setGuide(null);
+    } else if (SNAP_AWARE_TOOLS.includes(activeTool)) {
       const lastPoint = RECTANGLE_TOOLS.includes(activeTool)
         ? (polygonDraft?.[polygonDraft.length - 1] ?? undefined)
         : STAIR_TOOL.includes(activeTool)
@@ -543,6 +565,17 @@ export function FloorPlanCanvas({
     setSnappedCursor(point);
 
     if (CHAINING_LINE_TOOLS.includes(activeTool)) {
+      // Wall specifically: the first point opens a length-input prompt
+      // (see the design page's floating bar) instead of immediately
+      // arming a second-point click. Until a length has been typed and
+      // confirmed there, a tap on the canvas shouldn't commit a wall —
+      // it would use whatever the raw cursor position happens to be,
+      // defeating the point of asking for an exact length. Ortho mode
+      // still applies once the length is locked in, via
+      // snapFromPointer's pointAtLockedLength branch above.
+      if (activeTool === 'wall' && drawStart && pendingWallLength == null) {
+        return;
+      }
       if (!drawStart) {
         setDrawStart(point);
       } else {
@@ -2057,17 +2090,38 @@ export function FloorPlanCanvas({
             !RECTANGLE_TOOLS.includes(activeTool) &&
             drawStart &&
             snappedCursor && (
-              <Line
-                points={[
-                  toPixels(drawStart).x,
-                  toPixels(drawStart).y,
-                  toPixels(snappedCursor).x,
-                  toPixels(snappedCursor).y,
-                ]}
-                stroke="#2D6CDF"
-                strokeWidth={2}
-                dash={[6, 4]}
-              />
+              <>
+                <Line
+                  points={[
+                    toPixels(drawStart).x,
+                    toPixels(drawStart).y,
+                    toPixels(snappedCursor).x,
+                    toPixels(snappedCursor).y,
+                  ]}
+                  stroke="#2D6CDF"
+                  strokeWidth={2}
+                  dash={[6, 4]}
+                />
+                {/* Wall tool with a length already locked in — label the
+                    preview with that fixed length so it's clear the
+                    number typed in the prompt is what's about to be
+                    placed, not whatever distance the cursor happens to
+                    be at. Positioned at the segment's midpoint, offset
+                    upward slightly so it doesn't sit directly on the
+                    dashed line. */}
+                {activeTool === 'wall' && pendingWallLength != null && (
+                  <Text
+                    x={(toPixels(drawStart).x + toPixels(snappedCursor).x) / 2}
+                    y={(toPixels(drawStart).y + toPixels(snappedCursor).y) / 2 - 16}
+                    text={`${pendingWallLength.toFixed(2)} m`}
+                    fontSize={12}
+                    fontStyle="bold"
+                    fill="#2D6CDF"
+                    align="center"
+                    offsetX={20}
+                  />
+                )}
+              </>
             )}
 
           {/* Polygon boundary tools (Slab/Ceiling/Foundation/Roof/

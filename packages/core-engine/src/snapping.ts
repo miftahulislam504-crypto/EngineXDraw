@@ -100,6 +100,39 @@ export function snapOrthogonalToAngle(
 }
 
 /**
+ * Places a point exactly `lengthMeters` away from `from`, in the
+ * direction the cursor (`cursorRaw`) is pointing — used by the Wall
+ * tool's "type a length, then aim with the cursor" flow. When
+ * `orthoMode` is on, the direction is first locked to the nearest of
+ * 0°/90°/180°/270° (strict horizontal/vertical) so the typed length
+ * always produces an axis-aligned wall; when off, the raw cursor angle
+ * is used as-is (no 45° snapping — a deliberately free direction since
+ * the length is already pinned down numerically). Falls back to
+ * pointing along +X if the cursor hasn't moved away from `from` yet, so
+ * the live preview has something sensible to show immediately after the
+ * length is confirmed.
+ */
+export function pointAtLockedLength(
+  from: Point2D,
+  cursorRaw: Point2D,
+  lengthMeters: number,
+  orthoMode: boolean,
+): Point2D {
+  const dx = cursorRaw.x - from.x;
+  const dy = cursorRaw.y - from.y;
+  const dist = Math.hypot(dx, dy);
+  let angleRad = dist === 0 ? 0 : Math.atan2(dy, dx);
+  if (orthoMode) {
+    const rightAngle = Math.PI / 2;
+    angleRad = Math.round(angleRad / rightAngle) * rightAngle;
+  }
+  return {
+    x: from.x + lengthMeters * Math.cos(angleRad),
+    y: from.y + lengthMeters * Math.sin(angleRad),
+  };
+}
+
+/**
  * Priority: existing wall endpoint > a point along another wall's span
  * (T-junction) > orthogonal angle from the in-progress wall's start point >
  * plain grid. Endpoint snaps win because missing a connection is a worse

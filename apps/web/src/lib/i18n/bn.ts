@@ -175,6 +175,15 @@ export const bn: Translations = {
     escTooltip: 'থামুন / বাতিল করুন (Esc)',
     showFloorBelow: 'নিচতলা রেফারেন্স',
     showFloorBelowTooltip: 'নিচতলার wall ও column হালকাভাবে দেখান, যাতে এই তলার সাথে নিচতলা মিলিয়ে আঁকা যায়',
+    orthoMode: 'সোজা মোড',
+    orthoModeTooltip: 'অন থাকলে wall শুধু সোজা (0°/90°) টানা যাবে, অফ থাকলে যেকোনো দিকে টানা যাবে',
+    wallLengthPrompt: {
+      label: 'দৈর্ঘ্য (মিটার)',
+      placeholder: 'যেমন ৩.৫',
+      confirm: 'ওকে',
+      cancel: 'বাতিল',
+      aimHint: 'এখন দিক ঠিক করতে ট্যাপ করুন',
+    },
     zoomInTooltip: 'জুম ইন',
     zoomOutTooltip: 'জুম আউট',
     structuralBlock: {

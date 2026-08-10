@@ -305,7 +305,22 @@ export default function DesignStudioPage() {
     setPolygonDraft,
     stairDraft,
     setStairDraft,
+    drawStart,
+    setDrawStart,
+    pendingWallLength,
+    setPendingWallLength,
   } = useDesignStudioStore();
+  // Local text-field state for the Wall length prompt — kept as a raw
+  // string (not the parsed number) so the person can type freely (an
+  // empty field, a trailing decimal point mid-entry, etc.) without the
+  // input fighting them. Only parsed into pendingWallLength once they
+  // confirm. Reset whenever drawStart is cleared (wall cancelled,
+  // finished, or Escape) so a stale value doesn't linger into the next
+  // wall's prompt.
+  const [wallLengthInput, setWallLengthInput] = useState('');
+  useEffect(() => {
+    if (!drawStart) setWallLengthInput('');
+  }, [drawStart]);
   const { t } = useI18nStore();
   const currentFloorLevel = floors.find((f) => f.id === floorId)?.level ?? 0;
   // Highest Floor.level among this building's floors — used to notice
@@ -1252,6 +1267,68 @@ export default function DesignStudioPage() {
               )}
               <Button variant="secondary" size="sm" onClick={() => setStairDraft(null)}>
                 {t.designStudio.stairDraft.cancel}
+              </Button>
+            </div>
+          )}
+          {/* Wall tool — length prompt. Appears the moment the first
+              point is placed (drawStart set), before any length has
+              been locked in (pendingWallLength still null). Confirming
+              hands off to FloorPlanCanvas's aim-with-cursor flow (see
+              pointAtLockedLength there); Cancel backs out of the wall
+              entirely rather than just closing the prompt, since
+              there's no useful state to return to otherwise. Once a
+              length is locked in, this bar is replaced by a small aim
+              hint so it doesn't sit on screen fighting for space with
+              the live length label FloorPlanCanvas draws on the canvas
+              itself. */}
+          {activeTool === 'wall' && drawStart && pendingWallLength == null && (
+            <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-sheet border border-line bg-white/95 px-3 py-2 text-sm shadow-sm">
+              <label className="text-ink-muted" htmlFor="wall-length-input">
+                {t.designStudio.wallLengthPrompt.label}
+              </label>
+              <input
+                id="wall-length-input"
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                autoFocus
+                value={wallLengthInput}
+                onChange={(e) => setWallLengthInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return;
+                  const parsed = parseFloat(wallLengthInput);
+                  if (Number.isFinite(parsed) && parsed > 0) setPendingWallLength(parsed);
+                }}
+                placeholder={t.designStudio.wallLengthPrompt.placeholder}
+                className="w-20 rounded-sheet border border-line-strong bg-surface px-2 py-1 font-body text-sm text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent"
+              />
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  const parsed = parseFloat(wallLengthInput);
+                  if (Number.isFinite(parsed) && parsed > 0) setPendingWallLength(parsed);
+                }}
+              >
+                {t.designStudio.wallLengthPrompt.confirm}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setDrawStart(null);
+                }}
+              >
+                {t.designStudio.wallLengthPrompt.cancel}
+              </Button>
+            </div>
+          )}
+          {activeTool === 'wall' && drawStart && pendingWallLength != null && (
+            <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-sheet border border-line bg-white/95 px-3 py-2 text-sm text-ink-muted shadow-sm">
+              <span>{t.designStudio.wallLengthPrompt.aimHint}</span>
+              <Button variant="secondary" size="sm" onClick={() => setDrawStart(null)}>
+                {t.designStudio.wallLengthPrompt.cancel}
               </Button>
             </div>
           )}

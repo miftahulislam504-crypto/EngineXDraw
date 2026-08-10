@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import clsx from 'clsx';
-import { Library, ListChecks, Maximize, Minus, Plus as PlusIcon, Redo2, RotateCcw, Trash2, Undo2, X, Layers2 } from 'lucide-react';
+import { Library, ListChecks, Maximize, Minus, Plus as PlusIcon, Redo2, RotateCcw, Trash2, Undo2, X, Layers2, CornerDownRight } from 'lucide-react';
 import { useDesignStudioStore, type DesignTool } from '@/lib/design-studio-store';
 import { useDesignHistoryStore } from '@/lib/design-history';
 import { useI18nStore, formatTemplate } from '@/lib/i18n';
@@ -70,6 +70,8 @@ export function Toolbar({
     setStairDraft,
     showFloorBelow,
     toggleShowFloorBelow,
+    orthoMode,
+    toggleOrthoMode,
   } = useDesignStudioStore();
   const { t } = useI18nStore();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -196,6 +198,28 @@ export function Toolbar({
         >
           <Layers2 size={16} aria-hidden />
         </button>
+
+        {/* Wall tool only — locks the second point to strict 0°/90°
+            from the first (Ortho mode) instead of following the cursor
+            at whatever free angle it's aimed. Only shown while the Wall
+            tool is active since it's meaningless for every other tool;
+            unlike the floor-below toggle above (which stays visible but
+            disabled off its own floor), there's no value in a
+            permanently-visible button that does nothing most of the
+            time. */}
+        {activeTool === 'wall' && (
+          <button
+            onClick={toggleOrthoMode}
+            title={t.designStudio.orthoModeTooltip}
+            aria-label={t.designStudio.orthoMode}
+            className={clsx(
+              'flex shrink-0 items-center justify-center rounded-sheet p-2 transition-colors',
+              orthoMode ? 'bg-accent-soft text-accent-dark' : 'text-ink-muted hover:bg-paper hover:text-ink',
+            )}
+          >
+            <CornerDownRight size={16} aria-hidden />
+          </button>
+        )}
       </div>
 
       {/* Row 2: current tool indicator, undo/redo, esc, zoom, reset, delete. */}

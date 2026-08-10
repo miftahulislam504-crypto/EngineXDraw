@@ -175,6 +175,15 @@ export const en: Translations = {
     escTooltip: 'Stop / cancel (Esc)',
     showFloorBelow: 'Floor below',
     showFloorBelowTooltip: "Show the floor below's walls and columns as a faint reference, to line up this floor with what's underneath it",
+    orthoMode: 'Ortho mode',
+    orthoModeTooltip: 'On locks walls to straight 0°/90° angles; off lets you draw a wall at any angle',
+    wallLengthPrompt: {
+      label: 'Length (m)',
+      placeholder: 'e.g. 3.5',
+      confirm: 'OK',
+      cancel: 'Cancel',
+      aimHint: 'Now tap to set the direction',
+    },
     zoomInTooltip: 'Zoom in',
     zoomOutTooltip: 'Zoom out',
     structuralBlock: {

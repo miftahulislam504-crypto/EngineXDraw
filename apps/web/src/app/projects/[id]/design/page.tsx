@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import clsx from 'clsx';
 import { Button } from '@archibim/shared-ui';
+import { feetInchesToMeters, formatFeetInches } from '@archibim/core-engine';
 import {
   Building2 as BuildingIcon,
   Layers,
@@ -317,9 +318,13 @@ export default function DesignStudioPage() {
   // confirm. Reset whenever drawStart is cleared (wall cancelled,
   // finished, or Escape) so a stale value doesn't linger into the next
   // wall's prompt.
-  const [wallLengthInput, setWallLengthInput] = useState('');
+  const [wallLengthFeetInput, setWallLengthFeetInput] = useState('');
+  const [wallLengthInchInput, setWallLengthInchInput] = useState('');
   useEffect(() => {
-    if (!drawStart) setWallLengthInput('');
+    if (!drawStart) {
+      setWallLengthFeetInput('');
+      setWallLengthInchInput('');
+    }
   }, [drawStart]);
   const { t } = useI18nStore();
   const currentFloorLevel = floors.find((f) => f.id === floorId)?.level ?? 0;
@@ -1283,32 +1288,55 @@ export default function DesignStudioPage() {
               itself. */}
           {activeTool === 'wall' && drawStart && pendingWallLength == null && (
             <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-sheet border border-line bg-white/95 px-3 py-2 text-sm shadow-sm">
-              <label className="text-ink-muted" htmlFor="wall-length-input">
+              <label className="text-ink-muted" htmlFor="wall-length-feet-input">
                 {t.designStudio.wallLengthPrompt.label}
               </label>
               <input
-                id="wall-length-input"
+                id="wall-length-feet-input"
                 type="number"
                 inputMode="decimal"
-                step="0.01"
-                min="0"
+                step="1"
                 autoFocus
-                value={wallLengthInput}
-                onChange={(e) => setWallLengthInput(e.target.value)}
+                value={wallLengthFeetInput}
+                onChange={(e) => setWallLengthFeetInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key !== 'Enter') return;
-                  const parsed = parseFloat(wallLengthInput);
-                  if (Number.isFinite(parsed) && parsed > 0) setPendingWallLength(parsed);
+                  const feet = parseFloat(wallLengthFeetInput) || 0;
+                  const inches = parseFloat(wallLengthInchInput) || 0;
+                  const meters = feetInchesToMeters(feet, inches);
+                  if (meters > 0) setPendingWallLength(meters);
                 }}
-                placeholder={t.designStudio.wallLengthPrompt.placeholder}
-                className="w-20 rounded-sheet border border-line-strong bg-surface px-2 py-1 font-body text-sm text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent"
+                placeholder={t.designStudio.wallLengthPrompt.placeholderFeet}
+                className="w-14 rounded-sheet border border-line-strong bg-surface px-2 py-1 font-body text-sm text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent"
               />
+              <span className="text-xs text-ink-faint">ft</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.25"
+                min="0"
+                max="11.99"
+                value={wallLengthInchInput}
+                onChange={(e) => setWallLengthInchInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return;
+                  const feet = parseFloat(wallLengthFeetInput) || 0;
+                  const inches = parseFloat(wallLengthInchInput) || 0;
+                  const meters = feetInchesToMeters(feet, inches);
+                  if (meters > 0) setPendingWallLength(meters);
+                }}
+                placeholder={t.designStudio.wallLengthPrompt.placeholderInches}
+                className="w-14 rounded-sheet border border-line-strong bg-surface px-2 py-1 font-body text-sm text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent"
+              />
+              <span className="text-xs text-ink-faint">in</span>
               <Button
                 variant="primary"
                 size="sm"
                 onClick={() => {
-                  const parsed = parseFloat(wallLengthInput);
-                  if (Number.isFinite(parsed) && parsed > 0) setPendingWallLength(parsed);
+                  const feet = parseFloat(wallLengthFeetInput) || 0;
+                  const inches = parseFloat(wallLengthInchInput) || 0;
+                  const meters = feetInchesToMeters(feet, inches);
+                  if (meters > 0) setPendingWallLength(meters);
                 }}
               >
                 {t.designStudio.wallLengthPrompt.confirm}

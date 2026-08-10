@@ -1,5 +1,5 @@
 import type { Point2D, Stair, StairFlight } from '@archibim/object-model';
-import { flightsTurnAtJoint } from '@archibim/object-model';
+import { flightsTurnAtJoint, DEFAULT_STAIR_RISER_HEIGHT } from '@archibim/object-model';
 
 export function flightLength(flight: StairFlight): number {
   return Math.hypot(flight.end.x - flight.start.x, flight.end.y - flight.start.y);
@@ -204,6 +204,92 @@ export function deriveStairLandings(stair: Stair): StairLanding[] {
   }
 
   return landings;
+}
+
+/** How far apart (meters, center-to-center) the two parallel flights of
+ * a U-shape/switchback preset sit — needs to clear the stair's own
+ * width so the up-flight and down-flight don't overlap, plus a little
+ * headroom for the mid landing itself to read as a real platform
+ * rather than a hairline gap. */
+function uShapeFlightGap(stairWidth: number): number {
+  return stairWidth + Math.max(0.9, stairWidth);
+}
+
+/** Reshapes a stair's flights into a standard U-shape (switchback):
+ * two parallel straight flights, same total rise as before, connected
+ * by a 180° turn at a mid landing — the most common residential/
+ * stairwell layout (walk up half the rise, turn back on yourself, walk
+ * up the rest, arriving above where you started). This is a *preset* —
+ * a shortcut for reshaping an already-drawn stair — not a new drawing
+ * tool; the stair itself is still created by the point-by-point stair
+ * tool in FloorPlanCanvas (see handleCreateStair), same as before.
+ *
+ * Orientation is taken from the stair's existing first flight (its
+ * start point and direction of travel), so applying the preset doesn't
+ * relocate the stair on the plan — it just re-lays-out the flights
+ * starting from the same spot the user originally drew.
+ *
+ * Total rise and total step count are preserved from the stair as
+ * drawn (stairTotalRise / stairTotalSteps), split evenly between the
+ * two flights (the standard case — an odd total step count puts the
+ * extra step on the lower flight, matching common stair-shop practice
+ * of never leaving the top flight one step short of a full landing
+ * height). Width and riser height are also preserved (riser height
+ * falls back to the object-model default only if the stair had no
+ * flights to read it from — DEFAULT_STAIR_RISER_HEIGHT, the same
+ * constant handleCreateStair uses for a brand new stair). */
+export function applyUShapeStairPreset(stair: Stair): StairFlight[] {
+  const first = stair.flights[0];
+  const totalSteps = Math.max(2, stairTotalSteps(stair) || 12);
+  const riserHeight = first?.riserHeight ?? DEFAULT_STAIR_RISER_HEIGHT;
+
+  const lowerSteps = Math.ceil(totalSteps / 2);
+  const upperSteps = totalSteps - lowerSteps;
+
+  const origin: Point2D = first?.start ?? { x: 0, y: 0 };
+  // Direction of travel for the lower (first) flight — reuse the
+  // existing stair's orientation so the preset doesn't spin the stair
+  // to a surprising new angle; default to +x if there's nothing to
+  // read (a stair somehow created with zero flights).
+  let dx = 1;
+  let dy = 0;
+  if (first) {
+    const rawDx = first.end.x - first.start.x;
+    const rawDy = first.end.y - first.start.y;
+    const len = Math.hypot(rawDx, rawDy) || 1;
+    dx = rawDx / len;
+    dy = rawDy / len;
+  }
+  // Perpendicular direction — where the return flight sits, offset by
+  // the gap so it doesn't overlap the first flight or its landing.
+  const px = -dy;
+  const py = dx;
+  const gap = uShapeFlightGap(stair.width);
+
+  const lowerRun = lowerSteps * treadDepthForPreset(stair.width);
+  const lowerEnd: Point2D = { x: origin.x + dx * lowerRun, y: origin.y + dy * lowerRun };
+
+  // Upper flight runs back the way it came (switchback), offset
+  // sideways by `gap`, ending directly above (in plan) the point
+  // `gap` away from the origin — i.e. the classic U shape.
+  const upperStart: Point2D = { x: lowerEnd.x + px * gap, y: lowerEnd.y + py * gap };
+  const upperRun = upperSteps * treadDepthForPreset(stair.width);
+  const upperEnd: Point2D = { x: upperStart.x - dx * upperRun, y: upperStart.y - dy * upperRun };
+
+  return [
+    { start: origin, end: lowerEnd, numberOfSteps: lowerSteps, riserHeight },
+    { start: upperStart, end: upperEnd, numberOfSteps: upperSteps, riserHeight },
+  ];
+}
+
+/** A reasonable tread depth (meters) to lay out a preset flight's run
+ * with — BNBC 2020's comfortable residential range is ~250-300mm; 275mm
+ * sits in the middle. This only sizes the *preset's* initial geometry;
+ * treadDepth() above still derives the real value from whatever run/
+ * step-count the user ends up with after dragging endpoints or editing
+ * numberOfSteps, same as any other stair. */
+function treadDepthForPreset(_stairWidth: number): number {
+  return 0.275;
 }
 
 /** Centroid-ish reference point for the whole stair — used by

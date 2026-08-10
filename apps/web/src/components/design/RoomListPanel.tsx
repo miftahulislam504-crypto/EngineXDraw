@@ -2,6 +2,7 @@
 
 import type { OccupancyType, Room } from '@archibim/object-model';
 import { Button, Input } from '@archibim/shared-ui';
+import { formatFeetInches, sqMetersToSqFeet, cubicMetersToCubicFeet } from '@archibim/core-engine';
 import { useI18nStore, formatTemplate } from '@/lib/i18n';
 
 export interface RoomListPanelProps {
@@ -35,7 +36,7 @@ export function RoomListPanel({ rooms, onClose, onUpdateRoom }: RoomListPanelPro
             {formatTemplate(t.roomsPanel.title, { n: rooms.length })}
           </h2>
           <p className="font-mono text-xs text-ink-faint">
-            {formatTemplate(t.roomsPanel.totalArea, { area: totalArea.toFixed(1) })}
+            {formatTemplate(t.roomsPanel.totalArea, { area: sqMetersToSqFeet(totalArea).toFixed(1) })}
           </p>
         </div>
         <button onClick={onClose} className="text-ink-faint hover:text-ink" aria-label={t.designStudio.closeAriaLabel}>
@@ -84,7 +85,8 @@ export function RoomListPanel({ rooms, onClose, onUpdateRoom }: RoomListPanelPro
                   {t.roomsPanel.areaPerimeterVolume}
                 </span>
                 <span className="font-mono text-sm text-ink">
-                  {room.areaSqm.toFixed(1)} m² · {room.perimeterM.toFixed(1)} m · {room.volumeCubicM.toFixed(1)} m³
+                  {sqMetersToSqFeet(room.areaSqm).toFixed(1)} sq ft · {formatFeetInches(room.perimeterM)} ·{' '}
+                  {cubicMetersToCubicFeet(room.volumeCubicM).toFixed(1)} cu ft
                 </span>
               </div>
             </div>

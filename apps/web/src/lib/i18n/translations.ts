@@ -194,7 +194,8 @@ export interface Translations {
     orthoModeTooltip: string; // tooltip explaining the Ortho toggle
     wallLengthPrompt: {
       label: string; // label on the length input shown right after the wall's first point is placed
-      placeholder: string; // placeholder text in the length input, e.g. "e.g. 3.5"
+      placeholderFeet: string; // placeholder text in the feet box, e.g. "ft"
+      placeholderInches: string; // placeholder text in the inches box, e.g. "in"
       confirm: string; // button that locks in the typed length and starts aiming direction
       cancel: string; // button that cancels the in-progress wall and clears drawStart
       aimHint: string; // shown after length is locked, telling the person to now tap a direction
@@ -273,6 +274,9 @@ export interface Translations {
     stairSummary: string; // use {steps} and {rise} placeholders
     flightLabel: string; // use {n} placeholder
     treadDepth: string; // use {depth} placeholder
+    stairShape: string;
+    stairShapeUShape: string;
+    stairShapeUShapeHint: string;
     mullionSpacing: string;
     label: string;
     rotation: string;

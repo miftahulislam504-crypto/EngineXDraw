@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import * as THREE from 'three';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Grid, Environment, Html } from '@react-three/drei';
+import { sqMetersToSqFeet } from '@archibim/core-engine';
 import type {
   Balcony,
   Beam,
@@ -563,7 +564,7 @@ export function RoomLabel({ room }: { room: Room }) {
       <div className="pointer-events-none whitespace-nowrap rounded bg-white/80 px-2 py-0.5 text-center font-mono text-[10px] text-ink-muted shadow-sm">
         {room.name}
         <br />
-        {room.areaSqm.toFixed(1)} m²
+        {sqMetersToSqFeet(room.areaSqm).toFixed(1)} sq ft
       </div>
     </Html>
   );

@@ -28,8 +28,15 @@ import type {
   Stair,
   Wall,
 } from '@archibim/object-model';
-import { wallLength, treadDepth, stairTotalRise, stairTotalSteps } from '@archibim/core-engine';
-import { Button, Input } from '@archibim/shared-ui';
+import {
+  wallLength,
+  treadDepth,
+  stairTotalRise,
+  stairTotalSteps,
+  formatFeetInches,
+  applyUShapeStairPreset,
+} from '@archibim/core-engine';
+import { Button, Input, LengthInput } from '@archibim/shared-ui';
 import { useDesignStudioStore } from '@/lib/design-studio-store';
 import { useI18nStore, formatTemplate } from '@/lib/i18n';
 import type { Translations } from '@/lib/i18n/translations';
@@ -245,14 +252,10 @@ export function PropertiesPanel({
 
       {wall && (
         <div className="flex flex-col gap-3">
-          <Input
+          <LengthInput
             label={t.properties.length}
-            type="number"
-            step={0.05}
-            min={0.1}
-            value={Number(wallLength(wall).toFixed(3))}
-            onChange={(e) => {
-              const newLength = Number(e.target.value);
+            valueMeters={wallLength(wall)}
+            onChangeMeters={(newLength) => {
               if (!Number.isFinite(newLength) || newLength <= 0) return;
               const dx = wall.end.x - wall.start.x;
               const dy = wall.end.y - wall.start.y;
@@ -268,19 +271,16 @@ export function PropertiesPanel({
               });
             }}
           />
-          <Input
+          <LengthInput
             label={t.properties.thickness}
-            type="number"
-            step={0.01}
-            value={wall.thickness}
-            onChange={(e) => onUpdateWall(wall.id, { thickness: Number(e.target.value) })}
+            inchStep={0.125}
+            valueMeters={wall.thickness}
+            onChangeMeters={(thickness) => onUpdateWall(wall.id, { thickness })}
           />
-          <Input
+          <LengthInput
             label={t.properties.height}
-            type="number"
-            step={0.05}
-            value={wall.height}
-            onChange={(e) => onUpdateWall(wall.id, { height: Number(e.target.value) })}
+            valueMeters={wall.height}
+            onChangeMeters={(height) => onUpdateWall(wall.id, { height })}
           />
           <label className="flex flex-col gap-1.5">
             <span className="font-mono text-[11px] uppercase tracking-wide text-ink-muted">
@@ -361,29 +361,21 @@ export function PropertiesPanel({
 
       {opening && (
         <div className="flex flex-col gap-3">
-          <Input
+          <LengthInput
             label={t.properties.width}
-            type="number"
-            step={0.05}
-            value={opening.width}
-            onChange={(e) => onUpdateOpening(opening.id, { width: Number(e.target.value) })}
+            valueMeters={opening.width}
+            onChangeMeters={(width) => onUpdateOpening(opening.id, { width })}
           />
-          <Input
+          <LengthInput
             label={t.properties.height}
-            type="number"
-            step={0.05}
-            value={opening.height}
-            onChange={(e) => onUpdateOpening(opening.id, { height: Number(e.target.value) })}
+            valueMeters={opening.height}
+            onChangeMeters={(height) => onUpdateOpening(opening.id, { height })}
           />
           {opening.kind === 'WINDOW' && (
-            <Input
+            <LengthInput
               label={t.properties.sillHeight}
-              type="number"
-              step={0.05}
-              value={opening.sillHeight}
-              onChange={(e) =>
-                onUpdateOpening(opening.id, { sillHeight: Number(e.target.value) })
-              }
+              valueMeters={opening.sillHeight}
+              onChangeMeters={(sillHeight) => onUpdateOpening(opening.id, { sillHeight })}
             />
           )}
           {opening.kind === 'DOOR' && (
@@ -418,135 +410,125 @@ export function PropertiesPanel({
 
       {column && (
         <div className="flex flex-col gap-3">
-          <Input
+          <LengthInput
             label={t.properties.width}
-            type="number"
-            step={0.05}
-            value={column.width}
-            onChange={(e) => onUpdateColumn(column.id, { width: Number(e.target.value) })}
+            valueMeters={column.width}
+            onChangeMeters={(width) => onUpdateColumn(column.id, { width })}
           />
           {column.shape === 'RECTANGULAR' && (
-            <Input
+            <LengthInput
               label={t.properties.depth}
-              type="number"
-              step={0.05}
-              value={column.depth}
-              onChange={(e) => onUpdateColumn(column.id, { depth: Number(e.target.value) })}
+              valueMeters={column.depth}
+              onChangeMeters={(depth) => onUpdateColumn(column.id, { depth })}
             />
           )}
-          <Input
+          <LengthInput
             label={t.properties.height}
-            type="number"
-            step={0.05}
-            value={column.height}
-            onChange={(e) => onUpdateColumn(column.id, { height: Number(e.target.value) })}
+            valueMeters={column.height}
+            onChangeMeters={(height) => onUpdateColumn(column.id, { height })}
           />
         </div>
       )}
 
       {beam && (
         <div className="flex flex-col gap-3">
-          <Input
+          <LengthInput
             label={t.properties.width}
-            type="number"
-            step={0.05}
-            value={beam.width}
-            onChange={(e) => onUpdateBeam(beam.id, { width: Number(e.target.value) })}
+            valueMeters={beam.width}
+            onChangeMeters={(width) => onUpdateBeam(beam.id, { width })}
           />
-          <Input
+          <LengthInput
             label={t.properties.depth}
-            type="number"
-            step={0.05}
-            value={beam.depth}
-            onChange={(e) => onUpdateBeam(beam.id, { depth: Number(e.target.value) })}
+            valueMeters={beam.depth}
+            onChangeMeters={(depth) => onUpdateBeam(beam.id, { depth })}
           />
-          <Input
+          <LengthInput
             label={t.properties.elevationAboveFloor}
-            type="number"
-            step={0.05}
-            value={beam.elevation}
-            onChange={(e) => onUpdateBeam(beam.id, { elevation: Number(e.target.value) })}
+            valueMeters={beam.elevation}
+            onChangeMeters={(elevation) => onUpdateBeam(beam.id, { elevation })}
           />
         </div>
       )}
 
       {footing && (
         <div className="flex flex-col gap-3">
-          <Input
+          <LengthInput
             label={t.properties.width}
-            type="number"
-            step={0.05}
-            value={footing.width}
-            onChange={(e) => onUpdateFooting(footing.id, { width: Number(e.target.value) })}
+            valueMeters={footing.width}
+            onChangeMeters={(width) => onUpdateFooting(footing.id, { width })}
           />
-          <Input
+          <LengthInput
             label={t.properties.depth}
-            type="number"
-            step={0.05}
-            value={footing.depth}
-            onChange={(e) => onUpdateFooting(footing.id, { depth: Number(e.target.value) })}
+            valueMeters={footing.depth}
+            onChangeMeters={(depth) => onUpdateFooting(footing.id, { depth })}
           />
-          <Input
+          <LengthInput
             label={t.properties.thickness}
-            type="number"
-            step={0.05}
-            value={footing.thickness}
-            onChange={(e) => onUpdateFooting(footing.id, { thickness: Number(e.target.value) })}
+            inchStep={0.125}
+            valueMeters={footing.thickness}
+            onChangeMeters={(thickness) => onUpdateFooting(footing.id, { thickness })}
           />
         </div>
       )}
 
       {ramp && (
         <div className="flex flex-col gap-3">
-          <Input
+          <LengthInput
             label={t.properties.width}
-            type="number"
-            step={0.05}
-            value={ramp.width}
-            onChange={(e) => onUpdateRamp(ramp.id, { width: Number(e.target.value) })}
+            valueMeters={ramp.width}
+            onChangeMeters={(width) => onUpdateRamp(ramp.id, { width })}
           />
-          <Input
+          <LengthInput
             label={t.properties.topElevation}
-            type="number"
-            step={0.05}
-            value={ramp.endElevation}
-            onChange={(e) => onUpdateRamp(ramp.id, { endElevation: Number(e.target.value) })}
+            valueMeters={ramp.endElevation}
+            onChangeMeters={(endElevation) => onUpdateRamp(ramp.id, { endElevation })}
           />
         </div>
       )}
 
       {railing && (
         <div className="flex flex-col gap-3">
-          <Input
+          <LengthInput
             label={t.properties.height}
-            type="number"
-            step={0.05}
-            value={railing.height}
-            onChange={(e) => onUpdateRailing(railing.id, { height: Number(e.target.value) })}
+            valueMeters={railing.height}
+            onChangeMeters={(height) => onUpdateRailing(railing.id, { height })}
           />
-          <Input
+          <LengthInput
             label={t.properties.postSpacing}
-            type="number"
-            step={0.1}
-            value={railing.postSpacing}
-            onChange={(e) => onUpdateRailing(railing.id, { postSpacing: Number(e.target.value) })}
+            valueMeters={railing.postSpacing}
+            onChangeMeters={(postSpacing) => onUpdateRailing(railing.id, { postSpacing })}
           />
         </div>
       )}
 
       {stair && (
         <div className="flex flex-col gap-3">
-          <Input
+          <LengthInput
             label={t.properties.width}
-            type="number"
-            step={0.05}
-            value={stair.width}
-            onChange={(e) => onUpdateStair(stair.id, { width: Number(e.target.value) })}
+            valueMeters={stair.width}
+            onChangeMeters={(width) => onUpdateStair(stair.id, { width })}
           />
+
+          <div className="flex flex-col gap-1.5">
+            <span className="font-mono text-[11px] uppercase tracking-wide text-ink-muted">
+              {t.properties.stairShape}
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => onUpdateStair(stair.id, { flights: applyUShapeStairPreset(stair) })}
+              >
+                {t.properties.stairShapeUShape}
+              </Button>
+            </div>
+            <p className="text-xs text-ink-faint">{t.properties.stairShapeUShapeHint}</p>
+          </div>
+
           <p className="text-xs text-ink-faint">
             {formatTemplate(t.properties.stairSummary, {
               steps: stairTotalSteps(stair),
-              rise: stairTotalRise(stair).toFixed(2),
+              rise: formatFeetInches(stairTotalRise(stair)),
             })}
           </p>
           {stair.flights.map((flight, i) => (
@@ -566,19 +548,18 @@ export function PropertiesPanel({
                   onUpdateStair(stair.id, { flights: next });
                 }}
               />
-              <Input
+              <LengthInput
                 label={t.properties.riserHeight}
-                type="number"
-                step={0.01}
-                value={flight.riserHeight}
-                onChange={(e) => {
+                inchStep={0.125}
+                valueMeters={flight.riserHeight}
+                onChangeMeters={(riserHeight) => {
                   const next = [...stair.flights];
-                  next[i] = { ...flight, riserHeight: Number(e.target.value) };
+                  next[i] = { ...flight, riserHeight };
                   onUpdateStair(stair.id, { flights: next });
                 }}
               />
               <p className="text-xs text-ink-faint">
-                {formatTemplate(t.properties.treadDepth, { depth: treadDepth(flight).toFixed(3) })}
+                {formatTemplate(t.properties.treadDepth, { depth: formatFeetInches(treadDepth(flight)) })}
               </p>
             </div>
           ))}
@@ -587,40 +568,30 @@ export function PropertiesPanel({
 
       {curtainWall && (
         <div className="flex flex-col gap-3">
-          <Input
+          <LengthInput
             label={t.properties.height}
-            type="number"
-            step={0.05}
-            value={curtainWall.height}
-            onChange={(e) => onUpdateCurtainWall(curtainWall.id, { height: Number(e.target.value) })}
+            valueMeters={curtainWall.height}
+            onChangeMeters={(height) => onUpdateCurtainWall(curtainWall.id, { height })}
           />
-          <Input
+          <LengthInput
             label={t.properties.mullionSpacing}
-            type="number"
-            step={0.1}
-            value={curtainWall.mullionSpacing}
-            onChange={(e) =>
-              onUpdateCurtainWall(curtainWall.id, { mullionSpacing: Number(e.target.value) })
-            }
+            valueMeters={curtainWall.mullionSpacing}
+            onChangeMeters={(mullionSpacing) => onUpdateCurtainWall(curtainWall.id, { mullionSpacing })}
           />
         </div>
       )}
 
       {skylight && (
         <div className="flex flex-col gap-3">
-          <Input
+          <LengthInput
             label={t.properties.width}
-            type="number"
-            step={0.05}
-            value={skylight.width}
-            onChange={(e) => onUpdateSkylight(skylight.id, { width: Number(e.target.value) })}
+            valueMeters={skylight.width}
+            onChangeMeters={(width) => onUpdateSkylight(skylight.id, { width })}
           />
-          <Input
+          <LengthInput
             label={t.properties.depth}
-            type="number"
-            step={0.05}
-            value={skylight.depth}
-            onChange={(e) => onUpdateSkylight(skylight.id, { depth: Number(e.target.value) })}
+            valueMeters={skylight.depth}
+            onChangeMeters={(depth) => onUpdateSkylight(skylight.id, { depth })}
           />
         </div>
       )}
@@ -633,26 +604,20 @@ export function PropertiesPanel({
             value={placedObject.label}
             onChange={(e) => onUpdatePlacedObject(placedObject.id, { label: e.target.value })}
           />
-          <Input
+          <LengthInput
             label={t.properties.width}
-            type="number"
-            step={0.05}
-            value={placedObject.width}
-            onChange={(e) => onUpdatePlacedObject(placedObject.id, { width: Number(e.target.value) })}
+            valueMeters={placedObject.width}
+            onChangeMeters={(width) => onUpdatePlacedObject(placedObject.id, { width })}
           />
-          <Input
+          <LengthInput
             label={t.properties.depth}
-            type="number"
-            step={0.05}
-            value={placedObject.depth}
-            onChange={(e) => onUpdatePlacedObject(placedObject.id, { depth: Number(e.target.value) })}
+            valueMeters={placedObject.depth}
+            onChangeMeters={(depth) => onUpdatePlacedObject(placedObject.id, { depth })}
           />
-          <Input
+          <LengthInput
             label={t.properties.height}
-            type="number"
-            step={0.05}
-            value={placedObject.height}
-            onChange={(e) => onUpdatePlacedObject(placedObject.id, { height: Number(e.target.value) })}
+            valueMeters={placedObject.height}
+            onChangeMeters={(height) => onUpdatePlacedObject(placedObject.id, { height })}
           />
           <Input
             label={t.properties.rotation}
@@ -669,14 +634,12 @@ export function PropertiesPanel({
       {dimension && (
         <div className="flex flex-col gap-3">
           <p className="font-mono text-xs text-ink-faint">
-            {Math.hypot(dimension.end.x - dimension.start.x, dimension.end.y - dimension.start.y).toFixed(2)} m
+            {formatFeetInches(Math.hypot(dimension.end.x - dimension.start.x, dimension.end.y - dimension.start.y))}
           </p>
-          <Input
+          <LengthInput
             label={t.properties.offset}
-            type="number"
-            step={0.05}
-            value={dimension.offset}
-            onChange={(e) => onUpdateDimension(dimension.id, { offset: Number(e.target.value) })}
+            valueMeters={dimension.offset}
+            onChangeMeters={(offset) => onUpdateDimension(dimension.id, { offset })}
           />
           <Input
             label={t.properties.label}
@@ -703,12 +666,10 @@ export function PropertiesPanel({
 
       {gridLine && (
         <div className="flex flex-col gap-3">
-          <Input
+          <LengthInput
             label={t.properties.gridPosition}
-            type="number"
-            step={0.05}
-            value={gridLine.position}
-            onChange={(e) => onUpdateGridLine(gridLine.id, { position: Number(e.target.value) })}
+            valueMeters={gridLine.position}
+            onChangeMeters={(position) => onUpdateGridLine(gridLine.id, { position })}
           />
           <Input
             label={t.properties.label}
@@ -915,19 +876,16 @@ function BoundaryElementFields({
 }) {
   return (
     <div className="flex flex-col gap-3">
-      <Input
+      <LengthInput
         label={t.properties.thickness}
-        type="number"
-        step={0.01}
-        value={thickness}
-        onChange={(e) => onUpdateThickness(Number(e.target.value))}
+        inchStep={0.125}
+        valueMeters={thickness}
+        onChangeMeters={onUpdateThickness}
       />
-      <Input
+      <LengthInput
         label={t.properties.elevation}
-        type="number"
-        step={0.05}
-        value={elevation}
-        onChange={(e) => onUpdateElevation(Number(e.target.value))}
+        valueMeters={elevation}
+        onChangeMeters={onUpdateElevation}
       />
       <p className="text-xs text-ink-faint">{formatTemplate(t.properties.boundaryInfo, { n: boundaryPoints })}</p>
       <p className="text-xs text-ink-faint">{t.properties.reshapeNote}</p>

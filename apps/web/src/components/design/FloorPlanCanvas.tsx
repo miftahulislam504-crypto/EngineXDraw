@@ -43,6 +43,8 @@ import {
   computeMiteredWallPolygons,
   isPointInPolygon,
   deriveStairLandings,
+  formatFeetInches,
+  sqMetersToSqFeet,
 } from '@archibim/core-engine';
 import {
   useDesignStudioStore,
@@ -901,7 +903,7 @@ export function FloorPlanCanvas({
                 key={`${room.id}-label`}
                 x={px.x}
                 y={px.y}
-                text={`${room.name}\n${room.areaSqm.toFixed(1)} m²`}
+                text={`${room.name}\n${sqMetersToSqFeet(room.areaSqm).toFixed(1)} sq ft`}
                 fontFamily="monospace"
                 fontSize={11}
                 fill="#5B6478"
@@ -1621,7 +1623,7 @@ export function FloorPlanCanvas({
                 <Text
                   x={centerPx.x}
                   y={centerPx.y}
-                  text={`${tag} · ${opening.width.toFixed(2)}m`}
+                  text={`${tag} · ${formatFeetInches(opening.width)}`}
                   fontFamily="monospace"
                   fontSize={10}
                   fill={isDoor ? '#B4620F' : '#2D6CDF'}
@@ -1750,7 +1752,7 @@ export function FloorPlanCanvas({
                 <Text
                   x={mid.x}
                   y={mid.y}
-                  text={dim.label ?? `${len.toFixed(2)} m`}
+                  text={dim.label ?? formatFeetInches(len)}
                   fontFamily="monospace"
                   fontSize={11}
                   fill={color}
@@ -2113,7 +2115,7 @@ export function FloorPlanCanvas({
                   <Text
                     x={(toPixels(drawStart).x + toPixels(snappedCursor).x) / 2}
                     y={(toPixels(drawStart).y + toPixels(snappedCursor).y) / 2 - 16}
-                    text={`${pendingWallLength.toFixed(2)} m`}
+                    text={formatFeetInches(pendingWallLength)}
                     fontSize={12}
                     fontStyle="bold"
                     fill="#2D6CDF"

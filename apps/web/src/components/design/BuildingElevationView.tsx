@@ -5,7 +5,7 @@ import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, OrthographicCamera, Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import type { Floor, LibraryItem } from '@archibim/object-model';
-import { computeFloorBaseElevations } from '@archibim/core-engine';
+import { computeFloorBaseElevations, formatFeetInches } from '@archibim/core-engine';
 import type { FloorElements } from '@/lib/floors';
 import { numberToLetters } from '@/lib/floors';
 import { buildMaterialLookup, resolveMaterial } from '@/lib/material-resolver';
@@ -410,8 +410,8 @@ export function BuildingElevationView({
                       {floorIndex + 1}
                     </div>
                     <div className="rounded bg-white/85 px-1.5 py-0.5 font-mono text-[10px] text-ink-muted shadow-sm">
-                      {floor.name} {base >= 0 ? '+' : ''}
-                      {base.toFixed(2)}m
+                      {floor.name} {base >= 0 ? '+' : '-'}
+                      {formatFeetInches(Math.abs(base))}
                     </div>
                   </div>
                 </Html>

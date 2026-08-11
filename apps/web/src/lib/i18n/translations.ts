@@ -190,6 +190,7 @@ export interface Translations {
     escTooltip: string; // aria-label/tooltip for the Toolbar's Esc/Stop button — clears any in-progress draw and the current selection (Phase 6)
     showFloorBelow: string; // aria-label for the Toolbar's floor-below reference toggle (Phase 7)
     showFloorBelowTooltip: string; // tooltip explaining the floor-below reference toggle (Phase 7)
+    footingGroundFloorOnly: string; // shown on the disabled footing tool when the active floor isn't the ground floor (Phase 13)
     orthoMode: string; // aria-label for the Toolbar's Wall-tool Ortho (0°/90° lock) toggle
     orthoModeTooltip: string; // tooltip explaining the Ortho toggle
     wallLengthPrompt: {

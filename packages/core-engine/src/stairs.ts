@@ -106,6 +106,94 @@ const MIN_END_LANDING_DEPTH = 0.9; // meters — floor below which a platform re
  * degenerates to a zero-area landing; the multi-flight draw tool avoids
  * this by never letting flight[i+1]'s start land exactly on
  * flight[i]'s end when they turn (see FloorPlanCanvas's stair tool). */
+/** A flight's own direction-of-travel (ux,uy) and width axis (nx,ny) —
+ * the exact same pair FloorPlanCanvas uses to draw the flight's
+ * rectangle, so any landing built from these axes is guaranteed to meet
+ * the flight's drawn edge with zero gap and zero overshoot. */
+function flightAxes(flight: StairFlight) {
+  const dx = flight.end.x - flight.start.x;
+  const dy = flight.end.y - flight.start.y;
+  const len = Math.hypot(dx, dy) || 1e-9;
+  const ux = dx / len;
+  const uy = dy / len;
+  return { ux, uy, nx: -uy, ny: ux };
+}
+
+/** Builds the turn-landing boundary connecting flight `a` (ending) to
+ * flight `b` (starting). Two genuinely different shapes depending on
+ * how the flights turn — treating them with one formula was the source
+ * of a real bug (landing corners bulging out past the flight's own
+ * drawn width, into open space with no flight underneath):
+ *
+ *  - Switchback (a 180° turn, the U-shape preset's case — flights run
+ *    parallel, opposite direction): the landing is a `stair.width`-deep
+ *    strip sandwiched flush between the two flights' facing edges,
+ *    spanning their full overlapping length. This matches the physical
+ *    stairwell — the platform between the up-flight and the return
+ *    flight is as long as the flights themselves, not a small square.
+ *
+ *  - Any other turn angle (an L-shaped corner, hand-drawn with the
+ *    point-by-point stair tool): the landing is a compact
+ *    `stair.width` × `stair.width` square centered on the joint. This
+ *    never extends past either flight's own footprint by more than
+ *    half the stair width, and stays well-defined for any turn angle
+ *    (90°, or anything else a freeform-drawn stair might produce). */
+function buildTurnLandingBoundary(a: StairFlight, b: StairFlight, stairWidth: number): Point2D[] {
+  const half = stairWidth / 2;
+  const A = flightAxes(a);
+  const B = flightAxes(b);
+  const dot = A.ux * B.ux + A.uy * B.uy;
+
+  if (dot < -0.5) {
+    // Switchback: find how far flight A and flight B overlap along A's
+    // own travel direction (normally ~identical lengths, but computed
+    // generally in case of a hand-edited stair), then build a
+    // stair.width-deep strip across that overlap, flush against each
+    // flight's facing edge (no gap, no overshoot past either flight).
+    const projAStart = (a.start.x - a.end.x) * A.ux + (a.start.y - a.end.y) * A.uy;
+    const projBStart = (b.start.x - a.end.x) * A.ux + (b.start.y - a.end.y) * A.uy;
+    const projBEnd = (b.end.x - a.end.x) * A.ux + (b.end.y - a.end.y) * A.uy;
+    const rangeAMin = Math.min(projAStart, 0);
+    const rangeAMax = Math.max(projAStart, 0);
+    const rangeBMin = Math.min(projBStart, projBEnd);
+    const rangeBMax = Math.max(projBStart, projBEnd);
+    const overlapMin = Math.max(rangeAMin, rangeBMin);
+    const overlapMax = Math.min(rangeAMax, rangeBMax);
+    // Flights that don't actually overlap in length (unusual hand-edit)
+    // fall back to a stair.width-deep patch flush at a.end.
+    const spanMin = overlapMin < overlapMax ? overlapMin : -stairWidth;
+    const spanMax = overlapMin < overlapMax ? overlapMax : 0;
+
+    const p1 = { x: a.end.x + A.ux * spanMin, y: a.end.y + A.uy * spanMin };
+    const p2 = { x: a.end.x + A.ux * spanMax, y: a.end.y + A.uy * spanMax };
+
+    const gapDx = b.start.x - a.end.x;
+    const gapDy = b.start.y - a.end.y;
+    const gapLen = Math.hypot(gapDx, gapDy) || 1e-9;
+    const gx = gapDx / gapLen;
+    const gy = gapDy / gapLen;
+    const nearA = half;
+    const nearB = Math.max(gapLen - half, half);
+
+    return [
+      { x: p1.x + gx * nearA, y: p1.y + gy * nearA },
+      { x: p2.x + gx * nearA, y: p2.y + gy * nearA },
+      { x: p2.x + gx * nearB, y: p2.y + gy * nearB },
+      { x: p1.x + gx * nearB, y: p1.y + gy * nearB },
+    ];
+  }
+
+  // L-turn / general corner: compact stair.width square centered on the
+  // joint between a.end and b.start.
+  const center = { x: (a.end.x + b.start.x) / 2, y: (a.end.y + b.start.y) / 2 };
+  return [
+    { x: center.x - half, y: center.y - half },
+    { x: center.x + half, y: center.y - half },
+    { x: center.x + half, y: center.y + half },
+    { x: center.x - half, y: center.y + half },
+  ];
+}
+
 export function deriveStairLandings(stair: Stair): StairLanding[] {
   const landings: StairLanding[] = [];
   if (stair.flights.length === 0) return landings;
@@ -148,21 +236,7 @@ export function deriveStairLandings(stair: Stair): StairLanding[] {
     elevationSoFar += flightRiseHeight(a);
     if (!flightsTurnAtJoint(a, b)) continue;
 
-    const gapDx = b.start.x - a.end.x;
-    const gapDy = b.start.y - a.end.y;
-    const gapLen = Math.hypot(gapDx, gapDy) || 1e-9;
-    const gx = gapDx / gapLen;
-    const gy = gapDy / gapLen;
-    // Perpendicular to the gap direction — the landing's width axis.
-    const px = -gy;
-    const py = gx;
-
-    const corners: Point2D[] = [
-      { x: a.end.x + px * half, y: a.end.y + py * half },
-      { x: a.end.x - px * half, y: a.end.y - py * half },
-      { x: b.start.x - px * half, y: b.start.y - py * half },
-      { x: b.start.x + px * half, y: b.start.y + py * half },
-    ];
+    const corners = buildTurnLandingBoundary(a, b, stair.width);
 
     landings.push({
       kind: 'turn',

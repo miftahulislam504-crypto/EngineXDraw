@@ -28,6 +28,35 @@ export function snapToGridPoint(p: Point2D, gridSize: number): Point2D {
   };
 }
 
+/**
+ * Nearest column center on the floor below, within tolerance — used when
+ * placing a new column on an upper floor so it snaps exactly onto the
+ * column below it rather than a few centimeters off. Load only travels
+ * straight down through a real column stack, so even a small offset here
+ * would mean the column above isn't actually bearing on the one below.
+ * Same tolerance-and-nearest-wins shape as findNearestEndpoint, just
+ * over column centers instead of wall endpoints — kept as a standalone
+ * export (not wired into resolveSnap's wall-focused SnapContext) since
+ * callers need it, unlike wall snapping, only for the column tool and
+ * only on floors above the ground floor.
+ */
+export function findNearestColumnBelowCenter(
+  cursor: Point2D,
+  columnCentersBelow: Point2D[],
+  tolerance = 0.3,
+): Point2D | null {
+  let nearest: Point2D | null = null;
+  let nearestDist = tolerance;
+  for (const p of columnCentersBelow) {
+    const d = distance(cursor, p);
+    if (d <= nearestDist) {
+      nearest = p;
+      nearestDist = d;
+    }
+  }
+  return nearest;
+}
+
 function wallEndpoints(walls: Wall[]): Point2D[] {
   return walls.flatMap((w) => [w.start, w.end]);
 }

@@ -135,6 +135,8 @@ import {
   noteCrud,
   gridLineCrud,
   sectionLineCrud,
+  subscribeToFloorElements,
+  type FloorElements,
 } from '@/lib/floors';
 import { subscribeToShafts, createShaft, updateShaft, deleteShaft } from '@/lib/shafts';
 import {
@@ -302,6 +304,7 @@ export default function DesignStudioPage() {
     mobileViewMode,
     setMobileViewMode,
     activeTool,
+    setActiveTool,
     polygonDraft,
     setPolygonDraft,
     stairDraft,
@@ -328,6 +331,18 @@ export default function DesignStudioPage() {
   }, [drawStart]);
   const { t } = useI18nStore();
   const currentFloorLevel = floors.find((f) => f.id === floorId)?.level ?? 0;
+  // Footing tool is ground-floor-only (footings sit in the soil below
+  // the ground slab — see Toolbar's matching disabled state). If the
+  // person had it armed and then switches to a different floor, drop
+  // back to select rather than leaving a tool active that the Toolbar
+  // now shows as disabled and FloorPlanCanvas silently ignores clicks
+  // for — a tool that visibly can't do anything is more confusing left
+  // "on" than reset.
+  useEffect(() => {
+    if (activeTool === 'footing' && currentFloorLevel !== 0) {
+      setActiveTool('select');
+    }
+  }, [activeTool, currentFloorLevel, setActiveTool]);
   // Highest Floor.level among this building's floors — used to notice
   // (not block; a stepped-back terrace roof on a middle floor is a real
   // design, not a mistake) when a roof is being drawn somewhere other
@@ -424,6 +439,40 @@ export default function DesignStudioPage() {
     ];
     return () => unsubs.forEach((unsub) => unsub());
   }, [projectId, buildingId, belowFloorId]);
+
+  // Phase 14 — Multi-floor 3D stacking. Live3DView needs every floor's
+  // elements at once (not just the one open in the 2D editor) to show
+  // the whole building stacked instead of a single slice. Same
+  // subscribeToFloorElements-per-floor pattern the Elevations page
+  // already uses for the same reason (see
+  // app/projects/[id]/elevations/page.tsx) — one live "all element
+  // types for this floor" subscription per floor, merged into a
+  // floorId-keyed map.
+  //
+  // Deferred until the person actually opens the 3D tab at least once
+  // (hasOpened3D), rather than subscribing unconditionally alongside
+  // the single-floor data above — a person doing pure 2D drafting for
+  // a 10-floor building shouldn't pay for ~17 x 10 Firestore listeners
+  // they never look at. Once opened, the subscription is kept alive
+  // even after switching back to 2D (matching how the 3D pane itself
+  // stays mounted-but-hidden via CSS rather than unmounting — see
+  // mobileViewMode's className below), so toggling 2D/3D back and forth
+  // doesn't repeatedly tear down and rebuild every listener.
+  const [hasOpened3D, setHasOpened3D] = useState(false);
+  useEffect(() => {
+    if (mobileViewMode === '3d') setHasOpened3D(true);
+  }, [mobileViewMode]);
+
+  const [floorElements, setFloorElements] = useState<Record<string, FloorElements>>({});
+  useEffect(() => {
+    if (!buildingId || !hasOpened3D || floors.length === 0) return;
+    const unsubs = floors.map((floor) =>
+      subscribeToFloorElements(projectId, buildingId, floor.id, (elements) => {
+        setFloorElements((prev) => ({ ...prev, [floor.id]: elements }));
+      }),
+    );
+    return () => unsubs.forEach((unsub) => unsub());
+  }, [projectId, buildingId, floors, hasOpened3D]);
 
   // Smart Room System: re-detect rooms whenever the wall set settles.
   // Debounced so a drag-in-progress doesn't fire a Firestore write per frame.
@@ -1080,6 +1129,7 @@ export default function DesignStudioPage() {
         buildingId={buildingId}
         floorId={floorId}
         hasFloorBelow={belowFloorId != null}
+        currentFloorLevel={currentFloorLevel}
       />
 
       {blockMessage && (
@@ -1161,6 +1211,9 @@ export default function DesignStudioPage() {
             onMoveWallEndpoint={handleMoveWallEndpoint}
             onUpdateDimension={(id, patch) =>
               buildingId && floorId && dimensionCrud.update(projectId, buildingId, floorId, id, patch)
+            }
+            onUpdateOpening={(id, patch) =>
+              buildingId && floorId && updateOpening(projectId, buildingId, floorId, id, patch)
             }
             northAngleDeg={currentBuilding?.northAngleDeg ?? 0}
           />
@@ -1517,6 +1570,8 @@ export default function DesignStudioPage() {
             rooms={rooms}
             explodedView={explodedView}
             libraryItems={materialLibraryItems}
+            floors={floors}
+            floorElements={floorElements}
           />
         </div>
       </div>

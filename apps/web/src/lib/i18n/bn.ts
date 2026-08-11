@@ -175,6 +175,7 @@ export const bn: Translations = {
     escTooltip: 'থামুন / বাতিল করুন (Esc)',
     showFloorBelow: 'নিচতলা রেফারেন্স',
     showFloorBelowTooltip: 'নিচতলার wall ও column হালকাভাবে দেখান, যাতে এই তলার সাথে নিচতলা মিলিয়ে আঁকা যায়',
+    footingGroundFloorOnly: 'Footing শুধু ground floor-এর জন্য — এটা ground slab-এর নিচে মাটিতে বসে',
     orthoMode: 'সোজা মোড',
     orthoModeTooltip: 'অন থাকলে wall শুধু সোজা (0°/90°) টানা যাবে, অফ থাকলে যেকোনো দিকে টানা যাবে',
     wallLengthPrompt: {

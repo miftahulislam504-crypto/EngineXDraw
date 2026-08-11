@@ -175,6 +175,7 @@ export const en: Translations = {
     escTooltip: 'Stop / cancel (Esc)',
     showFloorBelow: 'Floor below',
     showFloorBelowTooltip: "Show the floor below's walls and columns as a faint reference, to line up this floor with what's underneath it",
+    footingGroundFloorOnly: 'Footings are only for the ground floor — they sit in the soil below the ground slab',
     orthoMode: 'Ortho mode',
     orthoModeTooltip: 'On locks walls to straight 0°/90° angles; off lets you draw a wall at any angle',
     wallLengthPrompt: {

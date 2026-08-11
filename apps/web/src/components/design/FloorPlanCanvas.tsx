@@ -31,6 +31,7 @@ import type {
   Stair,
   Wall,
   Opening,
+  DoorSwingDirection,
 } from '@archibim/object-model';
 import { DEFAULT_WALL_THICKNESS, PLACED_OBJECT_DEFAULTS } from '@archibim/object-model';
 import {
@@ -45,6 +46,7 @@ import {
   deriveStairLandings,
   formatFeetInches,
   sqMetersToSqFeet,
+  findNearestColumnBelowCenter,
 } from '@archibim/core-engine';
 import {
   useDesignStudioStore,
@@ -111,6 +113,13 @@ export interface FloorPlanCanvasProps {
    * the dimension line itself, the standard CAD gesture, instead of only
    * being editable as a typed number in the Properties Panel. */
   onUpdateDimension: (id: string, patch: Partial<Pick<Dimension, 'offset'>>) => void;
+  /** Phase 12 — lets a door's swing be flipped by tapping the door
+   * symbol directly on the canvas, instead of only through the
+   * Properties Panel dropdown. Optional: Sheet-capture / read-only
+   * viewport callers (which pass readOnly=true) don't supply this,
+   * same pattern as onMoveWallEndpoint's drag handlers being harmless
+   * no-ops there since readOnly turns off Konva hit-testing entirely. */
+  onUpdateOpening?: (id: string, patch: Partial<Pick<Opening, 'swingDirection'>>) => void;
   width?: number;
   height?: number;
   /** Renders everything but disables all interaction — used for the
@@ -149,6 +158,26 @@ export interface FloorPlanCanvasProps {
 }
 
 const ORIGIN_RATIO = 0.5; // meters (0,0) renders at the canvas center
+
+/** Tap-to-flip cycle order for a door's swing — same four states the
+ * Properties Panel dropdown offers, in the same order, so switching
+ * between tapping the door on canvas and using the dropdown never feels
+ * inconsistent. Cycling (rather than toggling just hinge side or just
+ * in/out) covers all four combinations with repeated taps, matching
+ * how the person asked for it: taps flip the door frame through every
+ * side. */
+const DOOR_SWING_CYCLE: DoorSwingDirection[] = [
+  'hingeStart-in',
+  'hingeStart-out',
+  'hingeEnd-in',
+  'hingeEnd-out',
+];
+
+function nextDoorSwingDirection(current: DoorSwingDirection | undefined): DoorSwingDirection {
+  const currentIndex = DOOR_SWING_CYCLE.indexOf(current ?? 'hingeStart-in');
+  const nextIndex = (currentIndex + 1) % DOOR_SWING_CYCLE.length;
+  return DOOR_SWING_CYCLE[nextIndex];
+}
 
 const CHAINING_LINE_TOOLS: DesignTool[] = ['wall', 'beam', 'railing', 'curtainWall'];
 const ONESHOT_LINE_TOOLS: DesignTool[] = ['ramp', 'dimension', 'section'];
@@ -221,6 +250,7 @@ export function FloorPlanCanvas({
   onOpenElevation,
   onMoveWallEndpoint,
   onUpdateDimension,
+  onUpdateOpening,
   width: widthOverride,
   height: heightOverride,
   readOnly = false,
@@ -648,11 +678,30 @@ export function FloorPlanCanvas({
     }
 
     if (activeTool === 'column') {
-      onCreateColumn(point);
+      // Above the ground floor, a column's load only transfers straight
+      // down if it actually sits on top of the column below it — snap
+      // the click onto that column's center when it's close enough,
+      // instead of leaving a small, easy-to-miss offset. Ground floor
+      // has nothing below it to snap to, so this only applies above it.
+      const belowColumn =
+        currentFloorLevel > 0 && belowFloorColumns
+          ? findNearestColumnBelowCenter(
+              point,
+              belowFloorColumns.map((c) => c.center),
+            )
+          : null;
+      onCreateColumn(belowColumn ?? point);
       return;
     }
 
     if (activeTool === 'footing') {
+      if (currentFloorLevel !== 0) {
+        // Footings sit in the soil below the ground floor slab — BNBC
+        // practice never places one on an upper floor, so the footing
+        // tool is inert there rather than silently creating a footing
+        // object that has no real structural meaning at that level.
+        return;
+      }
       onCreateFooting(point);
       return;
     }
@@ -1610,13 +1659,32 @@ export function FloorPlanCanvas({
                   onClick={(e) => {
                     if (activeTool === 'select') {
                       e.cancelBubble = true;
-                      setSelection({ kind: 'opening', id: opening.id });
+                      if (isDoor && isSelected && onUpdateOpening) {
+                        // Already selected door, tapped again — cycle
+                        // the swing direction instead of re-selecting
+                        // (which would be a no-op the person can't feel
+                        // happened). First tap on an unselected door
+                        // just selects it, same as any other element,
+                        // so a person browsing the plan doesn't flip a
+                        // door by accident while merely inspecting it.
+                        onUpdateOpening(opening.id, {
+                          swingDirection: nextDoorSwingDirection(opening.swingDirection),
+                        });
+                      } else {
+                        setSelection({ kind: 'opening', id: opening.id });
+                      }
                     }
                   }}
                   onTap={(e) => {
                     if (activeTool === 'select') {
                       e.cancelBubble = true;
-                      setSelection({ kind: 'opening', id: opening.id });
+                      if (isDoor && isSelected && onUpdateOpening) {
+                        onUpdateOpening(opening.id, {
+                          swingDirection: nextDoorSwingDirection(opening.swingDirection),
+                        });
+                      } else {
+                        setSelection({ kind: 'opening', id: opening.id });
+                      }
                     }
                   }}
                 />
@@ -1633,6 +1701,21 @@ export function FloorPlanCanvas({
                   offsetY={gapHalfThickness + (isDoor ? opening.width * pixelsPerMeter : 0) + 14}
                   listening={false}
                 />
+                {isDoor && isSelected && onUpdateOpening && (
+                  <Text
+                    x={centerPx.x}
+                    y={centerPx.y}
+                    text="⟲"
+                    fontFamily="monospace"
+                    fontSize={13}
+                    fill="#2D6CDF"
+                    align="center"
+                    width={20}
+                    offsetX={10}
+                    offsetY={-(gapHalfThickness + 10)}
+                    listening={false}
+                  />
+                )}
               </Fragment>
             );
           })}

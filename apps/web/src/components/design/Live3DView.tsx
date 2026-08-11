@@ -4,13 +4,14 @@ import { useMemo } from 'react';
 import * as THREE from 'three';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Grid, Environment, Html } from '@react-three/drei';
-import { sqMetersToSqFeet } from '@archibim/core-engine';
+import { sqMetersToSqFeet, computeFloorBaseElevations } from '@archibim/core-engine';
 import type {
   Balcony,
   Beam,
   Ceiling,
   Column,
   CurtainWall,
+  Floor,
   Footing,
   Foundation,
   LibraryItem,
@@ -32,6 +33,7 @@ import {
   deriveStairLandings,
 } from '@archibim/core-engine';
 import { buildMaterialLookup, resolveMaterial } from '@/lib/material-resolver';
+import type { FloorElements } from '@/lib/floors';
 
 export interface Live3DViewProps {
   walls: Wall[];
@@ -59,13 +61,29 @@ export interface Live3DViewProps {
    * showing the flat default. Optional and defaults to empty so existing
    * callers that haven't wired this up yet keep working unchanged. */
   libraryItems?: LibraryItem[];
+  /** Phase 14 — Multi-floor 3D stacking. When both `floors` and
+   * `floorElements` are supplied, every floor in `floors` is rendered
+   * together, each stacked at its real elevation (via
+   * computeFloorBaseElevations, the same helper BuildingElevationView
+   * already uses) — the whole building at once, not just whichever
+   * floor happens to be open in the 2D editor. The single-floor props
+   * above (walls, openings, columns, ...) are ignored when this pair is
+   * present.
+   *
+   * Left optional, rather than replacing the flat per-type arrays
+   * outright, so this component still works exactly as before for any
+   * caller that only ever has one floor's worth of data — the
+   * flat-arrays shape actually reflects genuine intent then, e.g. a
+   * design later wants a single-floor-only 3D preview again. */
+  floors?: Floor[];
+  floorElements?: Record<string, FloorElements>;
 }
 
-/** Exploded view offsets everything above ground floor upward, per-floor —
- * this MVP only has one floor's worth of elements at a time, so it lifts
- * every element by a fixed gap purely to show the concept; a true
- * per-floor explode needs the design studio to load multiple floors at
- * once, which is a page-level change beyond this component. */
+/** Exploded view lifts each floor further apart than its real stacked
+ * height, by this extra gap on top of the floor's own
+ * floorToFloorHeight — applied per floor (via computeFloorBaseElevations
+ * scaled by index) when multi-floor data is present, or as the old
+ * fixed single-floor lift when it isn't. */
 const EXPLODE_LIFT = 1.5;
 
 /** Builds the wall's cross-section as a flat 2D shape (X = distance along
@@ -591,6 +609,186 @@ export function PlacedObjectMesh({ object, selected }: { object: PlacedObject; s
   );
 }
 
+/** One floor's worth of meshes, positioned as a group at `elevation`
+ * (meters on the Y/vertical axis). Extracted out of Live3DView so the
+ * same rendering logic serves both call shapes that component supports:
+ * the legacy single-floor flat-array props (elevation always 0) and the
+ * Phase 14 multi-floor stack (one FloorGroup per floor, each at its own
+ * computeFloorBaseElevations result). Mirrors BuildingElevationView's
+ * per-floor <group> block exactly, since both need "one floor's meshes,
+ * offset to its real height" — this just adds shadows/orbit-friendly
+ * settings suited to a perspective walkthrough rather than an
+ * orthographic elevation. */
+export function FloorGroup({
+  elevation,
+  walls,
+  openings,
+  columns,
+  beams,
+  slabs,
+  ceilings,
+  foundations,
+  footings,
+  roofs,
+  ramps,
+  railings,
+  stairs,
+  balconies,
+  curtainWalls,
+  skylights,
+  placedObjects,
+  rooms,
+  materialLookup,
+}: {
+  elevation: number;
+  walls: Wall[];
+  openings: Opening[];
+  columns: Column[];
+  beams: Beam[];
+  slabs: Slab[];
+  ceilings: Ceiling[];
+  foundations: Foundation[];
+  footings: Footing[];
+  roofs: Roof[];
+  ramps: Ramp[];
+  railings: Railing[];
+  stairs: Stair[];
+  balconies: Balcony[];
+  curtainWalls: CurtainWall[];
+  skylights: Skylight[];
+  placedObjects: PlacedObject[];
+  rooms: Room[];
+  materialLookup: ReturnType<typeof buildMaterialLookup>;
+}) {
+  const extendedSegments = useMemo(() => computeExtendedWallSegments(walls), [walls]);
+  const openingsByWallId = useMemo(() => {
+    const map = new Map<string, Opening[]>();
+    for (const opening of openings) {
+      const list = map.get(opening.wallId) ?? [];
+      list.push(opening);
+      map.set(opening.wallId, list);
+    }
+    return map;
+  }, [openings]);
+
+  return (
+    <group position={[0, elevation, 0]}>
+      {foundations.map((f) => (
+        <PlanarBoxMesh
+          key={f.id}
+          boundary={f.boundary}
+          thickness={f.thickness}
+          elevation={f.elevation}
+          color="#9AA3B2"
+          selectedColor="#2D6CDF"
+          selected={false}
+        />
+      ))}
+      {footings.map((f) => (
+        <FootingMesh key={f.id} footing={f} selected={false} />
+      ))}
+      {slabs.map((slab) => (
+        <PlanarBoxMesh
+          key={slab.id}
+          boundary={slab.boundary}
+          thickness={slab.thickness}
+          elevation={slab.elevation}
+          color="#D8DEE9"
+          selectedColor="#2D6CDF"
+          selected={false}
+        />
+      ))}
+      {walls.map((wall) => {
+        const segment = extendedSegments.find((s) => s.wallId === wall.id) ?? wall;
+        const material = resolveMaterial(wall, materialLookup, '#E7E9EE');
+        return (
+          <WallMesh
+            key={wall.id}
+            wall={wall}
+            segment={segment}
+            selected={false}
+            colorOverride={material.color}
+            roughness={material.roughness}
+            metalness={material.metalness}
+            wallOpenings={openingsByWallId.get(wall.id)}
+          />
+        );
+      })}
+      {openings.map((opening) => {
+        const wall = walls.find((w) => w.id === opening.wallId);
+        return wall ? <OpeningMarker key={opening.id} opening={opening} wall={wall} /> : null;
+      })}
+      {columns.map((column) => (
+        <ColumnMesh key={column.id} column={column} selected={false} />
+      ))}
+      {beams.map((beam) => (
+        <BeamMesh key={beam.id} beam={beam} selected={false} />
+      ))}
+      {ceilings.map((c) => (
+        <PlanarBoxMesh
+          key={c.id}
+          boundary={c.boundary}
+          thickness={c.thickness}
+          elevation={c.elevation}
+          color="#EDEFF3"
+          selectedColor="#2D6CDF"
+          selected={false}
+        />
+      ))}
+      {roofs.map((r) => {
+        const material = resolveMaterial(r, materialLookup, '#8B5E4A');
+        return (
+          <PlanarBoxMesh
+            key={r.id}
+            boundary={r.boundary}
+            thickness={r.thickness}
+            elevation={r.elevation}
+            color={material.color}
+            selectedColor="#2D6CDF"
+            selected={false}
+            roughness={material.roughness}
+            metalness={material.metalness}
+          />
+        );
+      })}
+      {ramps.map((r) => (
+        <RampMesh key={r.id} ramp={r} selected={false} />
+      ))}
+      {railings.map((r) => (
+        <RailingMesh key={r.id} railing={r} selected={false} />
+      ))}
+      {stairs.map((s) => (
+        <StairMesh key={s.id} stair={s} selected={false} />
+      ))}
+      {balconies.map((b) => (
+        <PlanarBoxMesh
+          key={b.id}
+          boundary={b.boundary}
+          thickness={b.thickness}
+          elevation={b.elevation}
+          color="#B7C0D1"
+          selectedColor="#2D6CDF"
+          selected={false}
+        />
+      ))}
+      {curtainWalls.map((cw) => (
+        <CurtainWallMesh key={cw.id} curtainWall={cw} selected={false} />
+      ))}
+      {skylights.map((sky) => {
+        const roof = roofs.find((r) => r.id === sky.roofId);
+        if (!roof) return null;
+        return <SkylightMesh key={sky.id} skylight={sky} topElevation={roof.elevation + roof.thickness} />;
+      })}
+      {placedObjects.map((obj) => (
+        <PlacedObjectMesh key={obj.id} object={obj} selected={false} />
+      ))}
+      {rooms.map((room) => (
+        <RoomLabel key={room.id} room={room} />
+      ))}
+    </group>
+  );
+}
+
 export function Live3DView({
   walls,
   openings,
@@ -612,29 +810,46 @@ export function Live3DView({
   explodedView = false,
   height,
   libraryItems = [],
+  floors,
+  floorElements,
 }: Live3DViewProps) {
+  // Multi-floor mode is on whenever both floors and floorElements are
+  // supplied and floors is non-empty — same "both present" contract
+  // BuildingElevationView's caller (the Elevations page) already
+  // follows. Falls back to the legacy flat-array single-floor rendering
+  // otherwise, so any caller that hasn't been updated to pass these two
+  // props keeps working exactly as before.
+  const isMultiFloor = !!floors && floors.length > 0 && !!floorElements;
+
+  const baseElevations = useMemo(
+    () => (isMultiFloor ? computeFloorBaseElevations(floors!) : new Map<string, number>()),
+    [isMultiFloor, floors],
+  );
+
+  // Center the camera/orbit target on the whole building's wall extent
+  // in multi-floor mode (every floor's walls combined), or just the
+  // single supplied floor's walls otherwise — same averaging approach
+  // either way, just over a bigger point set when there's more than one
+  // floor's data to look at.
   const center = useMemo(() => {
-    if (walls.length === 0) return { x: 0, z: 0 };
-    const sum = walls.reduce(
+    const allWalls = isMultiFloor
+      ? Object.values(floorElements!).flatMap((el) => el.walls)
+      : walls;
+    if (allWalls.length === 0) return { x: 0, z: 0 };
+    const sum = allWalls.reduce(
       (acc, w) => ({ x: acc.x + w.start.x + w.end.x, z: acc.z + w.start.y + w.end.y }),
       { x: 0, z: 0 },
     );
-    const n = walls.length * 2;
+    const n = allWalls.length * 2;
     return { x: sum.x / n, z: sum.z / n };
-  }, [walls]);
+  }, [isMultiFloor, floorElements, walls]);
 
-  const extendedSegments = useMemo(() => computeExtendedWallSegments(walls), [walls]);
-  const openingsByWallId = useMemo(() => {
-    const map = new Map<string, Opening[]>();
-    for (const opening of openings) {
-      const list = map.get(opening.wallId) ?? [];
-      list.push(opening);
-      map.set(opening.wallId, list);
-    }
-    return map;
-  }, [openings]);
-  const lift = explodedView ? EXPLODE_LIFT : 0;
   const materialLookup = useMemo(() => buildMaterialLookup(libraryItems), [libraryItems]);
+
+  // Single-floor legacy lift: the whole (only) floor shifts up by a
+  // fixed gap when exploded. Multi-floor lift instead spaces every
+  // floor's own real elevation further apart, computed per floor below.
+  const singleFloorLift = !isMultiFloor && explodedView ? EXPLODE_LIFT : 0;
 
   return (
     <div
@@ -657,126 +872,69 @@ export function Live3DView({
         />
         <Grid args={[100, 100]} position={[0, 0, 0]} cellColor="#D8DEE9" sectionColor="#B7C0D1" fadeDistance={40} />
 
-        <group position={[0, lift, 0]}>
-          {foundations.map((f) => (
-            <PlanarBoxMesh
-              key={f.id}
-              boundary={f.boundary}
-              thickness={f.thickness}
-              elevation={f.elevation}
-              color="#9AA3B2"
-              selectedColor="#2D6CDF"
-              selected={false}
+        {isMultiFloor
+          ? [...floors!]
+              .sort((a, b) => a.level - b.level)
+              .map((floor, index) => {
+                const elements = floorElements![floor.id];
+                if (!elements) return null;
+                const base = baseElevations.get(floor.id) ?? 0;
+                // Exploded view in multi-floor mode pulls every floor
+                // further apart than its real stacked height — each
+                // floor gets EXPLODE_LIFT extra meters of separation
+                // times how many floors are below it, so floor 0 stays
+                // put and higher floors fan out progressively, the same
+                // "explode along the stacking axis" idea orthographic
+                // exploded-axonometric views use.
+                const explodeOffset = explodedView ? index * EXPLODE_LIFT : 0;
+                return (
+                  <FloorGroup
+                    key={floor.id}
+                    elevation={base + explodeOffset}
+                    walls={elements.walls}
+                    openings={elements.openings}
+                    columns={elements.columns}
+                    beams={elements.beams}
+                    slabs={elements.slabs}
+                    ceilings={elements.ceilings}
+                    foundations={elements.foundations}
+                    footings={elements.footings}
+                    roofs={elements.roofs}
+                    ramps={elements.ramps}
+                    railings={elements.railings}
+                    stairs={elements.stairs}
+                    balconies={elements.balconies}
+                    curtainWalls={elements.curtainWalls}
+                    skylights={elements.skylights}
+                    placedObjects={elements.placedObjects}
+                    rooms={elements.rooms}
+                    materialLookup={materialLookup}
+                  />
+                );
+              })
+          : (
+            <FloorGroup
+              elevation={singleFloorLift}
+              walls={walls}
+              openings={openings}
+              columns={columns}
+              beams={beams}
+              slabs={slabs}
+              ceilings={ceilings}
+              foundations={foundations}
+              footings={footings}
+              roofs={roofs}
+              ramps={ramps}
+              railings={railings}
+              stairs={stairs}
+              balconies={balconies}
+              curtainWalls={curtainWalls}
+              skylights={skylights}
+              placedObjects={placedObjects}
+              rooms={rooms}
+              materialLookup={materialLookup}
             />
-          ))}
-          {footings.map((f) => (
-            <FootingMesh key={f.id} footing={f} selected={false} />
-          ))}
-          {slabs.map((slab) => (
-            <PlanarBoxMesh
-              key={slab.id}
-              boundary={slab.boundary}
-              thickness={slab.thickness}
-              elevation={slab.elevation}
-              color="#D8DEE9"
-              selectedColor="#2D6CDF"
-              selected={false}
-            />
-          ))}
-          {walls.map((wall) => {
-            const segment = extendedSegments.find((s) => s.wallId === wall.id) ?? wall;
-            const material = resolveMaterial(wall, materialLookup, '#E7E9EE');
-            return (
-              <WallMesh
-                key={wall.id}
-                wall={wall}
-                segment={segment}
-                selected={false}
-                colorOverride={material.color}
-                roughness={material.roughness}
-                metalness={material.metalness}
-                wallOpenings={openingsByWallId.get(wall.id)}
-              />
-            );
-          })}
-          {openings.map((opening) => {
-            const wall = walls.find((w) => w.id === opening.wallId);
-            return wall ? <OpeningMarker key={opening.id} opening={opening} wall={wall} /> : null;
-          })}
-          {columns.map((column) => (
-            <ColumnMesh key={column.id} column={column} selected={false} />
-          ))}
-          {beams.map((beam) => (
-            <BeamMesh key={beam.id} beam={beam} selected={false} />
-          ))}
-          {ceilings.map((c) => (
-            <PlanarBoxMesh
-              key={c.id}
-              boundary={c.boundary}
-              thickness={c.thickness}
-              elevation={c.elevation}
-              color="#EDEFF3"
-              selectedColor="#2D6CDF"
-              selected={false}
-            />
-          ))}
-          {roofs.map((r) => {
-            const material = resolveMaterial(r, materialLookup, '#8B5E4A');
-            return (
-              <PlanarBoxMesh
-                key={r.id}
-                boundary={r.boundary}
-                thickness={r.thickness}
-                elevation={r.elevation}
-                color={material.color}
-                selectedColor="#2D6CDF"
-                selected={false}
-                roughness={material.roughness}
-                metalness={material.metalness}
-              />
-            );
-          })}
-          {ramps.map((r) => (
-            <RampMesh key={r.id} ramp={r} selected={false} />
-          ))}
-          {railings.map((r) => (
-            <RailingMesh key={r.id} railing={r} selected={false} />
-          ))}
-          {stairs.map((s) => (
-            <StairMesh key={s.id} stair={s} selected={false} />
-          ))}
-          {balconies.map((b) => (
-            <PlanarBoxMesh
-              key={b.id}
-              boundary={b.boundary}
-              thickness={b.thickness}
-              elevation={b.elevation}
-              color="#B7C0D1"
-              selectedColor="#2D6CDF"
-              selected={false}
-            />
-          ))}
-          {curtainWalls.map((cw) => (
-            <CurtainWallMesh key={cw.id} curtainWall={cw} selected={false} />
-          ))}
-          {skylights.map((sky) => {
-            const roof = roofs.find((r) => r.id === sky.roofId);
-            if (!roof) return null;
-            return (
-              <SkylightMesh
-                key={sky.id}
-                skylight={sky}
-                topElevation={roof.elevation + roof.thickness}
-              />
-            );
-          })}
-          {placedObjects.map((obj) => (
-            <PlacedObjectMesh key={obj.id} object={obj} selected={false} />
-          ))}
-          {rooms.map((room) => (
-            <RoomLabel key={room.id} room={room} />
-          ))}
-        </group>
+          )}
 
         <OrbitControls target={[center.x, 1.5, center.z]} makeDefault />
         <Environment preset="city" />

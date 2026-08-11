@@ -41,6 +41,12 @@ export interface ToolbarProps {
    * doesn't jump around as floors change) when this is false, e.g. on
    * a building's ground floor. */
   hasFloorBelow?: boolean;
+  /** The currently active floor's level (0 = ground floor). Used to
+   * disable the footing tool above ground floor — footings sit in the
+   * soil below the ground slab, so a footing tool that's live on an
+   * upper floor would let a person create one with no structural
+   * meaning at that level. */
+  currentFloorLevel?: number;
 }
 
 export function Toolbar({
@@ -52,6 +58,7 @@ export function Toolbar({
   buildingId,
   floorId,
   hasFloorBelow,
+  currentFloorLevel,
 }: ToolbarProps) {
   const {
     activeTool,
@@ -314,20 +321,26 @@ export function Toolbar({
             .find((g) => g.groupKey === openToolGroup)
             ?.tools.map((toolId) => {
               const ToolIcon = TOOL_ICONS[toolId];
+              const isFootingAboveGround =
+                toolId === 'footing' && currentFloorLevel != null && currentFloorLevel !== 0;
               return (
                 <button
                   key={toolId}
                   onClick={() => {
+                    if (isFootingAboveGround) return;
                     setActiveTool(toolId);
                     setOpenToolGroup(null);
                   }}
-                  title={t.tools[toolId]}
-                  aria-label={t.tools[toolId]}
+                  disabled={isFootingAboveGround}
+                  title={isFootingAboveGround ? t.designStudio.footingGroundFloorOnly : t.tools[toolId]}
+                  aria-label={isFootingAboveGround ? t.designStudio.footingGroundFloorOnly : t.tools[toolId]}
                   className={clsx(
                     'flex flex-col items-center gap-1 whitespace-nowrap rounded-sheet px-2 py-1.5 text-[10px] font-medium transition-colors',
-                    activeTool === toolId
-                      ? 'bg-ink text-white'
-                      : 'text-ink-muted hover:bg-paper hover:text-ink',
+                    isFootingAboveGround
+                      ? 'cursor-not-allowed text-ink-faint opacity-40'
+                      : activeTool === toolId
+                        ? 'bg-ink text-white'
+                        : 'text-ink-muted hover:bg-paper hover:text-ink',
                   )}
                 >
                   <ToolIcon size={16} aria-hidden />

@@ -23,6 +23,7 @@ export interface HubExportPayload {
   siteInfo?: SiteInfoExport;
   bnbcSettings?: BNBCExport;
   buildingInfo?: BuildingExport;
+  projectSettings?: ProjectSettingsExport;
 }
 
 export interface SiteInfoExport {
@@ -75,4 +76,19 @@ export interface BuildingExport {
   hasGenerator: boolean;
   hasWaterTank: boolean;
   hasParkingFloor: boolean;
+}
+
+// Ported from Hub's lib/types/project-settings.types.ts (ProjectSettings)
+// — trimmed to the three fields that comment identifies as
+// Architectural's own (designCode, unitSystem, coordinateSystem).
+// concreteGrade/reinforcementGrade/structuralSteelGrade (Structural's)
+// and currency/vatPercent/taxPercent/contingencyPercent/overheadPercent/
+// profitPercent (Estimating's) are deliberately not duplicated here —
+// Draw has no current use for them, and each app should only carry the
+// subset it actually reads (same reasoning hub-read.ts's file comment
+// already gives for omitting bnbcSettings' seismic/wind fields).
+export interface ProjectSettingsExport {
+  designCode: string;
+  unitSystem: string;
+  coordinateSystem: string;
 }

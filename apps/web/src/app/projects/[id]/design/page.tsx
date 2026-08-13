@@ -94,6 +94,7 @@ import { subscribeToBuildings, updateBuilding } from '@/lib/projects';
 import { useDesignHistoryStore } from '@/lib/design-history';
 import { buildExportPayload } from '@/lib/hub/hub-read';
 import { publishArchitecturalModel } from '@/lib/hub/hub-write';
+import { publishScheduleData } from '@/lib/hub/hub-schedule-export';
 import type { HubExportPayload } from '@/lib/hub/export.types';
 import { useAuthStore } from '@/lib/auth-store';
 import {
@@ -286,11 +287,32 @@ export default function DesignStudioPage() {
     if (!buildingId || isPublishingToHub) return;
     setIsPublishingToHub(true);
     try {
-      const result = await publishArchitecturalModel(projectId, buildingId);
-      if (result.success) {
-        showNoticeMessage(formatTemplate(t.designStudio.publishToHubSuccess, { version: result.moduleVersion }));
+      // Two independent Hub writes for one "publish" action: geometry
+      // (Storage-file path, unchanged) and structured schedule/quantity
+      // fields (moduleData/architectural — see hub-schedule-export.ts).
+      // Both are run regardless of whether one fails, so a schedule-export
+      // bug (e.g. a floor with malformed boundary data) never blocks the
+      // geometry publish that already worked, and vice versa.
+      const [geometryResult, scheduleResult] = await Promise.all([
+        publishArchitecturalModel(projectId, buildingId),
+        publishScheduleData(projectId, buildingId),
+      ]);
+
+      if (geometryResult.success && scheduleResult.success) {
+        showNoticeMessage(formatTemplate(t.designStudio.publishToHubSuccess, { version: geometryResult.moduleVersion }));
+      } else if (geometryResult.success && !scheduleResult.success) {
+        // Geometry (levels/grids/elements) reached Hub; schedules/
+        // quantities didn't — Structural/PM will see the building but
+        // not room/wall/floor-load data until this is retried.
+        showBlockMessage(formatTemplate(t.designStudio.publishToHubFailure, { error: scheduleResult.error }));
+      } else if (!geometryResult.success && scheduleResult.success) {
+        showBlockMessage(formatTemplate(t.designStudio.publishToHubFailure, { error: geometryResult.error }));
       } else {
-        showBlockMessage(formatTemplate(t.designStudio.publishToHubFailure, { error: result.error }));
+        showBlockMessage(
+          formatTemplate(t.designStudio.publishToHubFailure, {
+            error: !geometryResult.success ? geometryResult.error : '',
+          }),
+        );
       }
     } finally {
       setIsPublishingToHub(false);

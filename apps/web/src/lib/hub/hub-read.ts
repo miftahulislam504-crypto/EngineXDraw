@@ -20,7 +20,7 @@
 
 import { doc, getDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase-client';
-import type { HubExportPayload, SiteInfoExport, BuildingExport } from './export.types';
+import type { HubExportPayload, SiteInfoExport, BuildingExport, ProjectSettingsExport } from './export.types';
 import { CONTRACT_SCHEMA_VERSION } from './contract.types';
 
 function toDate(val: unknown): Date {
@@ -128,6 +128,29 @@ async function getBuildingInfo(projectId: string): Promise<RawBuildingInfo | nul
   };
 }
 
+// ─── Project Settings (read-only) — designCode/unitSystem/coordinateSystem
+// only, see ProjectSettingsExport's comment in export.types.ts for why
+// the Structural/Estimating-only fields aren't read here. Verified path
+// from Hub's project-settings.firestore.ts: projects/{id}/project_settings/data.
+interface RawProjectSettings {
+  designCode: string;
+  unitSystem: string;
+  coordinateSystem: string;
+}
+
+const projectSettingsRef = (projectId: string) => doc(db, 'projects', projectId, 'project_settings', 'data');
+
+async function getProjectSettings(projectId: string): Promise<RawProjectSettings | null> {
+  const snap = await getDoc(projectSettingsRef(projectId));
+  if (!snap.exists()) return null;
+  const d = snap.data();
+  return {
+    designCode: d.designCode ?? 'BNBC 2020',
+    unitSystem: d.unitSystem ?? 'Metric (SI)',
+    coordinateSystem: d.coordinateSystem ?? 'Local/Project Grid',
+  };
+}
+
 // ─── Project (read-only, just the 2 fields buildExportPayload needs) ───
 async function getProjectCodeAndName(projectId: string): Promise<{ projectCode: string; projectName: string } | null> {
   const snap = await getDoc(doc(db, 'projects', projectId));
@@ -145,10 +168,11 @@ async function getProjectCodeAndName(projectId: string): Promise<{ projectCode: 
 // exactly what it means when a person looks at Hub's own Integration tab.
 export async function buildExportPayload(projectId: string): Promise<HubExportPayload | null> {
   try {
-    const [project, siteInfo, building] = await Promise.all([
+    const [project, siteInfo, building, projectSettings] = await Promise.all([
       getProjectCodeAndName(projectId),
       getSiteInfo(projectId),
       getBuildingInfo(projectId),
+      getProjectSettings(projectId),
     ]);
 
     if (!project) return null;
@@ -209,6 +233,15 @@ export async function buildExportPayload(projectId: string): Promise<HubExportPa
         hasParkingFloor: building.hasParkingFloor,
       };
       payload.buildingInfo = buildingExport;
+    }
+
+    if (projectSettings) {
+      const projectSettingsExport: ProjectSettingsExport = {
+        designCode: projectSettings.designCode,
+        unitSystem: projectSettings.unitSystem,
+        coordinateSystem: projectSettings.coordinateSystem,
+      };
+      payload.projectSettings = projectSettingsExport;
     }
 
     return payload;

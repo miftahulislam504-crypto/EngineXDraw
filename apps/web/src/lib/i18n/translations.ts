@@ -183,6 +183,9 @@ export interface Translations {
     publishToHub: string;
     publishToHubSuccess: string; // use {version} placeholder
     publishToHubFailure: string; // use {error} placeholder
+    publishScheduleToEstimating: string;
+    publishScheduleToEstimatingSuccess: string; // use {version} placeholder
+    publishScheduleToEstimatingFailure: string; // use {error} placeholder
     resetView: string;
     resetViewTooltip: string;
     undoTooltip: string; // aria-label/tooltip for the Toolbar's Undo button (Phase 6)

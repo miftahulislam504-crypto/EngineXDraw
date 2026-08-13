@@ -65,8 +65,8 @@ import { getLibraryOnce } from '@/lib/library';
 import { computeFloorBaseElevations } from '@archibim/core-engine';
 import type { ProjectLevel, ProjectGrid, BuildingElementRef } from './contract.types';
 import { wrapContract } from './contract.types';
-import { uploadModuleData } from './module-data.firestore';
-import { linkDependency, getModuleVersion } from './dependency.firestore';
+import { uploadModuleData, saveModuleData } from './module-data.firestore';
+import { linkDependency, getModuleVersion, bumpModuleVersion } from './dependency.firestore';
 import { emitEvent } from './event.firestore';
 
 /** shafts.ts and siteBoundary.ts only expose subscribe(), no getOnce —
@@ -513,6 +513,130 @@ export async function buildArchitecturalExport(
   }
 
   return { levels, grids, elements, shafts, siteBoundary, sheets, materials };
+}
+
+// ─── Draw -> Hub: structured schedule export (moduleData path) ───────────
+//
+// buildArchitecturalExport() উপরে যা বানায় (levels/grids/elements/...)
+// সেটা Structural app-এর জন্য designed (geometry-heavy, Storage file
+// পাথে যায়, নিচের publishArchitecturalModel() দেখুন)। কিন্তু
+// EngineXEstimate সম্পূর্ণ ভিন্ন, ছোট "schedule" shape আশা করে —
+// ArchitecturalModuleData (Estimate-এর lib/types/module-data.types.ts)
+// এর floorAreas/roomSchedule/wallSchedule/doorSchedule/windowSchedule
+// field, প্রতিটা row floorId দিয়ে ট্যাগ করা, মিটার এককে (Estimate নিজেই
+// ft-এ কনভার্ট করে, দেখুন lib/integration/architectural-mapper.ts) —
+// এবং এটা moduleData/{moduleId} collection-এ সরাসরি Firestore field
+// হিসেবে লেখে, Storage file হিসেবে না (Estimate এটাই subscribe করে)।
+//
+// এই দুটো export সম্পূর্ণ independent — একটা চালালে অন্যটা প্রভাবিত হয়
+// না, দুটোই একই buildArchitecturalExport() থেকে floor/element data
+// পুনর্ব্যবহার করে কিন্তু ভিন্ন shape-এ সাজায় ও ভিন্ন পাথে পাঠায়।
+
+interface RoomScheduleRow {
+  id: string;
+  floorId: string;
+  areaSqm: number;
+}
+interface WallScheduleRow {
+  id: string;
+  floorId: string;
+  lengthM: number;
+  height: number;
+}
+interface OpeningScheduleRow {
+  id: string;
+  floorId: string;
+}
+interface FloorAreaRow {
+  floorId: string;
+  floorName: string;
+}
+
+function lengthOf(start: { x: number; y: number }, end: { x: number; y: number }): number {
+  return Math.hypot(end.x - start.x, end.y - start.y);
+}
+
+/** exportData.elements (সব floor একসাথে, BuildingElementRef[], levelId
+ * দিয়ে ট্যাগ করা) থেকে Estimate-এর schedule shape বানায় — কোনো নতুন
+ * Firestore read লাগে না, buildArchitecturalExport() ইতিমধ্যে যা এনেছে
+ * তাই re-shape করা হয়। levels[] থেকে floorName resolve করা হয় যাতে
+ * Estimate-এর mapper-এর floorLabel অর্থপূর্ণ হয় (শুধু id না)। */
+function buildScheduleExport(exportData: ArchitecturalExport): {
+  floorAreas: FloorAreaRow[];
+  roomSchedule: RoomScheduleRow[];
+  wallSchedule: WallScheduleRow[];
+  doorSchedule: OpeningScheduleRow[];
+  windowSchedule: OpeningScheduleRow[];
+} {
+  const floorAreas: FloorAreaRow[] = exportData.levels.map((lvl) => ({
+    floorId: lvl.id,
+    floorName: lvl.name,
+  }));
+
+  const roomSchedule: RoomScheduleRow[] = [];
+  const wallSchedule: WallScheduleRow[] = [];
+  const doorSchedule: OpeningScheduleRow[] = [];
+  const windowSchedule: OpeningScheduleRow[] = [];
+
+  for (const el of exportData.elements) {
+    const geometry = el.geometry as Record<string, unknown>;
+    if (el.type === 'room') {
+      const areaSqm = geometry.areaSqm;
+      if (typeof areaSqm === 'number') {
+        roomSchedule.push({ id: el.id, floorId: el.levelId, areaSqm });
+      }
+    } else if (el.type === 'wall') {
+      const start = geometry.start as { x: number; y: number } | undefined;
+      const end = geometry.end as { x: number; y: number } | undefined;
+      const height = geometry.height;
+      if (start && end && typeof height === 'number') {
+        wallSchedule.push({ id: el.id, floorId: el.levelId, lengthM: lengthOf(start, end), height });
+      }
+    } else if (el.type === 'door') {
+      doorSchedule.push({ id: el.id, floorId: el.levelId });
+    } else if (el.type === 'window') {
+      windowSchedule.push({ id: el.id, floorId: el.levelId });
+    }
+  }
+
+  return { floorAreas, roomSchedule, wallSchedule, doorSchedule, windowSchedule };
+}
+
+/** Draw -> Hub (Estimating দিক): buildArchitecturalExport() থেকে
+ * schedule shape বানিয়ে সরাসরি moduleData/architectural document-এ লেখে
+ * (saveModuleData — Storage bucket লাগে না)। publishArchitecturalModel()
+ * (নিচে, Structural দিকের জন্য) থেকে independent — এই দুটো ফাংশন কেউ
+ * কাউকে কল করে না, UI যেকোনো একটা বা দুটোই কল করতে পারে। version bump
+ * এখানে নিজের — publishArchitecturalModel()-এর version bump এর সাথে
+ * শেয়ার করা হয় না, কারণ দুটো ভিন্ন consumer-এর জন্য ভিন্ন সময়ে আপডেট
+ * হতে পারে। */
+export async function publishArchitecturalScheduleToEstimating(
+  projectId: string,
+  buildingId: string,
+): Promise<{ success: true; moduleVersion: number } | { success: false; error: string }> {
+  try {
+    const exportData = await buildArchitecturalExport(projectId, buildingId);
+    const schedule = buildScheduleExport(exportData);
+
+    const newVersion = await bumpModuleVersion(projectId, 'architectural');
+    await saveModuleData(projectId, 'architectural', 'architectural', schedule, newVersion);
+
+    try {
+      await emitEvent(projectId, 'ARCH_MODEL_UPDATED', 'architectural', {
+        floorCount: schedule.floorAreas.length,
+        roomCount: schedule.roomSchedule.length,
+        wallCount: schedule.wallSchedule.length,
+        doorCount: schedule.doorSchedule.length,
+        windowCount: schedule.windowSchedule.length,
+      });
+    } catch {
+      /* non-critical — bumpModuleVersion() নিজেই MODULE_VERSION_BUMPED emit করে */
+    }
+
+    return { success: true, moduleVersion: newVersion };
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 /** The full Draw -> Hub write-back: builds the export, uploads it as

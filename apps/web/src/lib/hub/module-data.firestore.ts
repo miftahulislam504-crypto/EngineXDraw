@@ -16,6 +16,54 @@ import type { ModuleId } from './dependency.types';
 import type { SourceApp } from './contract.types';
 import { bumpModuleVersion } from './dependency.firestore';
 
+// ─── Structured field-data sync (projects/{projectId}/moduleData/{moduleId}) ──
+//
+// এই দ্বিতীয় পাথটা উপরের uploadModuleData()/Storage পাথ থেকে সম্পূর্ণ
+// আলাদা এবং স্বাধীন — Storage-এ বড় geometry file রাখার বদলে ছোট,
+// structured schedule/quantity ডেটা সরাসরি একটা Firestore document-এ
+// field হিসেবে লেখে। এটা EngineXEstimate-এর proven pattern-এর হুবহু
+// প্রতিরূপ (EngineXEstimate-এর lib/integration/hub-sdk-client.ts এর
+// saveOwnModuleData(), verified) — Estimating app সরাসরি এই collection
+// (moduleData, moduleMetadata না) subscribe করে, তাই আর্কিটেকচারাল
+// ডেটা Estimating পর্যন্ত পৌঁছাতে হলে এই পাথেই লিখতে হবে।
+//
+// Storage bucket enable করা না থাকলেও এই পাথ কাজ করে (কোনো
+// uploadBytesResumable/getDownloadURL কল নেই) — শুধু Firestore write।
+
+export interface ModuleDataRecord {
+  moduleId: ModuleId;
+  sourceApp: SourceApp;
+  data: Record<string, unknown>;
+  version: number;
+  updatedAt: string; // ISO
+}
+
+const moduleDataRef = (projectId: string, moduleId: ModuleId) =>
+  doc(db, 'projects', projectId, 'moduleData', moduleId);
+
+/**
+ * এই app-এর নিজের structured schedule/quantity data সরাসরি Hub-এর
+ * moduleData collection-এ প্রকাশ করে — merge:true (Hub-এর কনভেনশন)
+ * যাতে আংশিক আপডেটে বাকি field মুছে না যায়। caller আগে
+ * bumpModuleVersion() কল করে newVersion এখানে পাস করবে, যাতে
+ * moduleData.version সবসময় versions/{moduleId}.currentVersion-এর
+ * সাথে হুবহু sync থাকে (EngineXEstimate-এর saveOwnModuleData()-এর
+ * একই নীতি)।
+ */
+export async function saveModuleData(
+  projectId: string,
+  moduleId: ModuleId,
+  sourceApp: SourceApp,
+  data: Record<string, unknown>,
+  version: number,
+): Promise<void> {
+  await setDoc(
+    moduleDataRef(projectId, moduleId),
+    { moduleId, sourceApp, data, version, updatedAt: serverTimestamp() },
+    { merge: true },
+  );
+}
+
 export interface ModuleDataFile {
   fileName: string;
   fileUrl: string;

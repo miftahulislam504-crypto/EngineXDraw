@@ -11,6 +11,7 @@ import {
   Layers,
   Plus,
   UploadCloud,
+  Send,
   LayoutGrid,
   Box as Box3DIcon,
 } from 'lucide-react';
@@ -93,7 +94,7 @@ import {
 import { subscribeToBuildings, updateBuilding } from '@/lib/projects';
 import { useDesignHistoryStore } from '@/lib/design-history';
 import { buildExportPayload } from '@/lib/hub/hub-read';
-import { publishArchitecturalModel } from '@/lib/hub/hub-write';
+import { publishArchitecturalModel, publishArchitecturalScheduleToEstimating } from '@/lib/hub/hub-write';
 import type { HubExportPayload } from '@/lib/hub/export.types';
 import { useAuthStore } from '@/lib/auth-store';
 import {
@@ -297,52 +298,30 @@ export default function DesignStudioPage() {
     }
   }
 
-  // Auto-publish to Hub — বাকি সব CivilOS App (MathX, CivilLearn ইত্যাদি)
-  // এর মতো explicit "Publish" বাটনের অপেক্ষা না করিয়ে, wall/column/beam/
-  // slab এডিট থেমে যাওয়ার (debounce) ৩ সেকেন্ড পর নিজে থেকেই publish
-  // করে দেয়, যাতে EngineX-Structural সবসময় সর্বশেষ architectural model
-  // পায়। buildArchitecturalExport() (hub-write.ts) প্রতিবার নিজে থেকেই
-  // Firestore থেকে fresh সব floor-এর সম্পূর্ণ geometry পড়ে (শুধু বর্তমান
-  // floor-এর state না) — তাই এই effect-এর dependency শুধু "কিছু একটা
-  // বদলেছে কিনা" জানার signal, ঠিক কোন floor/element বদলেছে তা এই effect
-  // নিজে ট্র্যাক করে না।
-  //
-  // প্রতিটা mouse-drag/keystroke-এ publish না করে debounce রাখা হয়েছে,
-  // কারণ প্রতিটা ছোট পরিবর্তনে পুরো Storage upload (uploadModuleData)
-  // ট্রিগার করা অপচয়। ম্যানুয়াল বাটন সরানো হয়নি — "এখনই publish করো"
-  // (retry, বা ৩ সেকেন্ড অপেক্ষা না করে তাড়াতাড়ি করতে চাইলে) হিসেবে
-  // এখনো কাজ করে, auto-publish-এর সাথে conflict নেই কারণ handlePublishToHub
-  // নিজেই isPublishingToHub দিয়ে overlap আটকায়।
-  const isFirstGeometryLoad = useRef(true);
-  const autoPublishTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // publishArchitecturalModel() (উপরে) থেকে ইচ্ছাকৃতভাবে আলাদা — সেটা
+  // Storage-এ file আপলোড করে (Structural app-এর জন্য), এটা সরাসরি
+  // Firestore-এ ছোট schedule ডেটা লেখে (Estimating app-এর জন্য)। Storage
+  // bucket enable করা না থাকলেও এটা কাজ করে।
+  const [isPublishingSchedule, setIsPublishingSchedule] = useState(false);
 
-  // floorId বদলালে subscribeToWalls/Columns/Beams/Slabs নতুন floor-এর
-  // জন্য আবার একটা initial snapshot পাঠায় — সেটাও "edit" হিসেবে ধরা
-  // যাবে না, নাহলে শুধু floor সুইচ করলেই অপ্রয়োজনীয় publish হবে।
-  useEffect(() => {
-    isFirstGeometryLoad.current = true;
-  }, [floorId]);
-
-  useEffect(() => {
-    // প্রথম mount-এ subscription থেকে আসা initial snapshot-কে "পরিবর্তন"
-    // হিসেবে ধরা হবে না — নাহলে প্রতিটা floor খোলার সাথে সাথে অপ্রয়োজনীয়
-    // publish হবে, কোনো real edit ছাড়াই।
-    if (isFirstGeometryLoad.current) {
-      isFirstGeometryLoad.current = false;
-      return;
+  async function handlePublishScheduleToEstimating() {
+    if (!buildingId || isPublishingSchedule) return;
+    setIsPublishingSchedule(true);
+    try {
+      const result = await publishArchitecturalScheduleToEstimating(projectId, buildingId);
+      if (result.success) {
+        showNoticeMessage(
+          formatTemplate(t.designStudio.publishScheduleToEstimatingSuccess, { version: result.moduleVersion }),
+        );
+      } else {
+        showBlockMessage(
+          formatTemplate(t.designStudio.publishScheduleToEstimatingFailure, { error: result.error }),
+        );
+      }
+    } finally {
+      setIsPublishingSchedule(false);
     }
-    if (!buildingId) return;
-
-    if (autoPublishTimer.current) clearTimeout(autoPublishTimer.current);
-    autoPublishTimer.current = setTimeout(() => {
-      handlePublishToHub();
-    }, 3000);
-
-    return () => {
-      if (autoPublishTimer.current) clearTimeout(autoPublishTimer.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [walls, columns, beams, slabs, buildingId]);
+  }
 
   const {
     selection,
@@ -1131,6 +1110,21 @@ export default function DesignStudioPage() {
                 <span className="text-xs">…</span>
               ) : (
                 <UploadCloud size={14} aria-hidden />
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={handlePublishScheduleToEstimating}
+              disabled={!buildingId || isPublishingSchedule}
+              title={t.designStudio.publishScheduleToEstimating}
+              aria-label={t.designStudio.publishScheduleToEstimating}
+              className="flex shrink-0 items-center justify-center rounded-sheet border border-line-strong p-1.5 text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
+            >
+              {isPublishingSchedule ? (
+                <span className="text-xs">…</span>
+              ) : (
+                <Send size={14} aria-hidden />
               )}
             </button>
           </div>

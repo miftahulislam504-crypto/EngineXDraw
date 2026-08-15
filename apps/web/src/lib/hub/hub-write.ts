@@ -64,8 +64,11 @@ import { getSheetsOnce } from '@/lib/sheets';
 import { getLibraryOnce } from '@/lib/library';
 import { computeFloorBaseElevations } from '@archibim/core-engine';
 import type { ProjectLevel, ProjectGrid, BuildingElementRef } from './contract.types';
-import { wrapContract } from './contract.types';
-import { uploadModuleData, saveModuleData } from './module-data.firestore';
+// wrapContract/uploadModuleData আগে এখানে import হতো (Storage-based
+// publishArchitecturalModel()-এর জন্য) — এখন বাতিল, নিচের file comment
+// দ্রষ্টব্য (publishArchitecturalToHub() এর ওপরে)। saveModuleData()ই
+// এখন একমাত্র outgoing write mechanism, Storage লাগে না।
+import { saveModuleData } from './module-data.firestore';
 import { linkDependency, getModuleVersion, bumpModuleVersion } from './dependency.firestore';
 import { emitEvent } from './event.firestore';
 
@@ -517,20 +520,22 @@ export async function buildArchitecturalExport(
 
 // ─── Draw -> Hub: structured schedule export (moduleData path) ───────────
 //
-// buildArchitecturalExport() উপরে যা বানায় (levels/grids/elements/...)
-// সেটা Structural app-এর জন্য designed (geometry-heavy, Storage file
-// পাথে যায়, নিচের publishArchitecturalModel() দেখুন)। কিন্তু
-// EngineXEstimate সম্পূর্ণ ভিন্ন, ছোট "schedule" shape আশা করে —
+// buildScheduleExport() (নিচে) buildArchitecturalExport()-এর output
+// থেকে EngineXEstimate-এর প্রয়োজনীয় "schedule" shape বানায় —
 // ArchitecturalModuleData (Estimate-এর lib/types/module-data.types.ts)
 // এর floorAreas/roomSchedule/wallSchedule/doorSchedule/windowSchedule
 // field, প্রতিটা row floorId দিয়ে ট্যাগ করা, মিটার এককে (Estimate নিজেই
-// ft-এ কনভার্ট করে, দেখুন lib/integration/architectural-mapper.ts) —
-// এবং এটা moduleData/{moduleId} collection-এ সরাসরি Firestore field
-// হিসেবে লেখে, Storage file হিসেবে না (Estimate এটাই subscribe করে)।
+// ft-এ কনভার্ট করে, দেখুন lib/integration/architectural-mapper.ts)।
 //
-// এই দুটো export সম্পূর্ণ independent — একটা চালালে অন্যটা প্রভাবিত হয়
-// না, দুটোই একই buildArchitecturalExport() থেকে floor/element data
-// পুনর্ব্যবহার করে কিন্তু ভিন্ন shape-এ সাজায় ও ভিন্ন পাথে পাঠায়।
+// ⚠️ এই shape আর নিচের publishArchitecturalToHub()-এর পাঠানো পূর্ণ
+// geometry (levels/grids/elements/...) — দুটোই এখন একই
+// moduleData/architectural document-এর একই data object-এর ভিন্ন
+// top-level key হিসেবে একসাথে যায় (আগে এই কমেন্টে বলা ছিল এই দুটো
+// "সম্পূর্ণ independent" — সেটা তখন সত্যি ছিল কারণ geometry তখন
+// Storage-based ছিল, ভিন্ন mechanism/document; এখন আর সত্যি না — Storage
+// বাদ দেওয়ার পর দুটোই একই document-এ, তাই একসাথে assemble করে একটাই
+// saveModuleData() কলে পাঠানো হয়, দেখুন publishArchitecturalToHub()
+// এর file comment)।
 
 interface RoomScheduleRow {
   id: string;
@@ -602,15 +607,48 @@ function buildScheduleExport(exportData: ArchitecturalExport): {
   return { floorAreas, roomSchedule, wallSchedule, doorSchedule, windowSchedule };
 }
 
-/** Draw -> Hub (Estimating দিক): buildArchitecturalExport() থেকে
- * schedule shape বানিয়ে সরাসরি moduleData/architectural document-এ লেখে
- * (saveModuleData — Storage bucket লাগে না)। publishArchitecturalModel()
- * (নিচে, Structural দিকের জন্য) থেকে independent — এই দুটো ফাংশন কেউ
- * কাউকে কল করে না, UI যেকোনো একটা বা দুটোই কল করতে পারে। version bump
- * এখানে নিজের — publishArchitecturalModel()-এর version bump এর সাথে
- * শেয়ার করা হয় না, কারণ দুটো ভিন্ন consumer-এর জন্য ভিন্ন সময়ে আপডেট
- * হতে পারে। */
-export async function publishArchitecturalScheduleToEstimating(
+/**
+ * Draw -> Hub: একক combined publish (schedule + full geometry একই
+ * moduleData/architectural document-এ)
+ * ------------------------------------------------------------------
+ * ⚠️ সংশোধনী ইতিহাস: আগে এই ফাইলে দুটো আলাদা export ফাংশন ছিল —
+ * publishArchitecturalScheduleToEstimating() (pure Firestore,
+ * moduleData/architectural.data-তে schedule shape) আর
+ * publishArchitecturalModel() (Firebase Storage-এ পূর্ণ geometry JSON
+ * ফাইল আপলোড, Firestore-এ শুধু metadata pointer)। দুটো UI বাটন থেকে
+ * আলাদাভাবে ট্রিগার হতো।
+ *
+ * এখন বাতিল/একত্র করার কারণ:
+ *   ১) ব্যবহারকারীর নির্দেশ — ডেটা push করার জন্য কোনো ম্যানুয়াল বাটন
+ *      থাকবে না, সব auto-sync (নিচে দেখুন publishArchitecturalToHub())।
+ *   ২) Firebase free plan-এ Storage bucket তৈরি করা যায় না, তাই
+ *      publishArchitecturalModel()-এর Storage আপলোড কখনোই সফল হতো না —
+ *      Structural-এর Phase 2 geometry parser (hub-geometry-parser.ts)ও
+ *      এই একই broken mechanism-এর ওপর নির্ভরশীল ছিল।
+ *
+ * সমাধান: Hub-এর ModuleId ইউনিয়নে 'architectural' একটাই মডিউল —
+ * moduleData/architectural একটাই document, দুই ভিন্ন consumer (Estimate
+ * schedule পড়ে, Structural geometry পড়ে) সেই একই document পড়বে। তাই
+ * schedule আর geometry কে দুটো আলাদা saveModuleData() কলে পাঠানো যাবে
+ * না (setDoc merge:true শুধু top-level document field merge করে, data
+ * object-এর ভেতরের key merge করে না — দ্বিতীয় কল প্রথমটার data সম্পূর্ণ
+ * মুছে দিত)। এই ফাংশন schedule ও geometry দুটোর সব field একটাই data
+ * object-এ (আলাদা top-level key হিসেবে — floorAreas/roomSchedule/...
+ * schedule-এর, levels/grids/elements/... geometry-র) একসাথে assemble
+ * করে একটাই saveModuleData() কলে পাঠায়। Estimate-এর architectural-
+ * mapper.ts শুধু data.floorAreas/data.roomSchedule ইত্যাদি পড়ে (verified)
+ * — data.levels/data.elements এর উপস্থিতি Estimate-এর জন্য নিরীহ, ও
+ * উল্টোটাও (Structural শুধু data.levels/data.grids/data.elements পড়বে,
+ * data.floorAreas ignore করবে)।
+ *
+ * Firestore ডকুমেন্ট সাইজ সীমা ১ MiB — একটা মাঝারি বিল্ডিং-এর geometry
+ * সাধারণত এর অনেক নিচে থাকে (element প্রতি কয়েকটা number/string field),
+ * কিন্তু defensive check রাখা হলো যাতে খুব বড় বিল্ডিং-এ silent overflow
+ * না হয়ে স্পষ্ট error দেখা যায়।
+ */
+const FIRESTORE_DOC_SIZE_WARNING_BYTES = 900_000; // ~900KB, ১ MiB সীমার কাছাকাছি safety margin
+
+export async function publishArchitecturalToHub(
   projectId: string,
   buildingId: string,
 ): Promise<{ success: true; moduleVersion: number } | { success: false; error: string }> {
@@ -618,50 +656,45 @@ export async function publishArchitecturalScheduleToEstimating(
     const exportData = await buildArchitecturalExport(projectId, buildingId);
     const schedule = buildScheduleExport(exportData);
 
-    const newVersion = await bumpModuleVersion(projectId, 'architectural');
-    await saveModuleData(projectId, 'architectural', 'architectural', schedule, newVersion);
+    // schedule (Estimate consumer) ও পূর্ণ geometry (Structural consumer)
+    // দুটোই একই data object-এ — উপরের file comment দ্রষ্টব্য কেন এটা
+    // দুটো আলাদা saveModuleData() কলে করা যায় না।
+    const combinedData: Record<string, unknown> = {
+      // ── Schedule shape — Estimate-এর architectural-mapper.ts এই key
+      // গুলো পড়ে (verified, field name বদলানো যাবে না) ──
+      floorAreas: schedule.floorAreas,
+      roomSchedule: schedule.roomSchedule,
+      wallSchedule: schedule.wallSchedule,
+      doorSchedule: schedule.doorSchedule,
+      windowSchedule: schedule.windowSchedule,
 
-    try {
-      await emitEvent(projectId, 'ARCH_MODEL_UPDATED', 'architectural', {
-        floorCount: schedule.floorAreas.length,
-        roomCount: schedule.roomSchedule.length,
-        wallCount: schedule.wallSchedule.length,
-        doorCount: schedule.doorSchedule.length,
-        windowCount: schedule.windowSchedule.length,
-      });
-    } catch {
-      /* non-critical — bumpModuleVersion() নিজেই MODULE_VERSION_BUMPED emit করে */
+      // ── পূর্ণ geometry — Structural-এর hub-geometry-parser.ts এই key
+      // গুলো পড়ে (DrawArchitecturalExport shape, verified) ──
+      levels: exportData.levels,
+      grids: exportData.grids,
+      elements: exportData.elements,
+      shafts: exportData.shafts,
+      siteBoundary: exportData.siteBoundary,
+      sheets: exportData.sheets,
+      materials: exportData.materials,
+    };
+
+    const estimatedSizeBytes = new TextEncoder().encode(JSON.stringify(combinedData)).length;
+    if (estimatedSizeBytes > FIRESTORE_DOC_SIZE_WARNING_BYTES) {
+      return {
+        success: false,
+        error: `Architectural model এর ডেটা সাইজ (~${Math.round(estimatedSizeBytes / 1024)}KB) Firestore document সীমার (1MB) কাছাকাছি বা তার বেশি — এই বিল্ডিং এই মুহূর্তে Hub-এ sync করা যাচ্ছে না। এই সীমা অতিক্রম করলে ডেভেলপারকে জানান, ডেটা ভাগ করে পাঠানোর ব্যবস্থা করতে হবে।`,
+      };
     }
 
-    return { success: true, moduleVersion: newVersion };
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : String(e) };
-  }
-}
+    const newVersion = await bumpModuleVersion(projectId, 'architectural');
+    await saveModuleData(projectId, 'architectural', 'architectural', combinedData, newVersion);
 
-/** The full Draw -> Hub write-back: builds the export, uploads it as
- * Hub's 'architectural' module (Firebase Storage file + Firestore
- * metadata pointer, via the ported uploadModuleData — same pattern Hub's
- * own document uploads use), links the dependency on buildingInfo's
- * current version (so Hub's dependency graph knows this model was built
- * against a specific building-info snapshot and can flag it OUTDATED if
- * building info changes later), and emits ARCH_MODEL_UPDATED. */
-export async function publishArchitecturalModel(
-  projectId: string,
-  buildingId: string,
-): Promise<{ success: true; moduleVersion: number } | { success: false; error: string }> {
-  try {
-    const exportData = await buildArchitecturalExport(projectId, buildingId);
-    const envelope = wrapContract(exportData, 'architectural', projectId);
-    const json = JSON.stringify(envelope, null, 2);
-    const file = new File([json], `architectural_model_${Date.now()}.json`, { type: 'application/json' });
-
-    const record = await uploadModuleData(projectId, 'architectural', 'architectural', file);
-
-    // Best-effort — a missing buildingInfo version just means there's
-    // nothing to link against yet (Hub project with no building info
-    // saved), which shouldn't block the model upload that already
-    // succeeded above.
+    // Structural-এর publishArchitecturalModel() (আগে এখানে ছিল) buildingInfo
+    // এর version-এর সাথে dependency link করতো, যাতে building info বদলালে
+    // Hub এই architectural model-কে OUTDATED হিসেবে চিহ্নিত করতে পারে। সেই
+    // আচরণ এখানে সংরক্ষণ করা হলো, best-effort (buildingInfo এখনো সেভ না
+    // থাকলে link করার কিছু নেই, সেটা এই publish-কে ব্লক করা উচিত না)।
     try {
       const buildingInfoVersion = await getModuleVersion(projectId, 'buildingInfo');
       if (buildingInfoVersion) {
@@ -679,18 +712,19 @@ export async function publishArchitecturalModel(
 
     try {
       await emitEvent(projectId, 'ARCH_MODEL_UPDATED', 'architectural', {
+        floorCount: schedule.floorAreas.length,
+        roomCount: schedule.roomSchedule.length,
+        wallCount: schedule.wallSchedule.length,
+        doorCount: schedule.doorSchedule.length,
+        windowCount: schedule.windowSchedule.length,
         elementCount: exportData.elements.length,
         levelCount: exportData.levels.length,
-        shaftCount: exportData.shafts.length,
-        sheetCount: exportData.sheets.length,
-        hasSiteBoundary: exportData.siteBoundary !== null,
-        materialCount: exportData.materials.length,
       });
     } catch {
-      /* non-critical — uploadModuleData's own bumpModuleVersion already emits MODULE_VERSION_BUMPED */
+      /* non-critical — bumpModuleVersion() নিজেই MODULE_VERSION_BUMPED emit করে */
     }
 
-    return { success: true, moduleVersion: record.moduleVersion };
+    return { success: true, moduleVersion: newVersion };
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : String(e) };
   }

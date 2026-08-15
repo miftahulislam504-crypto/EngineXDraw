@@ -1,10 +1,12 @@
 // apps/web/src/lib/hub/hub-schedule-export.ts
 //
 // Phase 2 (ecosystem sync plan) — the second Draw -> Hub write path.
-// hub-write.ts's publishArchitecturalModel() already covers geometry
-// (levels/grids/BuildingElementRef — the moduleMetadata/Storage-file
-// path). This file covers the other ~32 fields the plan identified as
-// still empty: Room/Wall/Door/Window/Finish/Ceiling/Stair/Ramp/Roof
+// hub-write.ts's publishArchitecturalToHub() already covers geometry
+// (levels/grids/BuildingElementRef) as part of its combined
+// moduleData/architectural write (pure Firestore, no Storage — see
+// that function's header comment). This file covers the other ~32
+// fields the plan identified as still empty: Room/Wall/Door/Window/
+// Finish/Ceiling/Stair/Ramp/Roof
 // Schedule, Floor Areas, Area Statements, Floor Loads (Dead Load
 // Source — already exported as `materials` by buildArchitecturalExport,
 // reused here rather than refetched), and the PM-facing summary fields
@@ -462,10 +464,19 @@ export async function buildScheduleExport(
 
 /** The full Draw -> Hub structured-field write-back: builds the
  * schedule export, bumps this app's own module version, and publishes
- * it to moduleData/architectural via saveOwnModuleData. Independent of
- * publishArchitecturalModel() (the geometry/Storage-file path) — either
- * can be called without the other, though calling both keeps Hub's
- * dependency-version bookkeeping consistent for a single "publish".
+ * it to moduleData/architectural via saveOwnModuleData. Note:
+ * hub-write.ts's publishArchitecturalToHub() is now the primary,
+ * auto-synced write path and already writes floorAreas/roomSchedule/
+ * wallSchedule/doorSchedule/windowSchedule (the Estimate-relevant
+ * subset) plus the full geometry into the same document in one write
+ * (see that function's header comment for why). This function remains
+ * unwired (no current caller) — it would be for the ~32 additional
+ * PM-facing fields beyond what publishArchitecturalToHub() sends,
+ * should Phase 2's fuller schedule ever be needed. If wired in later,
+ * whoever calls it must ensure it does NOT overwrite the geometry keys
+ * publishArchitecturalToHub() writes (same moduleData/architectural
+ * document — merge:true only merges at the top document level, not
+ * inside the nested `data` object).
  */
 export async function publishScheduleData(
   projectId: string,

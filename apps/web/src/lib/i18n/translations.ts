@@ -180,12 +180,13 @@ export interface Translations {
     view2D: string;
     view3D: string;
     addFloor: string;
-    publishToHub: string;
-    publishToHubSuccess: string; // use {version} placeholder
-    publishToHubFailure: string; // use {error} placeholder
-    publishScheduleToEstimating: string;
-    publishScheduleToEstimatingSuccess: string; // use {version} placeholder
-    publishScheduleToEstimatingFailure: string; // use {error} placeholder
+    // Push button সরিয়ে auto-sync করা হয়েছে (ব্যবহারকারীর নির্দেশে —
+    // ডেটা পাঠানোর জন্য কোনো ম্যানুয়াল বাটন থাকবে না)। এই তিনটা key
+    // এখন একটা ছোট, non-intrusive status indicator-এর জন্য (দেখুন
+    // useArchitecturalAutoSync.ts ও design page-এর header)।
+    hubSyncSyncing: string; // debounce timer চলছে বা push in-progress
+    hubSyncSynced: string; // use {version} placeholder — সর্বশেষ সফল sync
+    hubSyncFailed: string; // use {error} placeholder
     resetView: string;
     resetViewTooltip: string;
     undoTooltip: string; // aria-label/tooltip for the Toolbar's Undo button (Phase 6)

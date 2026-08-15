@@ -29,11 +29,13 @@ export interface ArchitecturalModuleData {
 
   // Drawing settings / geometry references — grid/levels/
   // columnLocations/wallLocations/slabBoundaries/openings/
-  // stairGeometry/roofGeometry/shaftOpenings continue to go through
-  // the existing moduleMetadata (Storage-file) path via hub-write.ts's
-  // publishArchitecturalModel — see that file's header comment for why
-  // heavy geometry stays there instead of moving into this
-  // structured-field document.
+  // stairGeometry/roofGeometry/shaftOpenings now go through this same
+  // moduleData/architectural document as the top-level levels/grids/
+  // elements/shafts/siteBoundary/sheets/materials keys, written by
+  // hub-write.ts's publishArchitecturalToHub() — see that function's
+  // header comment for why heavy geometry moved off the old Storage-
+  // file path (Firebase free plan has no Storage bucket) onto pure
+  // Firestore, sharing one document with the schedule fields below.
   //
   // floorLoadsDeadLoadSource is the one exception: it's a small lookup
   // table (referenced MATERIAL library items only, not full geometry),

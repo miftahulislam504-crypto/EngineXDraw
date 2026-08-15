@@ -102,10 +102,10 @@ export function subscribeToModuleData(
 
 /** Bumps this app's own module version in `versions/architectural` and
  * emits MODULE_VERSION_BUMPED — same mechanism hub-write.ts's
- * publishArchitecturalModel already triggers indirectly via
- * uploadModuleData's bumpModuleVersion() call, exposed directly here
- * because saveOwnModuleData (structured fields) is a separate write
- * path that doesn't go through uploadModuleData. */
+ * publishArchitecturalToHub already triggers directly via its own
+ * bumpModuleVersion() call, exposed here separately because
+ * saveOwnModuleData (structured fields) is a separate write path from
+ * that function's saveModuleData() call. */
 export async function bumpOwnModuleVersion(projectId: string): Promise<number> {
   const ref = versionRef(projectId, OUR_APP);
   const snap = await getDoc(ref);

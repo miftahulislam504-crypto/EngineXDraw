@@ -7,7 +7,7 @@
 // document itself; those stay Hub's own responsibility (see the Hub
 // ecosystem plan: Hub owns Project/Site/Building info, apps only consume
 // it). Draw's own write-back is a separate, additive path — see
-// hub-write.ts (exportArchitecturalModel / publishArchitecturalModel).
+// hub-write.ts (buildArchitecturalExport / publishArchitecturalToHub).
 //
 // buildExportPayload is also the source for projects.ts's
 // seedBuildingFromHub / resyncBuildingFromHub — opening a Hub-created

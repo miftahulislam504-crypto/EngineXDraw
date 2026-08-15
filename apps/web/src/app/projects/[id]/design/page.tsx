@@ -10,8 +10,6 @@ import {
   Building2 as BuildingIcon,
   Layers,
   Plus,
-  UploadCloud,
-  Send,
   LayoutGrid,
   Box as Box3DIcon,
 } from 'lucide-react';
@@ -94,7 +92,7 @@ import {
 import { subscribeToBuildings, updateBuilding } from '@/lib/projects';
 import { useDesignHistoryStore } from '@/lib/design-history';
 import { buildExportPayload } from '@/lib/hub/hub-read';
-import { publishArchitecturalModel, publishArchitecturalScheduleToEstimating } from '@/lib/hub/hub-write';
+import { useArchitecturalAutoSync } from '@/lib/hub/useArchitecturalAutoSync';
 import type { HubExportPayload } from '@/lib/hub/export.types';
 import { useAuthStore } from '@/lib/auth-store';
 import {
@@ -281,47 +279,27 @@ export default function DesignStudioPage() {
     }
   }
 
-  const [isPublishingToHub, setIsPublishingToHub] = useState(false);
+  // Draw -> Hub architectural sync — আগে এখানে দুটো ম্যানুয়াল বাটন
+  // ("Publish to Hub", "Send schedule to Estimating") ছিল, এখন
+  // event-driven auto-sync (useArchitecturalAutoSync.ts এর file
+  // comment দ্রষ্টব্য)। hubSyncState.status একটা ছোট, non-blocking
+  // indicator দেখাতে ব্যবহৃত হয় (নিচে header-এ) — কোনো bocking UI না,
+  // ব্যর্থ হলেও ব্যবহারকারী কাজ চালিয়ে যেতে পারবেন, পরের edit-এ আবার
+  // চেষ্টা হবে।
+  const hubSyncState = useArchitecturalAutoSync(projectId, buildingId);
 
-  async function handlePublishToHub() {
-    if (!buildingId || isPublishingToHub) return;
-    setIsPublishingToHub(true);
-    try {
-      const result = await publishArchitecturalModel(projectId, buildingId);
-      if (result.success) {
-        showNoticeMessage(formatTemplate(t.designStudio.publishToHubSuccess, { version: result.moduleVersion }));
-      } else {
-        showBlockMessage(formatTemplate(t.designStudio.publishToHubFailure, { error: result.error }));
-      }
-    } finally {
-      setIsPublishingToHub(false);
-    }
-  }
-
-  // publishArchitecturalModel() (উপরে) থেকে ইচ্ছাকৃতভাবে আলাদা — সেটা
-  // Storage-এ file আপলোড করে (Structural app-এর জন্য), এটা সরাসরি
-  // Firestore-এ ছোট schedule ডেটা লেখে (Estimating app-এর জন্য)। Storage
-  // bucket enable করা না থাকলেও এটা কাজ করে।
-  const [isPublishingSchedule, setIsPublishingSchedule] = useState(false);
-
-  async function handlePublishScheduleToEstimating() {
-    if (!buildingId || isPublishingSchedule) return;
-    setIsPublishingSchedule(true);
-    try {
-      const result = await publishArchitecturalScheduleToEstimating(projectId, buildingId);
-      if (result.success) {
-        showNoticeMessage(
-          formatTemplate(t.designStudio.publishScheduleToEstimatingSuccess, { version: result.moduleVersion }),
-        );
-      } else {
-        showBlockMessage(
-          formatTemplate(t.designStudio.publishScheduleToEstimatingFailure, { error: result.error }),
-        );
-      }
-    } finally {
-      setIsPublishingSchedule(false);
-    }
-  }
+  // sync ব্যর্থ হলে একবার (repeat না) amber notice — showBlockMessage
+  // (লাল, কাজ থামায় বলে ভুল সংকেত) না, কারণ auto-sync ব্যর্থতা
+  // ব্যবহারকারীর কাজে বাধা দেওয়া উচিত না, শুধু জানানো উচিত। ref দিয়ে
+  // আগের error message ট্র্যাক করা হচ্ছে যাতে একই error বারবার (প্রতি
+  // re-render এ) notice না দেখায় — শুধু নতুন/বদলানো error-এই দেখাবে।
+  const lastNotifiedSyncErrorRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (hubSyncState.status !== 'error' || !hubSyncState.lastError) return;
+    if (lastNotifiedSyncErrorRef.current === hubSyncState.lastError) return;
+    lastNotifiedSyncErrorRef.current = hubSyncState.lastError;
+    showNoticeMessage(formatTemplate(t.designStudio.hubSyncFailed, { error: hubSyncState.lastError }));
+  }, [hubSyncState.status, hubSyncState.lastError]);
 
   const {
     selection,
@@ -1098,36 +1076,40 @@ export default function DesignStudioPage() {
               )}
             </button>
 
-            <button
-              type="button"
-              onClick={handlePublishToHub}
-              disabled={!buildingId || isPublishingToHub}
-              title={t.designStudio.publishToHub}
-              aria-label={t.designStudio.publishToHub}
-              className="flex shrink-0 items-center justify-center rounded-sheet border border-line-strong p-1.5 text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
-            >
-              {isPublishingToHub ? (
-                <span className="text-xs">…</span>
-              ) : (
-                <UploadCloud size={14} aria-hidden />
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={handlePublishScheduleToEstimating}
-              disabled={!buildingId || isPublishingSchedule}
-              title={t.designStudio.publishScheduleToEstimating}
-              aria-label={t.designStudio.publishScheduleToEstimating}
-              className="flex shrink-0 items-center justify-center rounded-sheet border border-line-strong p-1.5 text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
-            >
-              {isPublishingSchedule ? (
-                <span className="text-xs">…</span>
-              ) : (
-                <Send size={14} aria-hidden />
-              )}
-            </button>
-          </div>
+            {/* আগে এখানে দুটো ম্যানুয়াল push বাটন ছিল ("Publish to Hub",
+                "Send schedule to Estimating") — এখন auto-sync
+                (useArchitecturalAutoSync.ts), তাই বাটনের বদলে শুধু একটা
+                ছোট, নিরীহ status dot — 'syncing'/'pending' অবস্থায়
+                পালস করে, ব্যর্থ হলে amber, সফল হলে নিজে থেকে মিলিয়ে
+                যায়। ক্লিক করার কিছু নেই, শুধু informational। */}
+            {buildingId && (
+              <div
+                className="flex shrink-0 items-center justify-center p-1.5"
+                title={
+                  hubSyncState.status === 'error'
+                    ? formatTemplate(t.designStudio.hubSyncFailed, { error: hubSyncState.lastError ?? '' })
+                    : hubSyncState.status === 'syncing' || hubSyncState.status === 'pending'
+                      ? t.designStudio.hubSyncSyncing
+                      : hubSyncState.lastSyncedVersion !== null
+                        ? formatTemplate(t.designStudio.hubSyncSynced, { version: hubSyncState.lastSyncedVersion })
+                        : undefined
+                }
+                aria-hidden
+              >
+                <span
+                  className={
+                    'block h-1.5 w-1.5 rounded-full transition-colors ' +
+                    (hubSyncState.status === 'error'
+                      ? 'bg-amber-500'
+                      : hubSyncState.status === 'syncing' || hubSyncState.status === 'pending'
+                        ? 'animate-pulse bg-ink-muted'
+                        : hubSyncState.status === 'synced'
+                          ? 'bg-emerald-500'
+                          : 'bg-transparent')
+                  }
+                />
+              </div>
+            )}
 
           {/* Pinned outside the scrolling row above (not just pushed
               right with ml-auto inside it) so it can never end up

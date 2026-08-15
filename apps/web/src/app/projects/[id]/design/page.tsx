@@ -1076,12 +1076,6 @@ export default function DesignStudioPage() {
               )}
             </button>
 
-            {/* আগে এখানে দুটো ম্যানুয়াল push বাটন ছিল ("Publish to Hub",
-                "Send schedule to Estimating") — এখন auto-sync
-                (useArchitecturalAutoSync.ts), তাই বাটনের বদলে শুধু একটা
-                ছোট, নিরীহ status dot — 'syncing'/'pending' অবস্থায়
-                পালস করে, ব্যর্থ হলে amber, সফল হলে নিজে থেকে মিলিয়ে
-                যায়। ক্লিক করার কিছু নেই, শুধু informational। */}
             {buildingId && (
               <div
                 className="flex shrink-0 items-center justify-center p-1.5"
@@ -1110,12 +1104,8 @@ export default function DesignStudioPage() {
                 />
               </div>
             )}
+          </div>
 
-          {/* Pinned outside the scrolling row above (not just pushed
-              right with ml-auto inside it) so it can never end up
-              scrolled off-screen on a narrow phone when the building/
-              floor names are long — that was hiding this toggle
-              entirely on some screens. */}
           <div className="flex shrink-0 items-center rounded-sheet border border-line-strong p-0.5 lg:hidden">
             <button
               onClick={() => setMobileViewMode('2d')}

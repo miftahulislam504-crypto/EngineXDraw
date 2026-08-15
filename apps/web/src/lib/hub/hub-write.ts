@@ -648,6 +648,43 @@ function buildScheduleExport(exportData: ArchitecturalExport): {
  */
 const FIRESTORE_DOC_SIZE_WARNING_BYTES = 900_000; // ~900KB, ১ MiB সীমার কাছাকাছি safety margin
 
+/**
+ * Firestore-এর setDoc()/updateDoc() `undefined` value থাকলে সরাসরি
+ * throw করে (এমনকি nested object/array-এর ভেতরে থাকলেও) — এটা
+ * JSON.stringify()-এর মতো silently drop করে না।
+ *
+ * floorElements() (উপরে) প্রতিটা BuildingElementRef.geometry-তে
+ * source document-এর optional field সরাসরি বসায় (যেমন
+ * w.materialLabel, r.finishFloor) — এই field গুলো Draw-এর নিজস্ব Wall/
+ * Room/... টাইপে ঐচ্ছিক (`field?: T`), তাই ব্যবহারকারী যদি কখনো এই
+ * ফিল্ড পূরণ না করে থাকেন, runtime-এ সেই key `undefined` value নিয়ে
+ * object-এ থেকে যায় (TypeScript-এ `T | undefined` বৈধ, কিন্তু Firestore
+ * runtime-এ অবৈধ)। আগে এই ডেটা Storage-এ JSON.stringify() হয়ে যেত
+ * (যা undefined-ওয়ালা key silently বাদ দেয়), তাই এই bug কখনো প্রকাশ
+ * পায়নি — এখন সরাসরি Firestore setDoc() হওয়ায় প্রথমবার ধরা পড়েছে।
+ *
+ * এই ফাংশন publishArchitecturalToHub()-এর combinedData পাঠানোর ঠিক
+ * আগে পুরো object recursively walk করে undefined value-ওয়ালা key বাদ
+ * দেয় (array-এর ভেতরের object-সহ) — kept as a last line of defense
+ * right before the write, rather than fixing every individual
+ * `geometry: {...}` literal in floorElements(), so any future field
+ * added there is automatically covered too.
+ */
+function stripUndefinedDeep<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefinedDeep(item)) as unknown as T;
+  }
+  if (value !== null && typeof value === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      if (val === undefined) continue;
+      result[key] = stripUndefinedDeep(val);
+    }
+    return result as T;
+  }
+  return value;
+}
+
 export async function publishArchitecturalToHub(
   projectId: string,
   buildingId: string,
@@ -688,7 +725,7 @@ export async function publishArchitecturalToHub(
     }
 
     const newVersion = await bumpModuleVersion(projectId, 'architectural');
-    await saveModuleData(projectId, 'architectural', 'architectural', combinedData, newVersion);
+    await saveModuleData(projectId, 'architectural', 'architectural', stripUndefinedDeep(combinedData), newVersion);
 
     // Structural-এর publishArchitecturalModel() (আগে এখানে ছিল) buildingInfo
     // এর version-এর সাথে dependency link করতো, যাতে building info বদলালে

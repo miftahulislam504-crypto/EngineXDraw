@@ -167,13 +167,25 @@ function buildTurnLandingBoundary(a: StairFlight, b: StairFlight, stairWidth: nu
     const p1 = { x: a.end.x + A.ux * spanMin, y: a.end.y + A.uy * spanMin };
     const p2 = { x: a.end.x + A.ux * spanMax, y: a.end.y + A.uy * spanMax };
 
+    // Landing depth across the gap axis (perpendicular to travel,
+    // between the two flights' facing edges): a real switchback landing
+    // is only as deep as the stair itself is wide (`stairWidth`) — the
+    // same "landing depth = stair width" rule the bottom/top end
+    // landings already follow (see MIN_END_LANDING_DEPTH's own comment)
+    // — flush against flight A's facing edge and extending exactly
+    // `stairWidth` toward flight B, NOT stretched across the whole
+    // flight-to-flight gap. Stretching to fill the whole gap (the
+    // previous nearA = half, nearB = gapLen - half) is what made the
+    // landing swallow almost the entire gap between the two flights
+    // instead of leaving a proper narrow gap alongside a stair-width
+    // -deep landing platform.
     const gapDx = b.start.x - a.end.x;
     const gapDy = b.start.y - a.end.y;
     const gapLen = Math.hypot(gapDx, gapDy) || 1e-9;
     const gx = gapDx / gapLen;
     const gy = gapDy / gapLen;
-    const nearA = half;
-    const nearB = Math.max(gapLen - half, half);
+    const nearA = 0;
+    const nearB = Math.min(stairWidth, gapLen);
 
     return [
       { x: p1.x + gx * nearA, y: p1.y + gy * nearA },

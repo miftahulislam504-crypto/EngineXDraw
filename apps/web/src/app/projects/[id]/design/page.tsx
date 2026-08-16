@@ -335,6 +335,17 @@ export default function DesignStudioPage() {
   }, [drawStart]);
   const { t } = useI18nStore();
   const currentFloorLevel = floors.find((f) => f.id === floorId)?.level ?? 0;
+  // Walls must reach exactly this floor's real floorToFloorHeight, not
+  // a fixed app-wide constant — Hub-seeded buildings commonly set the
+  // ground floor/basement to 3.5m while upper floors stay 3.05m (see
+  // seedBuildingFromHub), and any floor's height can be edited to a
+  // custom value. A wall stuck at DEFAULT_WALL_HEIGHT while the floor
+  // above starts at a different elevation (via computeFloorBaseElevations)
+  // leaves a visible gap — or overlap — between stacked floors in every
+  // 3D/elevation view. Falls back to DEFAULT_WALL_HEIGHT only when the
+  // floor doc itself hasn't loaded yet.
+  const currentFloorToFloorHeight =
+    floors.find((f) => f.id === floorId)?.floorToFloorHeight ?? DEFAULT_WALL_HEIGHT;
   // Footing tool is ground-floor-only (footings sit in the soil below
   // the ground slab — see Toolbar's matching disabled state). If the
   // person had it armed and then switches to a different floor, drop
@@ -535,7 +546,7 @@ export default function DesignStudioPage() {
       start,
       end,
       thickness: DEFAULT_WALL_THICKNESS,
-      height: DEFAULT_WALL_HEIGHT,
+      height: currentFloorToFloorHeight,
       type: 'INTERIOR' as const,
     };
     const id = await createWall(projectId, buildingId, floorId, data);
@@ -555,7 +566,7 @@ export default function DesignStudioPage() {
       end,
       width: DEFAULT_BEAM_WIDTH,
       depth: DEFAULT_BEAM_DEPTH,
-      elevation: DEFAULT_WALL_HEIGHT - DEFAULT_BEAM_DEPTH,
+      elevation: currentFloorToFloorHeight - DEFAULT_BEAM_DEPTH,
     };
     const id = await createBeam(projectId, buildingId, floorId, data);
     recordHistory({ action: 'create', kind: 'beam', id, data });
@@ -654,14 +665,22 @@ export default function DesignStudioPage() {
     }
 
     if (tool === 'slab') {
-      const data = { boundary, thickness: DEFAULT_SLAB_THICKNESS, elevation: 0 };
+      // A Slab is the structural floor/roof plate spanning the TOP of
+      // this floor's walls/columns (it's what the floor above stands
+      // on, or the roof deck if nothing is above) — not a plate sitting
+      // at this floor's own base. elevation: 0 previously placed every
+      // new slab flush with the floor instead of at wall-top height.
+      // Uses this floor's own floorToFloorHeight (not the fixed
+      // DEFAULT_WALL_HEIGHT) so the slab lands exactly where this
+      // floor's walls actually stop, same reasoning as handleCreateWall.
+      const data = { boundary, thickness: DEFAULT_SLAB_THICKNESS, elevation: currentFloorToFloorHeight };
       const id = await createSlab(projectId, buildingId, floorId, data);
       recordHistory({ action: 'create', kind: 'slab', id, data });
     } else if (tool === 'ceiling') {
       const data = {
         boundary,
         thickness: DEFAULT_CEILING_THICKNESS,
-        elevation: DEFAULT_WALL_HEIGHT - DEFAULT_CEILING_THICKNESS,
+        elevation: currentFloorToFloorHeight - DEFAULT_CEILING_THICKNESS,
       };
       const id = await ceilingCrud.create(projectId, buildingId, floorId, data);
       recordHistory({ action: 'create', kind: 'ceiling', id, data });
@@ -674,7 +693,7 @@ export default function DesignStudioPage() {
       const id = await foundationCrud.create(projectId, buildingId, floorId, data);
       recordHistory({ action: 'create', kind: 'foundation', id, data });
     } else if (tool === 'roof') {
-      const data = { boundary, thickness: DEFAULT_ROOF_THICKNESS, elevation: DEFAULT_WALL_HEIGHT };
+      const data = { boundary, thickness: DEFAULT_ROOF_THICKNESS, elevation: currentFloorToFloorHeight };
       const id = await roofCrud.create(projectId, buildingId, floorId, data);
       recordHistory({ action: 'create', kind: 'roof', id, data });
       if (currentFloorLevel !== topFloorLevel) {

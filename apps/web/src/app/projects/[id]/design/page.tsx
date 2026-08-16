@@ -1336,7 +1336,7 @@ export default function DesignStudioPage() {
               )}
             </button>
 
-            <div className="relative shrink-0">
+            <div className="shrink-0">
               <button
                 type="button"
                 onClick={() => {
@@ -1353,56 +1353,73 @@ export default function DesignStudioPage() {
               </button>
 
               {isCopyFloorPanelOpen && (
-                <div className="absolute left-0 top-full z-20 mt-1 w-64 rounded-sheet border border-line-strong bg-paper p-3 shadow-lg">
-                  <p className="text-xs font-medium text-ink">{t.designStudio.copyFloorPanelTitle}</p>
-                  <p className="mt-1 text-xs text-ink-faint">{t.designStudio.copyFloorPanelDescription}</p>
+                // fixed + a full-screen backdrop, not absolute — this button
+                // sits inside the toolbar's own overflow-x-auto scroll row
+                // (see the parent div a few lines up), so an absolutely
+                // positioned panel would anchor to that scrolled content
+                // and land off-screen instead of under the button. Fixed
+                // positioning anchors to the viewport instead, so the panel
+                // is always visible regardless of the toolbar's scroll
+                // offset.
+                <>
+                  <div
+                    className="fixed inset-0 z-20"
+                    onClick={() => {
+                      setIsCopyFloorPanelOpen(false);
+                      setCopyFloorTargetIds([]);
+                    }}
+                  />
+                  <div className="fixed left-1/2 top-16 z-30 w-[calc(100vw-2rem)] max-w-xs -translate-x-1/2 rounded-sheet border border-line-strong bg-paper p-3 shadow-lg">
+                    <p className="text-xs font-medium text-ink">{t.designStudio.copyFloorPanelTitle}</p>
+                    <p className="mt-1 text-xs text-ink-faint">{t.designStudio.copyFloorPanelDescription}</p>
 
-                  {floors.filter((f) => f.id !== floorId).length === 0 ? (
-                    <p className="mt-3 text-xs text-ink-muted">{t.designStudio.copyFloorNoOtherFloors}</p>
-                  ) : (
-                    <>
-                      <p className="mt-3 text-xs font-medium text-ink-muted">{t.designStudio.copyFloorTargetsLabel}</p>
-                      <div className="mt-1 max-h-40 space-y-1 overflow-y-auto">
-                        {floors
-                          .filter((f) => f.id !== floorId)
-                          .map((f) => (
-                            <label key={f.id} className="flex items-center gap-2 text-xs text-ink">
-                              <input
-                                type="checkbox"
-                                checked={copyFloorTargetIds.includes(f.id)}
-                                onChange={() => toggleCopyFloorTarget(f.id)}
-                                className="shrink-0"
-                              />
-                              {f.name}
-                            </label>
-                          ))}
-                      </div>
+                    {floors.filter((f) => f.id !== floorId).length === 0 ? (
+                      <p className="mt-3 text-xs text-ink-muted">{t.designStudio.copyFloorNoOtherFloors}</p>
+                    ) : (
+                      <>
+                        <p className="mt-3 text-xs font-medium text-ink-muted">{t.designStudio.copyFloorTargetsLabel}</p>
+                        <div className="mt-1 max-h-40 space-y-1 overflow-y-auto">
+                          {floors
+                            .filter((f) => f.id !== floorId)
+                            .map((f) => (
+                              <label key={f.id} className="flex items-center gap-2 text-xs text-ink">
+                                <input
+                                  type="checkbox"
+                                  checked={copyFloorTargetIds.includes(f.id)}
+                                  onChange={() => toggleCopyFloorTarget(f.id)}
+                                  className="shrink-0"
+                                />
+                                {f.name}
+                              </label>
+                            ))}
+                        </div>
 
-                      <div className="mt-3 flex items-center justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsCopyFloorPanelOpen(false);
-                            setCopyFloorTargetIds([]);
-                          }}
-                          className="rounded-sheet px-2 py-1 text-xs text-ink-muted hover:text-ink"
-                        >
-                          {t.designStudio.copyFloorCancel}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleCopyFloor}
-                          disabled={copyFloorTargetIds.length === 0 || isCopyingFloor}
-                          className="rounded-sheet bg-accent px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
-                        >
-                          {isCopyingFloor
-                            ? '…'
-                            : formatTemplate(t.designStudio.copyFloorConfirm, { count: copyFloorTargetIds.length })}
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
+                        <div className="mt-3 flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsCopyFloorPanelOpen(false);
+                              setCopyFloorTargetIds([]);
+                            }}
+                            className="rounded-sheet px-2 py-1 text-xs text-ink-muted hover:text-ink"
+                          >
+                            {t.designStudio.copyFloorCancel}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCopyFloor}
+                            disabled={copyFloorTargetIds.length === 0 || isCopyingFloor}
+                            className="rounded-sheet bg-accent px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+                          >
+                            {isCopyingFloor
+                              ? '…'
+                              : formatTemplate(t.designStudio.copyFloorConfirm, { count: copyFloorTargetIds.length })}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </>
               )}
             </div>
 

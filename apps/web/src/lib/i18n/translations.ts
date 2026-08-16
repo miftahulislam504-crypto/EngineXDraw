@@ -181,6 +181,15 @@ export interface Translations {
     view2D: string;
     view3D: string;
     addFloor: string;
+    copyFloor: string; // Toolbar button that opens the copy-floor panel
+    copyFloorTooltip: string; // tooltip for the copy-floor button
+    copyFloorPanelTitle: string; // heading inside the copy-floor panel
+    copyFloorPanelDescription: string; // short explanation of what gets copied
+    copyFloorNoOtherFloors: string; // shown when the building has no other floor to copy onto
+    copyFloorTargetsLabel: string; // label above the list of target-floor checkboxes
+    copyFloorConfirm: string; // use {count} placeholder — confirm button, e.g. "Copy to 2 floors"
+    copyFloorCancel: string;
+    copyFloorSuccess: string; // use {count} placeholder — notice shown after a successful copy
     // Push button সরিয়ে auto-sync করা হয়েছে (ব্যবহারকারীর নির্দেশে —
     // ডেটা পাঠানোর জন্য কোনো ম্যানুয়াল বাটন থাকবে না)। এই তিনটা key
     // এখন একটা ছোট, non-intrusive status indicator-এর জন্য (দেখুন

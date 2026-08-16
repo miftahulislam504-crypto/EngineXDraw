@@ -18,11 +18,15 @@
  *  - The `isXSupported` gate functions below return a plain boolean and
  *    are called at create/delete time in Design Studio to hard-block an
  *    unsupported placement or a deletion that would leave something else
- *    unsupported (see apps/web's handleCreateColumn/Beam/Rectangle and
- *    handleDeleteSelection) — the person simply cannot place a column
- *    with no footing under it, a beam with a floating end, a slab/roof
- *    with an unsupported corner, or delete a footing/column/wall that
- *    something else is currently resting on.
+ *    unsupported (see apps/web's handleCreateBeam/Rectangle and
+ *    handleDeleteSelection) — the person cannot place a beam with a
+ *    floating end, a slab/roof with an unsupported corner, or delete a
+ *    column/wall that something else is currently resting on.
+ *    NOTE: this does NOT apply to columns/footings — a column never
+ *    requires a footing underneath it (isColumnSupportedByFooting exists
+ *    only for the read-only Automation scan below, it is not a
+ *    create/delete gate), and a footing can be deleted freely even with
+ *    a column resting on it.
  *  - findStructuralCoordinationIssues wraps the same geometry into
  *    read-only warnings for the Automation page's "what's already in
  *    this project" scan — that scan runs over every element on every
@@ -209,11 +213,10 @@ export function snapToNearestFooting(point: Point2D, footings: Footing[]): Point
 }
 
 /** Same idea in the other direction — snaps a to-be-placed footing onto
- * the nearest existing column's center, so drawing the footing after
- * the column (the normal order once columns are hard-gated on having a
- * footing... for every column except literally the first one drawn on a
- * floor, which necessarily has no footing yet to snap to) still lines
- * them up exactly. */
+ * the nearest existing column's center (if one is close enough), so
+ * drawing a footing under an already-placed column still lines them up
+ * exactly without pixel-perfect placement. Purely a convenience — a
+ * footing is never required for a column to exist. */
 export function snapToNearestColumn(point: Point2D, columns: Column[]): Point2D {
   let nearest: Column | null = null;
   let nearestDist = Infinity;

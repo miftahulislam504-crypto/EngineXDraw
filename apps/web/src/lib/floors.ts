@@ -716,6 +716,76 @@ export const ceilingCrud = makeElementCrud<Ceiling>('ceilings');
 export const foundationCrud = makeElementCrud<Foundation>('foundations');
 export const footingCrud = makeElementCrud<Footing>('footings');
 export const roofCrud = makeElementCrud<Roof>('roofs');
+
+/**
+ * Copy Floor — duplicates one floor's structural elements (Wall, Column,
+ * Beam, Slab, Footing) onto a different floor, at identical x/y plan
+ * position. Used for "draw the ground floor once, then copy it to every
+ * floor above" — a very common workflow, since most floors in a
+ * multi-storey building repeat the same column/beam/wall/slab grid.
+ *
+ * Deliberately scoped to just these five element kinds for now (not
+ * openings, stairs, MEP, etc. — those either don't make sense copied
+ * floor-to-floor as-is, like a stair, or are a separate, larger feature).
+ *
+ * Position is copied exactly as drawn — same center/start/end
+ * coordinates, same dimensions — since a floor's plan layout is
+ * (x, y) in a shared building-wide coordinate system; only the
+ * elevation/z of the floor itself differs, which is handled separately
+ * by computeFloorBaseElevations in @archibim/core-engine, not by this
+ * function. This function does not touch elevation-bearing fields
+ * (e.g. Beam.elevation, Footing.elevation) — those stay relative to
+ * each floor's own finished level exactly as they were on the source
+ * floor, which is what "the same drawing, on this floor too" means.
+ *
+ * One Firestore batch write per element kind (walls, columns, beams,
+ * slabs, footings), so up to 5 batches total. A single writeBatch is
+ * capped at 500 operations; a floor with more than 500 elements of one
+ * kind is not a case this handles — chunking can be added later if it's
+ * ever actually hit.
+ */
+export async function copyFloorElements(
+  projectId: string,
+  buildingId: string,
+  sourceFloorId: string,
+  targetFloorId: string,
+  elements: {
+    walls: Wall[];
+    columns: Column[];
+    beams: Beam[];
+    slabs: Slab[];
+    footings: Footing[];
+  },
+): Promise<void> {
+  const { walls, columns, beams, slabs, footings } = elements;
+
+  async function copyOne<T extends { id: string; floorId: string; createdAt: unknown; updatedAt: unknown }>(
+    items: T[],
+    col: ReturnType<typeof subCol>,
+  ) {
+    if (items.length === 0) return;
+    const batch = writeBatch(db);
+    for (const item of items) {
+      const { id: _id, floorId: _floorId, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = item;
+      const ref = doc(col);
+      batch.set(ref, {
+        ...rest,
+        floorId: targetFloorId,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+    await batch.commit();
+  }
+
+  await Promise.all([
+    copyOne(walls, wallsCol(projectId, buildingId, targetFloorId)),
+    copyOne(columns, columnsCol(projectId, buildingId, targetFloorId)),
+    copyOne(beams, beamsCol(projectId, buildingId, targetFloorId)),
+    copyOne(slabs, slabsCol(projectId, buildingId, targetFloorId)),
+    copyOne(footings, subCol(projectId, buildingId, targetFloorId, 'footings')),
+  ]);
+}
 export const rampCrud = makeElementCrud<Ramp>('ramps');
 export const railingCrud = makeElementCrud<Railing>('railings');
 export const stairCrud = makeElementCrud<Stair>('stairs');

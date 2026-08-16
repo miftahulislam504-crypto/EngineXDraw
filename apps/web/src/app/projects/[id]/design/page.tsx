@@ -12,6 +12,7 @@ import {
   Plus,
   LayoutGrid,
   Box as Box3DIcon,
+  Copy,
 } from 'lucide-react';
 import type {
   Balcony,
@@ -80,7 +81,6 @@ import {
 } from '@archibim/object-model';
 import {
   joinCoincidentEndpoints,
-  isColumnSupportedByFooting,
   isBeamSupported,
   isBoundarySupported,
   checkBoundarySupport,
@@ -98,6 +98,7 @@ import { useAuthStore } from '@/lib/auth-store';
 import {
   subscribeToFloors,
   createFloor,
+  copyFloorElements,
   subscribeToWalls,
   subscribeToOpenings,
   subscribeToColumns,
@@ -285,6 +286,41 @@ export default function DesignStudioPage() {
       }
     } finally {
       setIsAddingFloor(false);
+    }
+  }
+
+  // Copy Floor — duplicates the currently-open floor's structural
+  // elements (Wall, Column, Beam, Slab, Footing) onto one or more other
+  // floors, at identical x/y position. See copyFloorElements in
+  // lib/floors.ts for exactly what is and isn't copied.
+  const [isCopyFloorPanelOpen, setIsCopyFloorPanelOpen] = useState(false);
+  const [copyFloorTargetIds, setCopyFloorTargetIds] = useState<string[]>([]);
+  const [isCopyingFloor, setIsCopyingFloor] = useState(false);
+
+  function toggleCopyFloorTarget(id: string) {
+    setCopyFloorTargetIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  async function handleCopyFloor() {
+    if (!buildingId || !floorId || isCopyingFloor || copyFloorTargetIds.length === 0) return;
+    setIsCopyingFloor(true);
+    try {
+      for (const targetId of copyFloorTargetIds) {
+        await copyFloorElements(projectId, buildingId, floorId, targetId, {
+          walls,
+          columns,
+          beams,
+          slabs,
+          footings,
+        });
+      }
+      showNoticeMessage(
+        formatTemplate(t.designStudio.copyFloorSuccess, { count: copyFloorTargetIds.length }),
+      );
+      setIsCopyFloorPanelOpen(false);
+      setCopyFloorTargetIds([]);
+    } finally {
+      setIsCopyingFloor(false);
     }
   }
 
@@ -585,15 +621,12 @@ export default function DesignStudioPage() {
 
   async function handleCreateColumn(center: { x: number; y: number }) {
     if (!buildingId || !floorId) return;
-    // Snap onto the nearest footing's exact center first (a convenience
-    // so the two line up without pixel-perfect placement), then gate on
-    // that same footing set — a column is never allowed to exist without
-    // one directly underneath it.
+    // Snap onto the nearest footing's exact center if one is nearby (a
+    // convenience so the two line up without pixel-perfect placement).
+    // A footing is NOT required — a column can be placed with no footing
+    // underneath it at all; snapping only applies when a footing already
+    // happens to be close by.
     const snapped = snapToNearestFooting(center, footings);
-    if (!isColumnSupportedByFooting(snapped, footings)) {
-      showBlockMessage(t.designStudio.structuralBlock.columnWithoutFooting);
-      return;
-    }
     const data = {
       center: snapped,
       shape: 'RECTANGULAR' as const,
@@ -911,20 +944,16 @@ export default function DesignStudioPage() {
     if (!buildingId || !floorId || !selection) return;
     const { kind, id } = selection;
 
-    // A footing/column/wall can't be deleted while something else in
-    // the model depends on it for support — deleting it out from under
-    // a column/beam/slab/roof would leave that dependent unsupported,
-    // which Design Studio never allows to exist in the first place (see
-    // the create-time gates above). Same underlying checks, just run in
-    // the opposite direction: "does anything currently rest on this."
-    if (kind === 'footing') {
-      const footing = footings.find((f) => f.id === id);
-      const hasColumn = footing && columns.some((c) => isColumnSupportedByFooting(c.center, [footing]));
-      if (hasColumn) {
-        showBlockMessage(t.designStudio.structuralBlock.footingHasColumn);
-        return;
-      }
-    }
+    // A column/wall can't be deleted while something else in the model
+    // depends on it for support — deleting it out from under a
+    // beam/slab/roof would leave that dependent unsupported, which
+    // Design Studio never allows to exist in the first place (see the
+    // create-time gates above). Same underlying checks, just run in the
+    // opposite direction: "does anything currently rest on this."
+    // NOTE: footing deletion is NOT gated on whether a column rests on
+    // it — a column never requires a footing, so deleting a footing out
+    // from under one is a valid, unblocked action (the column simply
+    // ends up with no footing, same as a column drawn without one).
 
     if (kind === 'column') {
       const column = columns.find((c) => c.id === id);
@@ -1306,6 +1335,76 @@ export default function DesignStudioPage() {
                 <Plus size={14} aria-hidden />
               )}
             </button>
+
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setCopyFloorTargetIds([]);
+                  setIsCopyFloorPanelOpen((open) => !open);
+                }}
+                disabled={!buildingId || !floorId || floors.length < 2}
+                title={t.designStudio.copyFloorTooltip}
+                aria-label={t.designStudio.copyFloor}
+                aria-expanded={isCopyFloorPanelOpen}
+                className="flex shrink-0 items-center justify-center rounded-sheet border border-line-strong p-1.5 text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
+              >
+                <Copy size={14} aria-hidden />
+              </button>
+
+              {isCopyFloorPanelOpen && (
+                <div className="absolute left-0 top-full z-20 mt-1 w-64 rounded-sheet border border-line-strong bg-paper p-3 shadow-lg">
+                  <p className="text-xs font-medium text-ink">{t.designStudio.copyFloorPanelTitle}</p>
+                  <p className="mt-1 text-xs text-ink-faint">{t.designStudio.copyFloorPanelDescription}</p>
+
+                  {floors.filter((f) => f.id !== floorId).length === 0 ? (
+                    <p className="mt-3 text-xs text-ink-muted">{t.designStudio.copyFloorNoOtherFloors}</p>
+                  ) : (
+                    <>
+                      <p className="mt-3 text-xs font-medium text-ink-muted">{t.designStudio.copyFloorTargetsLabel}</p>
+                      <div className="mt-1 max-h-40 space-y-1 overflow-y-auto">
+                        {floors
+                          .filter((f) => f.id !== floorId)
+                          .map((f) => (
+                            <label key={f.id} className="flex items-center gap-2 text-xs text-ink">
+                              <input
+                                type="checkbox"
+                                checked={copyFloorTargetIds.includes(f.id)}
+                                onChange={() => toggleCopyFloorTarget(f.id)}
+                                className="shrink-0"
+                              />
+                              {f.name}
+                            </label>
+                          ))}
+                      </div>
+
+                      <div className="mt-3 flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsCopyFloorPanelOpen(false);
+                            setCopyFloorTargetIds([]);
+                          }}
+                          className="rounded-sheet px-2 py-1 text-xs text-ink-muted hover:text-ink"
+                        >
+                          {t.designStudio.copyFloorCancel}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCopyFloor}
+                          disabled={copyFloorTargetIds.length === 0 || isCopyingFloor}
+                          className="rounded-sheet bg-accent px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+                        >
+                          {isCopyingFloor
+                            ? '…'
+                            : formatTemplate(t.designStudio.copyFloorConfirm, { count: copyFloorTargetIds.length })}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
 
             {buildingId && (
               <div

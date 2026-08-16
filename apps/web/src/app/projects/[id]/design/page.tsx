@@ -1343,7 +1343,7 @@ export default function DesignStudioPage() {
                   setCopyFloorTargetIds([]);
                   setIsCopyFloorPanelOpen((open) => !open);
                 }}
-                disabled={!buildingId || !floorId || floors.length < 2}
+                disabled={!buildingId || !floorId}
                 title={t.designStudio.copyFloorTooltip}
                 aria-label={t.designStudio.copyFloor}
                 aria-expanded={isCopyFloorPanelOpen}

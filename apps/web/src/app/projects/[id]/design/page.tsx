@@ -110,11 +110,20 @@ import {
   createSlab,
   updateWall,
   updateWallsBatch,
+  updateWallsPatchBatch,
   updateOpening,
+  deleteOpeningsBatch,
   updateColumn,
+  updateColumnsPatchBatch,
+  deleteColumnsBatch,
   updateBeam,
+  updateBeamsPatchBatch,
+  deleteBeamsBatch,
   updateSlab,
+  updateSlabsPatchBatch,
+  deleteSlabsBatch,
   deleteWall,
+  deleteWallsBatch,
   deleteOpening,
   deleteColumn,
   deleteBeam,
@@ -146,7 +155,7 @@ import {
 } from '@/lib/siteBoundary';
 import { subscribeToRooms, reconcileRooms, updateRoom } from '@/lib/rooms';
 import { subscribeToLibrary, ensureLibrarySeeded } from '@/lib/library';
-import { useDesignStudioStore, POLYGON_BOUNDARY_TOOLS } from '@/lib/design-studio-store';
+import { useDesignStudioStore, POLYGON_BOUNDARY_TOOLS, type SelectionKind } from '@/lib/design-studio-store';
 import { useI18nStore, formatTemplate } from '@/lib/i18n';
 import { Toolbar } from '@/components/design/Toolbar';
 import { FloorPlanCanvas } from '@/components/design/FloorPlanCanvas';
@@ -304,6 +313,8 @@ export default function DesignStudioPage() {
   const {
     selection,
     setSelection,
+    multiSelection,
+    clearMultiSelection,
     explodedView,
     mobileViewMode,
     setMobileViewMode,
@@ -1017,6 +1028,207 @@ export default function DesignStudioPage() {
     setSelection(null);
   }
 
+  /** Multi-select bulk edit: applies the same patch to every element in
+   * the active multi-select batch. Each Firestore write happens in one
+   * batch commit per element kind (see the updateXPatchBatch/updateBatch
+   * helpers in floors.ts) rather than one write per element, but undo
+   * history is still recorded per element — same one-entry-per-change
+   * granularity as every other edit, so undo after a bulk edit steps
+   * back through the batch one element at a time instead of needing a
+   * separate "bulk" history-entry shape. */
+  async function handleBulkUpdate(kind: SelectionKind, ids: string[], patch: Record<string, unknown>) {
+    if (!buildingId || !floorId || ids.length === 0) return;
+
+    // Snapshot each element's current values for the touched fields only
+    // — undo needs to know what to restore, and only the fields actually
+    // in `patch` were touched.
+    const findAll = (): Record<string, unknown>[] => {
+      switch (kind) {
+        case 'wall': return walls.filter((w) => ids.includes(w.id)) as unknown as Record<string, unknown>[];
+        case 'column': return columns.filter((c) => ids.includes(c.id)) as unknown as Record<string, unknown>[];
+        case 'beam': return beams.filter((b) => ids.includes(b.id)) as unknown as Record<string, unknown>[];
+        case 'slab': return slabs.filter((s) => ids.includes(s.id)) as unknown as Record<string, unknown>[];
+        case 'ceiling': return ceilings.filter((c) => ids.includes(c.id)) as unknown as Record<string, unknown>[];
+        case 'foundation': return foundations.filter((f) => ids.includes(f.id)) as unknown as Record<string, unknown>[];
+        case 'footing': return footings.filter((f) => ids.includes(f.id)) as unknown as Record<string, unknown>[];
+        case 'roof': return roofs.filter((r) => ids.includes(r.id)) as unknown as Record<string, unknown>[];
+        case 'ramp': return ramps.filter((r) => ids.includes(r.id)) as unknown as Record<string, unknown>[];
+        case 'railing': return railings.filter((r) => ids.includes(r.id)) as unknown as Record<string, unknown>[];
+        case 'balcony': return balconies.filter((b) => ids.includes(b.id)) as unknown as Record<string, unknown>[];
+        case 'curtainWall': return curtainWalls.filter((c) => ids.includes(c.id)) as unknown as Record<string, unknown>[];
+        case 'skylight': return skylights.filter((s) => ids.includes(s.id)) as unknown as Record<string, unknown>[];
+        default: return [];
+      }
+    };
+    const before = findAll();
+
+    switch (kind) {
+      case 'wall':
+        await updateWallsPatchBatch(projectId, buildingId, floorId, ids, patch);
+        break;
+      case 'column':
+        await updateColumnsPatchBatch(projectId, buildingId, floorId, ids, patch);
+        break;
+      case 'beam':
+        await updateBeamsPatchBatch(projectId, buildingId, floorId, ids, patch);
+        break;
+      case 'slab':
+        await updateSlabsPatchBatch(projectId, buildingId, floorId, ids, patch);
+        break;
+      case 'ceiling':
+        await ceilingCrud.updateBatch(projectId, buildingId, floorId, ids, patch);
+        break;
+      case 'foundation':
+        await foundationCrud.updateBatch(projectId, buildingId, floorId, ids, patch);
+        break;
+      case 'footing':
+        await footingCrud.updateBatch(projectId, buildingId, floorId, ids, patch);
+        break;
+      case 'roof':
+        await roofCrud.updateBatch(projectId, buildingId, floorId, ids, patch);
+        break;
+      case 'ramp':
+        await rampCrud.updateBatch(projectId, buildingId, floorId, ids, patch);
+        break;
+      case 'railing':
+        await railingCrud.updateBatch(projectId, buildingId, floorId, ids, patch);
+        break;
+      case 'balcony':
+        await balconyCrud.updateBatch(projectId, buildingId, floorId, ids, patch);
+        break;
+      case 'curtainWall':
+        await curtainWallCrud.updateBatch(projectId, buildingId, floorId, ids, patch);
+        break;
+      case 'skylight':
+        await skylightCrud.updateBatch(projectId, buildingId, floorId, ids, patch);
+        break;
+      default:
+        return;
+    }
+
+    for (const el of before) {
+      const id = el.id as string;
+      const beforeFields: Record<string, unknown> = {};
+      for (const field of Object.keys(patch)) beforeFields[field] = el[field];
+      recordHistory({ action: 'update', kind, id, before: beforeFields, after: patch });
+    }
+  }
+
+  /** Multi-select bulk delete: removes every element in the active
+   * batch. Structural dependency checks (footing-has-column,
+   * column-has-dependents, wall-has-dependents — see
+   * handleDeleteSelection above) are skipped here deliberately: running
+   * them per-element against a batch that might delete several
+   * interdependent elements together (e.g. a column and the beam that
+   * only that column supports) would block valid batch deletes for the
+   * wrong reason. A person bulk-deleting a whole batch of the same kind
+   * is making one intentional decision, not several independent ones. */
+  async function handleDeleteMultiSelection() {
+    if (!buildingId || !floorId || !multiSelection || multiSelection.ids.length === 0) return;
+    const { kind, ids } = multiSelection;
+
+    const findAll = (): Record<string, unknown>[] => {
+      switch (kind) {
+        case 'wall': return walls.filter((w) => ids.includes(w.id)) as unknown as Record<string, unknown>[];
+        case 'opening': return openings.filter((o) => ids.includes(o.id)) as unknown as Record<string, unknown>[];
+        case 'column': return columns.filter((c) => ids.includes(c.id)) as unknown as Record<string, unknown>[];
+        case 'beam': return beams.filter((b) => ids.includes(b.id)) as unknown as Record<string, unknown>[];
+        case 'slab': return slabs.filter((s) => ids.includes(s.id)) as unknown as Record<string, unknown>[];
+        case 'ceiling': return ceilings.filter((c) => ids.includes(c.id)) as unknown as Record<string, unknown>[];
+        case 'foundation': return foundations.filter((f) => ids.includes(f.id)) as unknown as Record<string, unknown>[];
+        case 'footing': return footings.filter((f) => ids.includes(f.id)) as unknown as Record<string, unknown>[];
+        case 'roof': return roofs.filter((r) => ids.includes(r.id)) as unknown as Record<string, unknown>[];
+        case 'ramp': return ramps.filter((r) => ids.includes(r.id)) as unknown as Record<string, unknown>[];
+        case 'railing': return railings.filter((r) => ids.includes(r.id)) as unknown as Record<string, unknown>[];
+        case 'stair': return stairs.filter((s) => ids.includes(s.id)) as unknown as Record<string, unknown>[];
+        case 'balcony': return balconies.filter((b) => ids.includes(b.id)) as unknown as Record<string, unknown>[];
+        case 'curtainWall': return curtainWalls.filter((c) => ids.includes(c.id)) as unknown as Record<string, unknown>[];
+        case 'skylight': return skylights.filter((s) => ids.includes(s.id)) as unknown as Record<string, unknown>[];
+        case 'placedObject': return placedObjects.filter((p) => ids.includes(p.id)) as unknown as Record<string, unknown>[];
+        case 'dimension': return dimensions.filter((d) => ids.includes(d.id)) as unknown as Record<string, unknown>[];
+        case 'note': return notes.filter((n) => ids.includes(n.id)) as unknown as Record<string, unknown>[];
+        case 'gridLine': return gridLines.filter((g) => ids.includes(g.id)) as unknown as Record<string, unknown>[];
+        case 'sectionLine': return sectionLines.filter((s) => ids.includes(s.id)) as unknown as Record<string, unknown>[];
+        default: return [];
+      }
+    };
+    const strip = (obj: Record<string, unknown>) => {
+      const { id: _id, floorId: _floorId, buildingId: _buildingId, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = obj as any;
+      return rest;
+    };
+    const deletedElements = findAll();
+
+    switch (kind) {
+      case 'wall':
+        await deleteWallsBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'opening':
+        await deleteOpeningsBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'column':
+        await deleteColumnsBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'beam':
+        await deleteBeamsBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'slab':
+        await deleteSlabsBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'ceiling':
+        await ceilingCrud.removeBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'foundation':
+        await foundationCrud.removeBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'footing':
+        await footingCrud.removeBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'roof':
+        await roofCrud.removeBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'ramp':
+        await rampCrud.removeBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'railing':
+        await railingCrud.removeBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'stair':
+        await stairCrud.removeBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'balcony':
+        await balconyCrud.removeBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'curtainWall':
+        await curtainWallCrud.removeBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'skylight':
+        await skylightCrud.removeBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'placedObject':
+        await placedObjectCrud.removeBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'dimension':
+        await dimensionCrud.removeBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'note':
+        await noteCrud.removeBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'gridLine':
+        await gridLineCrud.removeBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'sectionLine':
+        await sectionLineCrud.removeBatch(projectId, buildingId, floorId, ids);
+        break;
+      default:
+        return;
+    }
+
+    for (const el of deletedElements) {
+      recordHistory({ action: 'delete', kind, id: el.id as string, data: strip(el) });
+    }
+    clearMultiSelection();
+  }
+
   if (hasLoadedBuildings && buildings.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
@@ -1154,6 +1366,7 @@ export default function DesignStudioPage() {
 
       <Toolbar
         onDeleteSelection={handleDeleteSelection}
+        onDeleteMultiSelection={handleDeleteMultiSelection}
         onOpenRooms={() => setShowRooms(true)}
         onOpenLibrary={() => setShowLibrary(true)}
         roomCount={rooms.length}
@@ -1536,6 +1749,8 @@ export default function DesignStudioPage() {
               setShowLibrary(true);
             }}
             onDelete={handleDeleteSelection}
+            onBulkUpdate={handleBulkUpdate}
+            onBulkDelete={handleDeleteMultiSelection}
           />
           {showRooms && (
             <RoomListPanel

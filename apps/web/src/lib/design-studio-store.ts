@@ -139,6 +139,29 @@ interface DesignStudioState {
   selection: Selection | null;
   setSelection: (selection: Selection | null) => void;
 
+  /** When on, tapping select-tool elements adds/removes them from
+   * `multiSelection` instead of replacing the single `selection` above —
+   * a toolbar toggle (see Toolbar's Multi-select button) rather than a
+   * modifier key, since phones have no Shift/Ctrl to hold while tapping.
+   * Turning this off does NOT clear an existing multiSelection, so a
+   * person can toggle back to single-select to inspect one element
+   * without losing their batch; starting a new tool or hitting Escape
+   * still clears it via setActiveTool/handleEscape. */
+  multiSelectMode: boolean;
+  toggleMultiSelectMode: () => void;
+
+  /** A same-kind batch of selected elements for bulk property edits and
+   * bulk delete (e.g. several walls at once). Only one kind at a time —
+   * tapping an element of a different kind while a multiSelection is
+   * active starts a fresh batch of that new kind, since "set thickness
+   * on this wall+column selection" has no single shared field to edit.
+   * Kept separate from `selection` (which stays the single-element
+   * source of truth PropertiesPanel/canvas highlighting already used)
+   * so every existing single-select call site keeps working unchanged. */
+  multiSelection: { kind: SelectionKind; ids: string[] } | null;
+  toggleInMultiSelection: (kind: SelectionKind, id: string) => void;
+  clearMultiSelection: () => void;
+
   /** Which endpoint of the selected wall/beam is being dragged, if any. */
   draggingEndpoint: 'start' | 'end' | null;
   setDraggingEndpoint: (end: 'start' | 'end' | null) => void;
@@ -184,6 +207,7 @@ export const useDesignStudioStore = create<DesignStudioState>((set) => ({
       polygonDraft: null,
       stairDraft: null,
       selection: null,
+      multiSelection: null,
     }),
 
   drawStart: null,
@@ -206,6 +230,31 @@ export const useDesignStudioStore = create<DesignStudioState>((set) => ({
 
   selection: null,
   setSelection: (selection) => set({ selection }),
+
+  multiSelectMode: false,
+  // Turning the mode off keeps whatever batch is already selected (see
+  // the field doc above) — only the mode flag flips.
+  toggleMultiSelectMode: () => set((s) => ({ multiSelectMode: !s.multiSelectMode })),
+
+  multiSelection: null,
+  toggleInMultiSelection: (kind, id) =>
+    set((s) => {
+      // Tapping a different kind than the current batch starts a fresh
+      // batch of just that one element, rather than mixing kinds or
+      // silently no-oping.
+      if (!s.multiSelection || s.multiSelection.kind !== kind) {
+        return { multiSelection: { kind, ids: [id] } };
+      }
+      const alreadyIn = s.multiSelection.ids.includes(id);
+      const nextIds = alreadyIn
+        ? s.multiSelection.ids.filter((existingId) => existingId !== id)
+        : [...s.multiSelection.ids, id];
+      // Emptying the batch (last element tapped again) clears it back to
+      // null rather than leaving an empty-array "active" multiSelection
+      // around for PropertiesPanel/Toolbar to have to special-case.
+      return { multiSelection: nextIds.length > 0 ? { kind, ids: nextIds } : null };
+    }),
+  clearMultiSelection: () => set({ multiSelection: null }),
 
   draggingEndpoint: null,
   setDraggingEndpoint: (end) => set({ draggingEndpoint: end }),

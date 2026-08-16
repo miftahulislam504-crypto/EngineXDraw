@@ -37,7 +37,7 @@ import {
   applyUShapeStairPreset,
 } from '@archibim/core-engine';
 import { Button, Input, LengthInput } from '@archibim/shared-ui';
-import { useDesignStudioStore } from '@/lib/design-studio-store';
+import { useDesignStudioStore, type SelectionKind } from '@/lib/design-studio-store';
 import { useI18nStore, formatTemplate } from '@/lib/i18n';
 import type { Translations } from '@/lib/i18n/translations';
 import { getOpeningAutoTag, getGridLineAutoLabel, getSectionLineAutoLabel } from '@/lib/floors';
@@ -118,6 +118,14 @@ export interface PropertiesPanelProps {
   onUpdateShaft: (id: string, patch: Partial<Pick<Shaft, 'shaftType' | 'startLevel' | 'endLevel' | 'label'>>) => void;
   onUpdateSiteBoundary: (id: string, patch: Partial<Pick<SiteBoundary, 'frontEdge'>>) => void;
   onDelete: () => void;
+  /** Multi-select bulk edit: applies `patch` to every id in the active
+   * batch (see useDesignStudioStore's multiSelection) in one call, kind
+   * dispatch handled by the caller (page.tsx) since it's the one holding
+   * every kind-specific batch-update function. Omitted entirely (rather
+   * than made a no-op) if the host page doesn't wire up bulk editing. */
+  onBulkUpdate?: (kind: SelectionKind, ids: string[], patch: Record<string, unknown>) => void;
+  /** Multi-select bulk delete: removes every id in the active batch. */
+  onBulkDelete?: () => void;
 }
 
 export function PropertiesPanel({
@@ -168,9 +176,37 @@ export function PropertiesPanel({
   onUpdateShaft,
   onUpdateSiteBoundary,
   onDelete,
+  onBulkUpdate,
+  onBulkDelete,
 }: PropertiesPanelProps) {
-  const { selection, setSelection } = useDesignStudioStore();
+  const { selection, setSelection, multiSelection, clearMultiSelection } = useDesignStudioStore();
   const { t } = useI18nStore();
+
+  if (multiSelection && multiSelection.ids.length > 0) {
+    return (
+      <BulkEditPanel
+        multiSelection={multiSelection}
+        walls={walls}
+        columns={columns}
+        beams={beams}
+        slabs={slabs}
+        ceilings={ceilings}
+        foundations={foundations}
+        footings={footings}
+        roofs={roofs}
+        ramps={ramps}
+        railings={railings}
+        balconies={balconies}
+        curtainWalls={curtainWalls}
+        skylights={skylights}
+        onClose={clearMultiSelection}
+        onBulkUpdate={onBulkUpdate}
+        onBulkDelete={onBulkDelete}
+        t={t}
+      />
+    );
+  }
+
   if (!selection) return null;
 
   const wall = selection.kind === 'wall' ? walls.find((w) => w.id === selection.id) : undefined;
@@ -956,6 +992,445 @@ function CustomParametersEditor({
           +
         </button>
       </div>
+    </div>
+  );
+}
+
+/** Shown instead of the single-element panel whenever a multi-select
+ * batch (see useDesignStudioStore's multiSelection) is active. Every
+ * field starts disabled/unchecked — the person opts into changing a
+ * field by ticking its checkbox, and only ticked fields are included in
+ * the patch sent to onBulkUpdate, so leaving a field untouched really
+ * does leave each element's own value alone rather than overwriting the
+ * whole batch with, say, whatever the first element's height happened
+ * to be. Only wall/column/beam/slab/ceiling/foundation/footing/roof/
+ * ramp/railing/balcony/curtainWall/skylight expose bulk fields — these
+ * are the kinds with simple shared numeric/enum properties; opening,
+ * stair, placedObject, dimension, note, gridLine, sectionLine, shaft,
+ * and siteBoundary are either rare to multi-select or have per-element
+ * fields (e.g. a stair's flights) that don't make sense batched, so
+ * for those kinds this panel falls back to count + bulk-delete only. */
+function BulkEditPanel({
+  multiSelection,
+  walls,
+  columns,
+  beams,
+  slabs,
+  ceilings,
+  foundations,
+  footings,
+  roofs,
+  ramps,
+  railings,
+  balconies,
+  curtainWalls,
+  skylights,
+  onClose,
+  onBulkUpdate,
+  onBulkDelete,
+  t,
+}: {
+  multiSelection: { kind: SelectionKind; ids: string[] };
+  walls: Wall[];
+  columns: Column[];
+  beams: Beam[];
+  slabs: Slab[];
+  ceilings: Ceiling[];
+  foundations: Foundation[];
+  footings: Footing[];
+  roofs: Roof[];
+  ramps: Ramp[];
+  railings: Railing[];
+  balconies: Balcony[];
+  curtainWalls: CurtainWall[];
+  skylights: Skylight[];
+  onClose: () => void;
+  onBulkUpdate?: (kind: SelectionKind, ids: string[], patch: Record<string, unknown>) => void;
+  onBulkDelete?: () => void;
+  t: Translations;
+}) {
+  const { kind, ids } = multiSelection;
+  const count = ids.length;
+
+  // A fresh set of checkbox/value state per batch (keyed on kind+ids)
+  // so switching from editing one batch to another (or growing/shrinking
+  // the same batch) doesn't carry over a stale half-filled form.
+  const [fields, setFields] = useState<Record<string, { enabled: boolean; value: unknown }>>({});
+  const batchKey = `${kind}:${ids.join(',')}`;
+  const [lastBatchKey, setLastBatchKey] = useState(batchKey);
+  if (batchKey !== lastBatchKey) {
+    setLastBatchKey(batchKey);
+    setFields({});
+  }
+
+  function setField(name: string, value: unknown) {
+    setFields((prev) => ({ ...prev, [name]: { enabled: true, value } }));
+  }
+  function toggleField(name: string, enabled: boolean, fallbackValue: unknown) {
+    setFields((prev) => ({ ...prev, [name]: { enabled, value: prev[name]?.value ?? fallbackValue } }));
+  }
+
+  function apply() {
+    const patch: Record<string, unknown> = {};
+    for (const [name, field] of Object.entries(fields)) {
+      if (field.enabled) patch[name] = field.value;
+    }
+    if (Object.keys(patch).length > 0) {
+      onBulkUpdate?.(kind, ids, patch);
+    }
+  }
+
+  // Reference element just to seed sensible starting values (e.g. the
+  // wall-type dropdown's default option) — never used to decide which
+  // fields are shown, since every kind's field set is fixed below.
+  const first = (() => {
+    switch (kind) {
+      case 'wall': return walls.find((w) => ids.includes(w.id));
+      case 'column': return columns.find((c) => ids.includes(c.id));
+      case 'beam': return beams.find((b) => ids.includes(b.id));
+      case 'slab': return slabs.find((s) => ids.includes(s.id));
+      case 'ceiling': return ceilings.find((c) => ids.includes(c.id));
+      case 'foundation': return foundations.find((f) => ids.includes(f.id));
+      case 'footing': return footings.find((f) => ids.includes(f.id));
+      case 'roof': return roofs.find((r) => ids.includes(r.id));
+      case 'ramp': return ramps.find((r) => ids.includes(r.id));
+      case 'railing': return railings.find((r) => ids.includes(r.id));
+      case 'balcony': return balconies.find((b) => ids.includes(b.id));
+      case 'curtainWall': return curtainWalls.find((c) => ids.includes(c.id));
+      case 'skylight': return skylights.find((s) => ids.includes(s.id));
+      default: return undefined;
+    }
+  })();
+
+  const hasFields = ['wall', 'column', 'beam', 'slab', 'ceiling', 'foundation', 'footing', 'roof', 'ramp', 'railing', 'balcony', 'curtainWall', 'skylight'].includes(kind);
+  const anyFieldEnabled = Object.values(fields).some((f) => f.enabled);
+
+  return (
+    <div className="absolute right-2 top-2 z-10 w-64 max-w-[calc(100%-1rem)] rounded-sheet border border-line bg-surface p-4 shadow-md sm:right-4 sm:top-4">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="font-mono text-[11px] uppercase tracking-wide text-ink-faint">
+          {formatTemplate(t.properties.bulkEditHeader, { count, kind: t.selectionKinds[kind] })}
+        </span>
+        <button onClick={onClose} className="text-ink-faint hover:text-ink" aria-label={t.designStudio.closeAriaLabel}>
+          ✕
+        </button>
+      </div>
+      <p className="mb-3 text-xs text-ink-faint">{formatTemplate(t.properties.bulkEditHint, { count })}</p>
+
+      {hasFields && (
+        <div className="flex flex-col gap-3">
+          {kind === 'wall' && (
+            <>
+              <BulkLengthField
+                label={t.properties.thickness}
+                inchStep={0.125}
+                fallback={first && 'thickness' in first ? (first as Wall).thickness : 0.2}
+                field={fields.thickness}
+                onToggle={(en, fb) => toggleField('thickness', en, fb)}
+                onChange={(v) => setField('thickness', v)}
+              />
+              <BulkLengthField
+                label={t.properties.height}
+                fallback={first ? (first as Wall).height : 3}
+                field={fields.height}
+                onToggle={(en, fb) => toggleField('height', en, fb)}
+                onChange={(v) => setField('height', v)}
+              />
+              <BulkSelectField
+                label={t.properties.type}
+                value={(fields.type?.value as string) ?? (first as Wall | undefined)?.type ?? 'EXTERIOR'}
+                enabled={fields.type?.enabled ?? false}
+                onToggle={(en) => toggleField('type', en, (first as Wall | undefined)?.type ?? 'EXTERIOR')}
+                onChange={(v) => setField('type', v)}
+                options={[
+                  { value: 'EXTERIOR', label: t.wallTypes.EXTERIOR },
+                  { value: 'INTERIOR', label: t.wallTypes.INTERIOR },
+                  { value: 'PARTITION', label: t.wallTypes.PARTITION },
+                ]}
+              />
+            </>
+          )}
+
+          {kind === 'column' && (
+            <>
+              <BulkLengthField
+                label={t.properties.width}
+                fallback={first ? (first as Column).width : 0.3}
+                field={fields.width}
+                onToggle={(en, fb) => toggleField('width', en, fb)}
+                onChange={(v) => setField('width', v)}
+              />
+              <BulkLengthField
+                label={t.properties.depth}
+                fallback={first && (first as Column).shape === 'RECTANGULAR' ? (first as Column).depth : 0.3}
+                field={fields.depth}
+                onToggle={(en, fb) => toggleField('depth', en, fb)}
+                onChange={(v) => setField('depth', v)}
+              />
+              <BulkLengthField
+                label={t.properties.height}
+                fallback={first ? (first as Column).height : 3}
+                field={fields.height}
+                onToggle={(en, fb) => toggleField('height', en, fb)}
+                onChange={(v) => setField('height', v)}
+              />
+            </>
+          )}
+
+          {kind === 'beam' && (
+            <>
+              <BulkLengthField
+                label={t.properties.width}
+                fallback={first ? (first as Beam).width : 0.25}
+                field={fields.width}
+                onToggle={(en, fb) => toggleField('width', en, fb)}
+                onChange={(v) => setField('width', v)}
+              />
+              <BulkLengthField
+                label={t.properties.depth}
+                fallback={first ? (first as Beam).depth : 0.4}
+                field={fields.depth}
+                onToggle={(en, fb) => toggleField('depth', en, fb)}
+                onChange={(v) => setField('depth', v)}
+              />
+              <BulkLengthField
+                label={t.properties.elevationAboveFloor}
+                fallback={first ? (first as Beam).elevation : 0}
+                field={fields.elevation}
+                onToggle={(en, fb) => toggleField('elevation', en, fb)}
+                onChange={(v) => setField('elevation', v)}
+              />
+            </>
+          )}
+
+          {(kind === 'slab' || kind === 'ceiling' || kind === 'foundation' || kind === 'roof' || kind === 'balcony') && (
+            <>
+              <BulkLengthField
+                label={t.properties.thickness}
+                inchStep={0.125}
+                fallback={first && 'thickness' in first ? (first as Slab).thickness : 0.15}
+                field={fields.thickness}
+                onToggle={(en, fb) => toggleField('thickness', en, fb)}
+                onChange={(v) => setField('thickness', v)}
+              />
+              <BulkLengthField
+                label={t.properties.elevation}
+                fallback={first && 'elevation' in first ? (first as Slab).elevation : 0}
+                field={fields.elevation}
+                onToggle={(en, fb) => toggleField('elevation', en, fb)}
+                onChange={(v) => setField('elevation', v)}
+              />
+            </>
+          )}
+
+          {kind === 'footing' && (
+            <>
+              <BulkLengthField
+                label={t.properties.width}
+                fallback={first ? (first as Footing).width : 0.6}
+                field={fields.width}
+                onToggle={(en, fb) => toggleField('width', en, fb)}
+                onChange={(v) => setField('width', v)}
+              />
+              <BulkLengthField
+                label={t.properties.depth}
+                fallback={first ? (first as Footing).depth : 0.6}
+                field={fields.depth}
+                onToggle={(en, fb) => toggleField('depth', en, fb)}
+                onChange={(v) => setField('depth', v)}
+              />
+              <BulkLengthField
+                label={t.properties.thickness}
+                inchStep={0.125}
+                fallback={first ? (first as Footing).thickness : 0.3}
+                field={fields.thickness}
+                onToggle={(en, fb) => toggleField('thickness', en, fb)}
+                onChange={(v) => setField('thickness', v)}
+              />
+            </>
+          )}
+
+          {kind === 'ramp' && (
+            <>
+              <BulkLengthField
+                label={t.properties.width}
+                fallback={first ? (first as Ramp).width : 1.2}
+                field={fields.width}
+                onToggle={(en, fb) => toggleField('width', en, fb)}
+                onChange={(v) => setField('width', v)}
+              />
+              <BulkLengthField
+                label={t.properties.topElevation}
+                fallback={first ? (first as Ramp).endElevation : 0}
+                field={fields.endElevation}
+                onToggle={(en, fb) => toggleField('endElevation', en, fb)}
+                onChange={(v) => setField('endElevation', v)}
+              />
+            </>
+          )}
+
+          {kind === 'railing' && (
+            <>
+              <BulkLengthField
+                label={t.properties.height}
+                fallback={first ? (first as Railing).height : 1.05}
+                field={fields.height}
+                onToggle={(en, fb) => toggleField('height', en, fb)}
+                onChange={(v) => setField('height', v)}
+              />
+              <BulkLengthField
+                label={t.properties.postSpacing}
+                fallback={first ? (first as Railing).postSpacing : 1}
+                field={fields.postSpacing}
+                onToggle={(en, fb) => toggleField('postSpacing', en, fb)}
+                onChange={(v) => setField('postSpacing', v)}
+              />
+            </>
+          )}
+
+          {kind === 'curtainWall' && (
+            <>
+              <BulkLengthField
+                label={t.properties.height}
+                fallback={first ? (first as CurtainWall).height : 3}
+                field={fields.height}
+                onToggle={(en, fb) => toggleField('height', en, fb)}
+                onChange={(v) => setField('height', v)}
+              />
+              <BulkLengthField
+                label={t.properties.mullionSpacing}
+                fallback={first ? (first as CurtainWall).mullionSpacing : 1.2}
+                field={fields.mullionSpacing}
+                onToggle={(en, fb) => toggleField('mullionSpacing', en, fb)}
+                onChange={(v) => setField('mullionSpacing', v)}
+              />
+            </>
+          )}
+
+          {kind === 'skylight' && (
+            <>
+              <BulkLengthField
+                label={t.properties.width}
+                fallback={first ? (first as Skylight).width : 0.6}
+                field={fields.width}
+                onToggle={(en, fb) => toggleField('width', en, fb)}
+                onChange={(v) => setField('width', v)}
+              />
+              <BulkLengthField
+                label={t.properties.depth}
+                fallback={first ? (first as Skylight).depth : 0.6}
+                field={fields.depth}
+                onToggle={(en, fb) => toggleField('depth', en, fb)}
+                onChange={(v) => setField('depth', v)}
+              />
+            </>
+          )}
+
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={!anyFieldEnabled}
+            onClick={apply}
+            className="mt-1 w-full"
+          >
+            {formatTemplate(t.properties.bulkApplyButton, { count })}
+          </Button>
+        </div>
+      )}
+
+      <Button variant="danger" size="sm" onClick={onBulkDelete} className="mt-4 w-full">
+        {formatTemplate(t.properties.bulkDeleteButton, { count })}
+      </Button>
+    </div>
+  );
+}
+
+/** One checkbox + LengthInput row for BulkEditPanel — unchecked means
+ * this field is excluded from the patch entirely (each element keeps
+ * its own value), checked means the typed length applies to every
+ * selected element. Starts unchecked with `fallback` (usually the
+ * first selected element's current value) as the seed so ticking the
+ * box doesn't jump to 0. */
+function BulkLengthField({
+  label,
+  inchStep,
+  fallback,
+  field,
+  onToggle,
+  onChange,
+}: {
+  label: string;
+  inchStep?: number;
+  fallback: number;
+  field: { enabled: boolean; value: unknown } | undefined;
+  onToggle: (enabled: boolean, fallback: number) => void;
+  onChange: (value: number) => void;
+}) {
+  const enabled = field?.enabled ?? false;
+  const value = typeof field?.value === 'number' ? field.value : fallback;
+  return (
+    <div className="flex items-end gap-2">
+      <input
+        type="checkbox"
+        checked={enabled}
+        onChange={(e) => onToggle(e.target.checked, fallback)}
+        className="mb-2.5 h-4 w-4 shrink-0"
+        aria-label={label}
+      />
+      <div className="flex-1">
+        <LengthInput
+          label={label}
+          inchStep={inchStep}
+          valueMeters={value}
+          onChangeMeters={onChange}
+          disabled={!enabled}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** One checkbox + select row for BulkEditPanel — same enable/disable
+ * pattern as BulkLengthField, for enum fields like Wall.type. */
+function BulkSelectField({
+  label,
+  value,
+  enabled,
+  onToggle,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  enabled: boolean;
+  onToggle: (enabled: boolean) => void;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <div className="flex items-end gap-2">
+      <input
+        type="checkbox"
+        checked={enabled}
+        onChange={(e) => onToggle(e.target.checked)}
+        className="mb-2.5 h-4 w-4 shrink-0"
+        aria-label={label}
+      />
+      <label className="flex flex-1 flex-col gap-1.5">
+        <span className="font-mono text-[11px] uppercase tracking-wide text-ink-muted">{label}</span>
+        <select
+          value={value}
+          disabled={!enabled}
+          onChange={(e) => onChange(e.target.value)}
+          className="rounded-sheet border border-line-strong px-3 py-2 text-sm disabled:opacity-40"
+        >
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </label>
     </div>
   );
 }

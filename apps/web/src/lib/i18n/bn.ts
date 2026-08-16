@@ -158,6 +158,7 @@ export const bn: Translations = {
     explodedView: 'এক্সপ্লোডেড ভিউ',
     explodedViewTooltip: '3D ভিউতে প্রতিটা ফ্লোর উলম্বভাবে আলাদা করে দেখায়',
     deleteSelection: 'মুছে ফেলুন ({kind})',
+    deleteMultiSelection: '{count}টা {kind} মুছে ফেলুন',
     closeAriaLabel: 'বন্ধ করুন',
     northLabel: 'উত্তর',
     buildingSelectLabel: 'বিল্ডিং',
@@ -178,6 +179,8 @@ export const bn: Translations = {
     footingGroundFloorOnly: 'Footing শুধু ground floor-এর জন্য — এটা ground slab-এর নিচে মাটিতে বসে',
     orthoMode: 'সোজা মোড',
     orthoModeTooltip: 'অন থাকলে wall শুধু সোজা (0°/90°) টানা যাবে, অফ থাকলে যেকোনো দিকে টানা যাবে',
+    multiSelectMode: 'একাধিক সিলেক্ট',
+    multiSelectTooltip: 'অন করে একই ধরনের একাধিক এলিমেন্ট (যেমন wall) ট্যাপ করুন — একসাথে এডিট বা ডিলিট করতে পারবেন',
     wallLengthPrompt: {
       label: 'দৈর্ঘ্য',
       placeholderFeet: 'ft',
@@ -402,6 +405,11 @@ export const bn: Translations = {
     siteBoundaryFrontEdge: 'কোন পাশ রাস্তার দিকে?',
     siteBoundaryHint:
       'Compliance পেজের Setback Validation এই পাশটাকে "সামনে" ধরে বিল্ডিং ফুটপ্রিন্ট থেকে এই বাউন্ডারি পর্যন্ত প্রকৃত দূরত্ব মাপে।',
+    bulkEditHeader: '{count}টা {kind} সিলেক্টেড',
+    bulkEditHint: 'পরিবর্তন সবগুলো ({count}টা) সিলেক্টেড এলিমেন্টে একসাথে প্রয়োগ হবে। কোনো ফিল্ড খালি/অপরিবর্তিত রাখলে সেই এলিমেন্টের নিজের মান থেকে যাবে।',
+    bulkDeleteButton: 'সবগুলো ({count}টা) মুছে ফেলুন',
+    bulkApplyButton: 'সবগুলোতে ({count}টা) প্রয়োগ করুন',
+    bulkFieldPlaceholder: '— বিভিন্ন —',
   },
   siteBoundaryEdges: {
     top: 'উপরে',

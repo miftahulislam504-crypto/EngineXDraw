@@ -173,6 +173,7 @@ export interface Translations {
     explodedView: string;
     explodedViewTooltip: string;
     deleteSelection: string; // use {kind} as placeholder — kind is a translated selectionKinds value
+    deleteMultiSelection: string; // use {count} and {kind} placeholders — bulk-delete button label/tooltip
     closeAriaLabel: string;
     northLabel: string; // label next to the north-angle input overlaid on the floor plan (Phase C)
     buildingSelectLabel: string; // aria-label for the icon-only building selector in the compact header
@@ -197,6 +198,8 @@ export interface Translations {
     footingGroundFloorOnly: string; // shown on the disabled footing tool when the active floor isn't the ground floor (Phase 13)
     orthoMode: string; // aria-label for the Toolbar's Wall-tool Ortho (0°/90° lock) toggle
     orthoModeTooltip: string; // tooltip explaining the Ortho toggle
+    multiSelectMode: string; // aria-label for the Toolbar's multi-select mode toggle
+    multiSelectTooltip: string; // tooltip explaining the multi-select mode toggle
     wallLengthPrompt: {
       label: string; // label on the length input shown right after the wall's first point is placed
       placeholderFeet: string; // placeholder text in the feet box, e.g. "ft"
@@ -303,6 +306,11 @@ export interface Translations {
     deleteButton: string;
     siteBoundaryFrontEdge: string;
     siteBoundaryHint: string;
+    bulkEditHeader: string; // use {count} and {kind} placeholders — header shown when a multi-select batch is active
+    bulkEditHint: string; // use {count} placeholder — explains that changes apply to every selected element
+    bulkDeleteButton: string; // use {count} placeholder
+    bulkApplyButton: string; // use {count} placeholder
+    bulkFieldPlaceholder: string; // shown in a bulk-edit field when the batch's elements don't share the same current value
   };
   siteBoundaryEdges: Record<SiteBoundaryEdge, string>;
   roomsPanel: {

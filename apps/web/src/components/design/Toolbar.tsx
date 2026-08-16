@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import clsx from 'clsx';
-import { Library, ListChecks, Maximize, Minus, Plus as PlusIcon, Redo2, RotateCcw, Trash2, Undo2, X, Layers2, CornerDownRight } from 'lucide-react';
+import { Library, ListChecks, Maximize, Minus, Plus as PlusIcon, Redo2, RotateCcw, Trash2, Undo2, X, Layers2, CornerDownRight, SquareCheck } from 'lucide-react';
 import { useDesignStudioStore, type DesignTool } from '@/lib/design-studio-store';
 import { useDesignHistoryStore } from '@/lib/design-history';
 import { useI18nStore, formatTemplate } from '@/lib/i18n';
@@ -26,6 +26,11 @@ const toolGroups: ToolGroup[] = [
 
 export interface ToolbarProps {
   onDeleteSelection?: () => void;
+  /** Deletes every element currently in the multi-select batch. Only
+   * relevant while multiSelection is non-empty — see the bulk-delete
+   * button below, shown instead of the single-delete button whenever a
+   * batch is active. */
+  onDeleteMultiSelection?: () => void;
   onOpenRooms?: () => void;
   onOpenLibrary?: () => void;
   roomCount?: number;
@@ -51,6 +56,7 @@ export interface ToolbarProps {
 
 export function Toolbar({
   onDeleteSelection,
+  onDeleteMultiSelection,
   onOpenRooms,
   onOpenLibrary,
   roomCount,
@@ -79,6 +85,10 @@ export function Toolbar({
     toggleShowFloorBelow,
     orthoMode,
     toggleOrthoMode,
+    multiSelectMode,
+    toggleMultiSelectMode,
+    multiSelection,
+    clearMultiSelection,
   } = useDesignStudioStore();
   const { t } = useI18nStore();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -98,6 +108,7 @@ export function Toolbar({
     setPolygonDraft(null);
     setStairDraft(null);
     setSelection(null);
+    clearMultiSelection();
     setOpenToolGroup(null);
   }
 
@@ -206,6 +217,33 @@ export function Toolbar({
           <Layers2 size={16} aria-hidden />
         </button>
 
+        {/* Turns select-tool taps into add/remove-from-batch instead of
+            single selection. A toggle rather than a modifier key (like
+            desktop Shift-click) since this toolbar has to work on phones,
+            which have no key to hold while tapping. Only shown for the
+            select tool — meaningless for draw tools, which don't select
+            anything. */}
+        {activeTool === 'select' && (
+          <button
+            onClick={() => {
+              toggleMultiSelectMode();
+              // Leaving multi-select mode with nothing batched shouldn't
+              // leave stale UI state around; an active batch is kept
+              // (see toggleMultiSelectMode's doc) so it can still be
+              // bulk-edited after switching back to single-select.
+              if (multiSelectMode) setSelection(null);
+            }}
+            title={t.designStudio.multiSelectTooltip}
+            aria-label={t.designStudio.multiSelectMode}
+            className={clsx(
+              'flex shrink-0 items-center justify-center rounded-sheet p-2 transition-colors',
+              multiSelectMode ? 'bg-accent-soft text-accent-dark' : 'text-ink-muted hover:bg-paper hover:text-ink',
+            )}
+          >
+            <SquareCheck size={16} aria-hidden />
+          </button>
+        )}
+
         {/* Wall tool only — locks the second point to strict 0°/90°
             from the first (Ortho mode) instead of following the cursor
             at whatever free angle it's aimed. Only shown while the Wall
@@ -300,15 +338,33 @@ export function Toolbar({
           <RotateCcw size={15} aria-hidden />
         </button>
 
-        {selection && (
+        {multiSelection && multiSelection.ids.length > 0 ? (
           <button
-            onClick={onDeleteSelection}
-            title={formatTemplate(t.designStudio.deleteSelection, { kind: t.selectionKinds[selection.kind] })}
-            aria-label={formatTemplate(t.designStudio.deleteSelection, { kind: t.selectionKinds[selection.kind] })}
-            className="flex shrink-0 items-center justify-center rounded-sheet p-2 text-danger transition-colors hover:bg-danger-soft"
+            onClick={onDeleteMultiSelection}
+            title={formatTemplate(t.designStudio.deleteMultiSelection, {
+              count: multiSelection.ids.length,
+              kind: t.selectionKinds[multiSelection.kind],
+            })}
+            aria-label={formatTemplate(t.designStudio.deleteMultiSelection, {
+              count: multiSelection.ids.length,
+              kind: t.selectionKinds[multiSelection.kind],
+            })}
+            className="flex shrink-0 items-center gap-1 rounded-sheet bg-danger-soft px-2 py-2 text-danger transition-colors hover:opacity-80"
           >
             <Trash2 size={15} aria-hidden />
+            <span className="font-mono text-[10px]">{multiSelection.ids.length}</span>
           </button>
+        ) : (
+          selection && (
+            <button
+              onClick={onDeleteSelection}
+              title={formatTemplate(t.designStudio.deleteSelection, { kind: t.selectionKinds[selection.kind] })}
+              aria-label={formatTemplate(t.designStudio.deleteSelection, { kind: t.selectionKinds[selection.kind] })}
+              className="flex shrink-0 items-center justify-center rounded-sheet p-2 text-danger transition-colors hover:bg-danger-soft"
+            >
+              <Trash2 size={15} aria-hidden />
+            </button>
+          )
         )}
 
         <span className="ml-1 truncate font-mono text-[10px] text-ink-faint">{t.hints[activeTool]}</span>

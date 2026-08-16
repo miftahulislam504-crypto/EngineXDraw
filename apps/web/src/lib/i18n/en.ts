@@ -158,6 +158,7 @@ export const en: Translations = {
     explodedView: 'Exploded View',
     explodedViewTooltip: 'Offset each floor vertically in the 3D view',
     deleteSelection: 'Delete ({kind})',
+    deleteMultiSelection: 'Delete {count} {kind}',
     closeAriaLabel: 'Close',
     northLabel: 'North',
     buildingSelectLabel: 'Building',
@@ -178,6 +179,8 @@ export const en: Translations = {
     footingGroundFloorOnly: 'Footings are only for the ground floor — they sit in the soil below the ground slab',
     orthoMode: 'Ortho mode',
     orthoModeTooltip: 'On locks walls to straight 0°/90° angles; off lets you draw a wall at any angle',
+    multiSelectMode: 'Multi-select',
+    multiSelectTooltip: 'Turn on, then tap several elements of the same type (e.g. walls) to batch-edit or batch-delete them together',
     wallLengthPrompt: {
       label: 'Length',
       placeholderFeet: 'ft',
@@ -402,6 +405,11 @@ export const en: Translations = {
     siteBoundaryFrontEdge: 'Which edge faces the road?',
     siteBoundaryHint:
       'Setback Validation on the Compliance page measures real clearance from the building footprint to this boundary, using this edge as "front".',
+    bulkEditHeader: '{count} {kind} selected',
+    bulkEditHint: 'Changes apply to all {count} selected elements at once. Leave a field untouched to keep each element\'s own value.',
+    bulkDeleteButton: 'Delete all {count}',
+    bulkApplyButton: 'Apply to all {count}',
+    bulkFieldPlaceholder: '— mixed —',
   },
   siteBoundaryEdges: {
     top: 'Top',

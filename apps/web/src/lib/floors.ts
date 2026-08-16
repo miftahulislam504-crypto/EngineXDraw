@@ -226,6 +226,49 @@ export async function deleteWall(
   await deleteDoc(doc(wallsCol(projectId, buildingId, floorId), wallId));
 }
 
+/** Multi-select bulk edit: apply the same patch (e.g. thickness/height/type)
+ * to several walls at once in a single Firestore batch write. */
+export async function updateWallsPatchBatch(
+  projectId: string,
+  buildingId: string,
+  floorId: string,
+  wallIds: string[],
+  patch: Partial<
+    Pick<
+      Wall,
+      | 'thickness'
+      | 'height'
+      | 'type'
+      | 'materialLabel'
+      | 'fireRatingMinutes'
+      | 'acousticRatingSTC'
+    >
+  >,
+) {
+  const batch = writeBatch(db);
+  for (const id of wallIds) {
+    batch.update(doc(wallsCol(projectId, buildingId, floorId), id), {
+      ...patch,
+      updatedAt: serverTimestamp(),
+    });
+  }
+  await batch.commit();
+}
+
+/** Multi-select bulk delete: remove several walls at once. */
+export async function deleteWallsBatch(
+  projectId: string,
+  buildingId: string,
+  floorId: string,
+  wallIds: string[],
+) {
+  const batch = writeBatch(db);
+  for (const id of wallIds) {
+    batch.delete(doc(wallsCol(projectId, buildingId, floorId), id));
+  }
+  await batch.commit();
+}
+
 export async function createOpening(
   projectId: string,
   buildingId: string,
@@ -259,6 +302,35 @@ export async function updateOpening(
   >,
 ) {
   await updateDoc(doc(openingsCol(projectId, buildingId, floorId), openingId), patch);
+}
+
+/** Multi-select bulk edit for openings (doors/windows). */
+export async function updateOpeningsPatchBatch(
+  projectId: string,
+  buildingId: string,
+  floorId: string,
+  openingIds: string[],
+  patch: Partial<Pick<Opening, 'width' | 'height' | 'sillHeight' | 'swingDirection'>>,
+) {
+  const batch = writeBatch(db);
+  for (const id of openingIds) {
+    batch.update(doc(openingsCol(projectId, buildingId, floorId), id), patch);
+  }
+  await batch.commit();
+}
+
+/** Multi-select bulk delete for openings. */
+export async function deleteOpeningsBatch(
+  projectId: string,
+  buildingId: string,
+  floorId: string,
+  openingIds: string[],
+) {
+  const batch = writeBatch(db);
+  for (const id of openingIds) {
+    batch.delete(doc(openingsCol(projectId, buildingId, floorId), id));
+  }
+  await batch.commit();
 }
 
 export async function getWallsOnce(
@@ -338,6 +410,38 @@ export async function deleteColumn(
   await deleteDoc(doc(columnsCol(projectId, buildingId, floorId), columnId));
 }
 
+/** Multi-select bulk edit for columns. */
+export async function updateColumnsPatchBatch(
+  projectId: string,
+  buildingId: string,
+  floorId: string,
+  columnIds: string[],
+  patch: Partial<Pick<Column, 'width' | 'depth' | 'height'>>,
+) {
+  const batch = writeBatch(db);
+  for (const id of columnIds) {
+    batch.update(doc(columnsCol(projectId, buildingId, floorId), id), {
+      ...patch,
+      updatedAt: serverTimestamp(),
+    });
+  }
+  await batch.commit();
+}
+
+/** Multi-select bulk delete for columns. */
+export async function deleteColumnsBatch(
+  projectId: string,
+  buildingId: string,
+  floorId: string,
+  columnIds: string[],
+) {
+  const batch = writeBatch(db);
+  for (const id of columnIds) {
+    batch.delete(doc(columnsCol(projectId, buildingId, floorId), id));
+  }
+  await batch.commit();
+}
+
 // ─── Beams ───────────────────────────────────────────────
 
 export function subscribeToBeams(
@@ -382,6 +486,38 @@ export async function deleteBeam(
   beamId: string,
 ) {
   await deleteDoc(doc(beamsCol(projectId, buildingId, floorId), beamId));
+}
+
+/** Multi-select bulk edit for beams. */
+export async function updateBeamsPatchBatch(
+  projectId: string,
+  buildingId: string,
+  floorId: string,
+  beamIds: string[],
+  patch: Partial<Pick<Beam, 'width' | 'depth' | 'elevation'>>,
+) {
+  const batch = writeBatch(db);
+  for (const id of beamIds) {
+    batch.update(doc(beamsCol(projectId, buildingId, floorId), id), {
+      ...patch,
+      updatedAt: serverTimestamp(),
+    });
+  }
+  await batch.commit();
+}
+
+/** Multi-select bulk delete for beams. */
+export async function deleteBeamsBatch(
+  projectId: string,
+  buildingId: string,
+  floorId: string,
+  beamIds: string[],
+) {
+  const batch = writeBatch(db);
+  for (const id of beamIds) {
+    batch.delete(doc(beamsCol(projectId, buildingId, floorId), id));
+  }
+  await batch.commit();
 }
 
 export async function updateBeam(
@@ -459,6 +595,38 @@ export async function deleteSlab(
   await deleteDoc(doc(slabsCol(projectId, buildingId, floorId), slabId));
 }
 
+/** Multi-select bulk edit for slabs. */
+export async function updateSlabsPatchBatch(
+  projectId: string,
+  buildingId: string,
+  floorId: string,
+  slabIds: string[],
+  patch: Partial<Pick<Slab, 'thickness' | 'elevation'>>,
+) {
+  const batch = writeBatch(db);
+  for (const id of slabIds) {
+    batch.update(doc(slabsCol(projectId, buildingId, floorId), id), {
+      ...patch,
+      updatedAt: serverTimestamp(),
+    });
+  }
+  await batch.commit();
+}
+
+/** Multi-select bulk delete for slabs. */
+export async function deleteSlabsBatch(
+  projectId: string,
+  buildingId: string,
+  floorId: string,
+  slabIds: string[],
+) {
+  const batch = writeBatch(db);
+  for (const id of slabIds) {
+    batch.delete(doc(slabsCol(projectId, buildingId, floorId), id));
+  }
+  await batch.commit();
+}
+
 // ─── Generic CRUD for the remaining element types ───────────────────────
 // Walls/openings/columns/beams/slabs above are hand-written since they
 // came first and each has quirks (walls need updateWallsBatch, openings
@@ -513,6 +681,33 @@ function makeElementCrud<T extends { id: string }>(collectionName: string) {
     },
     async remove(projectId: string, buildingId: string, floorId: string, id: string) {
       await deleteDoc(doc(col(projectId, buildingId, floorId), id));
+    },
+    /** Multi-select bulk edit: same patch applied to several ids in one
+     * Firestore batch write, e.g. setting thickness on every selected
+     * ceiling at once. */
+    async updateBatch(
+      projectId: string,
+      buildingId: string,
+      floorId: string,
+      ids: string[],
+      patch: Partial<T>,
+    ) {
+      const batch = writeBatch(db);
+      for (const id of ids) {
+        batch.update(doc(col(projectId, buildingId, floorId), id), {
+          ...patch,
+          updatedAt: serverTimestamp(),
+        });
+      }
+      await batch.commit();
+    },
+    /** Multi-select bulk delete: remove several ids in one batch write. */
+    async removeBatch(projectId: string, buildingId: string, floorId: string, ids: string[]) {
+      const batch = writeBatch(db);
+      for (const id of ids) {
+        batch.delete(doc(col(projectId, buildingId, floorId), id));
+      }
+      await batch.commit();
     },
   };
 }

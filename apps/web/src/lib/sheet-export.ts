@@ -605,7 +605,14 @@ async function drawSheetPage(pdf: jsPDF, sheet: Sheet, image: SheetExportImage, 
     placedDataUrl = cropped.dataUrl;
 
     // Fallback: aspect-fit the (now-cropped) image into the drawable area.
-    const imageAspect = cropped.width / cropped.height;
+    // Guard against a zero/invalid-size source (an empty capture — e.g.
+    // a floor with nothing drawn on it yet, or a viewport that hadn't
+    // finished rendering when it was captured — would otherwise make
+    // imageAspect 0/Infinity/NaN, which jsPDF's addImage throws on
+    // synchronously and uncaught, crashing the whole export instead of
+    // just this one sheet).
+    const hasValidSize = cropped.width > 0 && cropped.height > 0;
+    const imageAspect = hasValidSize ? cropped.width / cropped.height : 1;
     const boxAspect = frameWidth / drawableHeight;
     if (imageAspect > boxAspect) {
       imgW = frameWidth - 4;
@@ -614,11 +621,28 @@ async function drawSheetPage(pdf: jsPDF, sheet: Sheet, image: SheetExportImage, 
       imgH = drawableHeight - 4;
       imgW = imgH * imageAspect;
     }
+    if (!hasValidSize || !Number.isFinite(imgW) || !Number.isFinite(imgH) || imgW <= 0 || imgH <= 0) {
+      // Nothing usable to place — skip the image entirely rather than
+      // pass jsPDF a broken size. The frame + sidebar still draw, so the
+      // page is a visible "blank content" sheet instead of aborting the
+      // whole document.
+      drawSidebar(pdf, layout.sidebarX, margin, layout.sidebarWidth, heightMm - margin * 2, {
+        ...sidebar,
+        notScale: true,
+      });
+      return;
+    }
   }
 
   const imgX = bodyX + (frameWidth - imgW) / 2;
   const imgY = bodyY + (drawableHeight - imgH) / 2;
-  pdf.addImage(placedDataUrl, 'PNG', imgX, imgY, imgW, imgH);
+  try {
+    pdf.addImage(placedDataUrl, 'PNG', imgX, imgY, imgW, imgH);
+  } catch {
+    // A malformed/undecodable data URL should not abort the rest of the
+    // export (single-sheet OR the whole combined batch) — leave this
+    // page's drawing area blank inside its frame and continue.
+  }
 
   drawSidebar(pdf, layout.sidebarX, margin, layout.sidebarWidth, heightMm - margin * 2, {
     ...sidebar,
@@ -958,10 +982,19 @@ export function exportSheetsBatchToPdf(
         const { widthMm, heightMm } = SHEET_SIZES[sheet.size];
         pdf.addPage([widthMm, heightMm], 'landscape');
       }
-      if (sheet.viewportType === 'coverSheet' && coverSheetData) {
-        drawCoverSheetPage(pdf, sheet, coverSheetData, sidebar);
-      } else if (image) {
-        await drawSheetPage(pdf, sheet, image, sidebar);
+      try {
+        if (sheet.viewportType === 'coverSheet' && coverSheetData) {
+          drawCoverSheetPage(pdf, sheet, coverSheetData, sidebar);
+        } else if (image) {
+          await drawSheetPage(pdf, sheet, image, sidebar);
+        }
+      } catch {
+        // One sheet failing to draw (bad capture, malformed image data,
+        // etc.) should not abort the entire combined PDF — the page was
+        // already added above, so it's left blank inside its frame and
+        // the rest of the batch continues. Losing one page is far less
+        // disruptive than the whole "all sheets" export silently
+        // failing to download.
       }
       // Sheets with neither an image nor coverSheetData (e.g. a viewport
       // that failed to capture) still get their addPage() above, so the

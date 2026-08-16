@@ -5,7 +5,7 @@ import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, OrthographicCamera, Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import type { Floor, LibraryItem } from '@archibim/object-model';
-import { computeFloorBaseElevations, formatFeetInches } from '@archibim/core-engine';
+import { computeFloorBaseElevations, computeExtendedWallSegments, formatFeetInches } from '@archibim/core-engine';
 import type { FloorElements } from '@/lib/floors';
 import { numberToLetters } from '@/lib/floors';
 import { buildMaterialLookup, resolveMaterial } from '@/lib/material-resolver';
@@ -242,7 +242,14 @@ export function BuildingElevationView({
           const elements = floorElements[floor.id];
           if (!elements) return null;
           const base = baseElevations.get(floor.id) ?? 0;
-          const extendedSegments = elements.walls.map((w) => ({ wallId: w.id, start: w.start, end: w.end }));
+          // Real mitered wall-endpoint extension (see
+          // computeExtendedWallSegments) so adjoining walls' extruded
+          // boxes reach fully into each corner — this used to be a
+          // local no-op that just echoed each wall's own start/end
+          // unchanged, leaving a visible gap/offset at every junction
+          // that read as a doubled or split edge from the orthographic
+          // elevation camera.
+          const extendedSegments = computeExtendedWallSegments(elements.walls);
           return (
             <group key={floor.id} position={[0, base, 0]}>
               {elements.foundations.map((f) => (

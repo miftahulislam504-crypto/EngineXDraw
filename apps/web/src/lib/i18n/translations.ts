@@ -253,6 +253,16 @@ export interface Translations {
       promptLength: string;
       cancel: string;
     };
+    noteDraft: {
+      textLabel: string;
+      textPlaceholder: string;
+      sizeLabel: string;
+      sizeSmall: string;
+      sizeMedium: string;
+      sizeLarge: string;
+      place: string;
+      cancel: string;
+    };
     toolGroups: {
       structure: string;
       openings: string;
@@ -312,6 +322,7 @@ export interface Translations {
     doorWindowTag: string;
     doorSwingDirection: string;
     noteText: string;
+    noteFontSize: string;
     gridPosition: string;
     viewDirection: string;
     viewDirectionLeft: string;

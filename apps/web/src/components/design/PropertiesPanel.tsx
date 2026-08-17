@@ -111,7 +111,7 @@ export interface PropertiesPanelProps {
     patch: Partial<Pick<PlacedObject, 'width' | 'depth' | 'height' | 'rotationDeg' | 'label'>>,
   ) => void;
   onUpdateDimension: (id: string, patch: Partial<Pick<Dimension, 'offset' | 'label'>>) => void;
-  onUpdateNote: (id: string, patch: Partial<Pick<Note, 'text'>>) => void;
+  onUpdateNote: (id: string, patch: Partial<Pick<Note, 'text' | 'fontSize'>>) => void;
   onUpdateGridLine: (id: string, patch: Partial<Pick<GridLine, 'position' | 'label'>>) => void;
   onUpdateSectionLine: (id: string, patch: Partial<Pick<SectionLine, 'viewDirection' | 'label'>>) => void;
   onViewSection?: (sectionLineId: string) => void;
@@ -687,15 +687,31 @@ export function PropertiesPanel({
       )}
 
       {note && (
-        <div className="flex flex-col gap-1.5">
-          <span className="font-mono text-[11px] uppercase tracking-wide text-ink-muted">
-            {t.properties.noteText}
-          </span>
-          <textarea
-            value={note.text}
-            onChange={(e) => onUpdateNote(note.id, { text: e.target.value })}
-            rows={3}
-            className="rounded-sheet border border-line-strong px-3 py-2 text-sm"
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <span className="font-mono text-[11px] uppercase tracking-wide text-ink-muted">
+              {t.properties.noteText}
+            </span>
+            <textarea
+              value={note.text}
+              onChange={(e) => onUpdateNote(note.id, { text: e.target.value })}
+              rows={3}
+              className="rounded-sheet border border-line-strong px-3 py-2 text-sm"
+            />
+          </div>
+          <Input
+            label={t.properties.noteFontSize}
+            type="number"
+            min={8}
+            max={48}
+            step={1}
+            value={note.fontSize ?? 10}
+            onChange={(e) => {
+              const size = Number(e.target.value);
+              if (Number.isFinite(size) && size > 0) {
+                onUpdateNote(note.id, { fontSize: Math.min(48, Math.max(8, size)) });
+              }
+            }}
           />
         </div>
       )}

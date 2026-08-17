@@ -112,6 +112,17 @@ export interface FloorPlanCanvasProps {
   onCreateOpening: (wallId: string, positionOnWall: number, kind: 'DOOR' | 'WINDOW') => void;
   onCreateDimension: (start: Point2D, end: Point2D) => void;
   onCreateNote: (position: Point2D) => void;
+  /** Note tool click — instead of creating the note immediately (which
+   * used to insert a hardcoded "Note" placeholder text), this hands the
+   * click back to the page with both the floor-plan point (meters, for
+   * where the note is actually stored) and the screen-space pixel
+   * position (for placing the inline text+size popup right where the
+   * person tapped, since Konva has no native DOM text input). The page
+   * owns the popup and calls onCreateNote itself once the person
+   * confirms text/size. Optional so older callers/tests that only wire
+   * onCreateNote keep working, falling back to the old immediate-create
+   * behavior below. */
+  onRequestNote?: (position: Point2D, screenPoint: { x: number; y: number }) => void;
   onCreateGridLine: (orientation: 'vertical' | 'horizontal', position: number) => void;
   onCreateSectionLine: (start: Point2D, end: Point2D) => void;
   onOpenElevation?: (direction: 'N' | 'E' | 'S' | 'W') => void;
@@ -258,6 +269,7 @@ export function FloorPlanCanvas({
   onCreateOpening,
   onCreateDimension,
   onCreateNote,
+  onRequestNote,
   onCreateGridLine,
   onCreateSectionLine,
   onOpenElevation,
@@ -774,7 +786,11 @@ export function FloorPlanCanvas({
     }
 
     if (activeTool === 'note') {
-      onCreateNote(point);
+      if (onRequestNote && pos) {
+        onRequestNote(point, pos);
+      } else {
+        onCreateNote(point);
+      }
       return;
     }
 
@@ -891,6 +907,54 @@ export function FloorPlanCanvas({
       ),
     [shafts, currentFloorLevel],
   );
+
+  // Door/window tag labels ("D1 · 2 ft 6 in") each render at a fixed
+  // vertical offset straight up from their own opening's center — the
+  // Text element below always uses offsetY with no x component,
+  // regardless of the wall's own angle. When two openings sit close
+  // together — common on a small room, e.g. a door and a window on
+  // adjacent walls a meter apart — their labels land on top of each
+  // other and become an unreadable stack of overlapping text (the exact
+  // clutter this stagger pass fixes). Greedy pass: for every opening tag
+  // anchor (using the same pure-vertical offset the real Text uses), if
+  // it's within the estimated label size of an already-placed anchor,
+  // push it further up step by step until it clears. Order is stable
+  // (openings array order), so re-renders don't jitter labels that
+  // aren't actually colliding with anything new.
+  const openingLabelOffset = useMemo(() => {
+    const LABEL_W = 80;
+    const LABEL_H = 16;
+    const STEP = 14;
+    const placed: { x: number; y: number }[] = [];
+    const extra = new Map<string, number>();
+    for (const opening of openings) {
+      const wall = walls.find((w) => w.id === opening.wallId);
+      if (!wall) continue;
+      const center = pointAtParameter(wall, opening.positionOnWall);
+      const centerPx = toPixels(center);
+      const gapHalfThicknessPx = (wall.thickness * pixelsPerMeter) / 2 + 1.5;
+      const baseOffset =
+        gapHalfThicknessPx + (opening.kind === 'DOOR' ? opening.width * pixelsPerMeter : 0) + 14;
+      let pushed = 0;
+      // Try up to 6 extra steps outward before giving up and letting it
+      // overlap — real plans run out of room too, this just buys space
+      // for the common case of 2-3 nearby openings.
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const anchorX = centerPx.x;
+        const anchorY = centerPx.y - (baseOffset + pushed);
+        const collides = placed.some(
+          (p) => Math.abs(p.x - anchorX) < LABEL_W * 0.6 && Math.abs(p.y - anchorY) < LABEL_H,
+        );
+        if (!collides) {
+          placed.push({ x: anchorX, y: anchorY });
+          break;
+        }
+        pushed += STEP;
+      }
+      extra.set(opening.id, pushed);
+    }
+    return extra;
+  }, [openings, walls, toPixels, pixelsPerMeter]);
 
   const backgroundGridLines: number[][] = [];
   const gridPx = gridSize * pixelsPerMeter;
@@ -1767,7 +1831,12 @@ export function FloorPlanCanvas({
                   align="center"
                   width={80}
                   offsetX={40}
-                  offsetY={gapHalfThickness + (isDoor ? opening.width * pixelsPerMeter : 0) + 14}
+                  offsetY={
+                    gapHalfThickness +
+                    (isDoor ? opening.width * pixelsPerMeter : 0) +
+                    14 +
+                    (openingLabelOffset.get(opening.id) ?? 0)
+                  }
                   listening={false}
                 />
                 {isDoor && isSelected && onUpdateOpening && (
@@ -2048,13 +2117,20 @@ export function FloorPlanCanvas({
           {notes.map((note) => {
             const px = toPixels(note.position);
             const isSelected = isElementSelected('note', note.id);
+            // Person-chosen size (set in the placement popup, editable
+            // later in the Properties panel) — 10 matches the original
+            // fixed size, so notes created before fontSize existed are
+            // unaffected.
+            const fontSize = note.fontSize ?? 10;
+            const paddingX = 6;
+            const paddingY = fontSize * 0.6;
             return (
               <Fragment key={note.id}>
                 <Rect
-                  x={px.x - 6}
-                  y={px.y - 6}
-                  width={Math.max(24, note.text.length * 5.5)}
-                  height={20}
+                  x={px.x - paddingX}
+                  y={px.y - paddingY}
+                  width={Math.max(fontSize * 2.4, note.text.length * fontSize * 0.55)}
+                  height={fontSize + paddingY * 2}
                   fill="#FEF9E7"
                   stroke={isSelected ? '#2D6CDF' : '#D4B106'}
                   strokeWidth={isSelected ? 2 : 1}
@@ -2074,10 +2150,10 @@ export function FloorPlanCanvas({
                 />
                 <Text
                   x={px.x}
-                  y={px.y + 4}
+                  y={px.y - paddingY + fontSize * 0.4}
                   text={note.text}
                   fontFamily="sans-serif"
-                  fontSize={10}
+                  fontSize={fontSize}
                   fill="#7A6200"
                   listening={false}
                 />

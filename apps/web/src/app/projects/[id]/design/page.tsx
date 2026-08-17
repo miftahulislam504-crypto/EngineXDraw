@@ -211,6 +211,19 @@ export default function DesignStudioPage() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [dimensions, setDimensions] = useState<Dimension[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
+  // Note tool: a click on the canvas while the tool is active no longer
+  // creates a note immediately with a hardcoded placeholder text — it
+  // opens this small inline popup instead, positioned at the click's
+  // screen coordinates (Konva has no native DOM text input, so the
+  // popup is a normal HTML overlay sitting on top of the canvas
+  // container). `point` is the floor-plan position (meters) the note
+  // will actually be stored at; `screenPoint` only positions the popup.
+  const [noteDraft, setNoteDraft] = useState<{
+    point: Point2D;
+    screenPoint: { x: number; y: number };
+    text: string;
+    fontSize: number;
+  } | null>(null);
   const [gridLines, setGridLines] = useState<GridLine[]>([]);
   const [sectionLines, setSectionLines] = useState<SectionLine[]>([]);
   const [shafts, setShafts] = useState<Shaft[]>([]);
@@ -889,6 +902,28 @@ export default function DesignStudioPage() {
     const data = { position, text: 'Note' };
     const id = await noteCrud.create(projectId, buildingId, floorId, data);
     recordHistory({ action: 'create', kind: 'note', id, data });
+  }
+
+  // Opens the inline text+size popup instead of creating the note right
+  // away — see noteDraft state above for why.
+  function handleRequestNote(point: Point2D, screenPoint: { x: number; y: number }) {
+    setNoteDraft({ point, screenPoint, text: '', fontSize: 12 });
+  }
+
+  async function handleConfirmNoteDraft() {
+    if (!buildingId || !floorId || !noteDraft) return;
+    const text = noteDraft.text.trim();
+    if (!text) {
+      // Nothing typed — treat Place as a no-op cancel rather than
+      // creating an empty label that's invisible/unselectable on the
+      // plan afterward.
+      setNoteDraft(null);
+      return;
+    }
+    const data = { position: noteDraft.point, text, fontSize: noteDraft.fontSize };
+    const id = await noteCrud.create(projectId, buildingId, floorId, data);
+    recordHistory({ action: 'create', kind: 'note', id, data });
+    setNoteDraft(null);
   }
 
   async function handleCreateGridLine(orientation: 'vertical' | 'horizontal', position: number) {
@@ -1584,6 +1619,7 @@ export default function DesignStudioPage() {
             onCreateOpening={handleCreateOpening}
             onCreateDimension={handleCreateDimension}
             onCreateNote={handleCreateNote}
+            onRequestNote={handleRequestNote}
             onCreateGridLine={handleCreateGridLine}
             onCreateSectionLine={handleCreateSectionLine}
             onOpenElevation={handleOpenElevation}
@@ -1596,6 +1632,89 @@ export default function DesignStudioPage() {
             }
             northAngleDeg={currentBuilding?.northAngleDeg ?? 0}
           />
+          {/* Note tool popup — replaces the old "click places a note
+              immediately with placeholder text 'Note'" flow. Positioned
+              at the click's screen coordinates inside this same
+              `relative` container, since screenPoint from Konva's
+              getPointerPosition() is already container-relative pixels
+              (see onRequestNote in FloorPlanCanvas). An HTML overlay
+              because Konva/canvas has no native text input — same
+              reasoning as the north-angle input above it. */}
+          {noteDraft && (
+            <div
+              className="absolute z-20 flex w-56 flex-col gap-2 rounded-sheet border border-line-strong bg-white p-3 text-sm shadow-lg"
+              style={{
+                left: Math.max(8, Math.min(noteDraft.screenPoint.x, 520)),
+                top: Math.max(8, noteDraft.screenPoint.y),
+              }}
+            >
+              <div className="flex flex-col gap-1.5">
+                <label
+                  htmlFor="note-draft-text"
+                  className="font-mono text-[11px] uppercase tracking-wide text-ink-muted"
+                >
+                  {t.designStudio.noteDraft.textLabel}
+                </label>
+                <textarea
+                  id="note-draft-text"
+                  autoFocus
+                  value={noteDraft.text}
+                  onChange={(e) => setNoteDraft({ ...noteDraft, text: e.target.value })}
+                  onKeyDown={(e) => {
+                    // Enter places the note (matches the single-line
+                    // "type and go" feel being asked for); Shift+Enter
+                    // still inserts a newline for a multi-line label.
+                    // Esc cancels, same as every other in-progress draft
+                    // tool on this canvas (polygon/stair/etc.).
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleConfirmNoteDraft();
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setNoteDraft(null);
+                    }
+                  }}
+                  rows={2}
+                  placeholder={t.designStudio.noteDraft.textPlaceholder}
+                  className="rounded-sheet border border-line-strong px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <span className="font-mono text-[11px] uppercase tracking-wide text-ink-muted">
+                  {t.designStudio.noteDraft.sizeLabel}
+                </span>
+                <div className="flex gap-1.5">
+                  {([
+                    { size: 10, label: t.designStudio.noteDraft.sizeSmall },
+                    { size: 14, label: t.designStudio.noteDraft.sizeMedium },
+                    { size: 20, label: t.designStudio.noteDraft.sizeLarge },
+                  ] as const).map(({ size, label }) => (
+                    <button
+                      key={size}
+                      type="button"
+                      onClick={() => setNoteDraft({ ...noteDraft, fontSize: size })}
+                      className={clsx(
+                        'flex-1 rounded-sheet border px-2 py-1 text-xs',
+                        noteDraft.fontSize === size
+                          ? 'border-ink bg-ink text-white'
+                          : 'border-line-strong text-ink-muted hover:border-ink',
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <Button variant="secondary" size="sm" onClick={() => setNoteDraft(null)}>
+                  {t.designStudio.noteDraft.cancel}
+                </Button>
+                <Button size="sm" onClick={handleConfirmNoteDraft}>
+                  {t.designStudio.noteDraft.place}
+                </Button>
+              </div>
+            </div>
+          )}
           {/* Phase C — Sheet annotation: lets the person set the
               building's true-north offset (Building.northAngleDeg) that
               drives the north arrow drawn inside FloorPlanCanvas itself

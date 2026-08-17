@@ -37,6 +37,10 @@ export interface Note {
   floorId: string;
   position: Point2D;
   text: string;
+  /** Text size in px at 100% plan zoom. Optional — defaults to 10 (the
+   * original fixed size) when absent, so existing notes created before
+   * this field existed keep rendering exactly as before. */
+  fontSize?: number;
   createdAt: FirestoreTimestampLike;
   updatedAt: FirestoreTimestampLike;
 }

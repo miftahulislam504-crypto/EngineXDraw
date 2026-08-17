@@ -44,6 +44,7 @@ import {
   computeMiteredWallPolygons,
   isPointInPolygon,
   deriveStairLandings,
+  deriveUShapeStairFromRectangle,
   formatFeetInches,
   sqMetersToSqFeet,
   findNearestColumnBelowCenter,
@@ -98,6 +99,12 @@ export interface FloorPlanCanvasProps {
     boundary: Point2D[],
   ) => void;
   onCreateRamp: (start: Point2D, end: Point2D) => void;
+  /** The 'stairU' tool's 3-click gesture: p1->p2 is the width line,
+   * p2->p3 is the length line — see deriveUShapeStairFromRectangle in
+   * core-engine, which turns these 3 points into a U-shape stair's
+   * {width, flights}. Unlike onCreateRamp/onCreateRailing this fires
+   * once the 3rd point lands (auto-finish), not per-click. */
+  onCreateStairU: (p1: Point2D, p2: Point2D, p3: Point2D) => void;
   onCreateRailing: (start: Point2D, end: Point2D) => void;
   onCreateCurtainWall: (start: Point2D, end: Point2D) => void;
   onCreateSkylight: (roofId: string, center: Point2D) => void;
@@ -182,7 +189,11 @@ function nextDoorSwingDirection(current: DoorSwingDirection | undefined): DoorSw
 
 const CHAINING_LINE_TOOLS: DesignTool[] = ['wall', 'beam', 'railing', 'curtainWall'];
 const ONESHOT_LINE_TOOLS: DesignTool[] = ['ramp', 'dimension', 'section'];
-const STAIR_TOOL: DesignTool[] = ['stair'];
+// 'stairU' shares stairDraft's point-array state and all of STAIR_TOOL's
+// snap/preview/Escape-clearing wiring with 'stair' — the only
+// difference is what happens at click-time and at 3-points-placed (see
+// the click handler below and handleCreateStairU in the design page).
+const STAIR_TOOL: DesignTool[] = ['stair', 'stairU'];
 const SNAP_AWARE_TOOLS: DesignTool[] = [
   ...CHAINING_LINE_TOOLS,
   ...ONESHOT_LINE_TOOLS,
@@ -239,6 +250,7 @@ export function FloorPlanCanvas({
   onCreateFooting,
   onCreatePolygon,
   onCreateRamp,
+  onCreateStairU,
   onCreateRailing,
   onCreateCurtainWall,
   onCreateSkylight,
@@ -666,6 +678,23 @@ export function FloorPlanCanvas({
         if (activeTool === 'dimension') onCreateDimension(drawStart, point);
         if (activeTool === 'section') onCreateSectionLine(drawStart, point);
         setDrawStart(null);
+      }
+      return;
+    }
+
+    if (activeTool === 'stairU') {
+      // Fixed 3-click gesture (see deriveUShapeStairFromRectangle):
+      // point[0]->point[1] is the width line, point[1]->point[2] is the
+      // length line. Unlike the open-ended 'stair' chain below, the
+      // point count is known in advance, so this auto-finishes on the
+      // 3rd click instead of waiting for a Finish button — onCreateStairU
+      // reads the 3 points and clears the draft itself.
+      const next = stairDraft ? [...stairDraft, point] : [point];
+      if (next.length >= 3) {
+        onCreateStairU(next[0], next[1], next[2]);
+        setStairDraft(null);
+      } else {
+        setStairDraft(next);
       }
       return;
     }
@@ -2318,8 +2347,11 @@ export function FloorPlanCanvas({
           {/* Stair tool — in-progress flight-point chain and live segment
               to the cursor. Simpler than the polygon preview above since
               a stair never closes into a loop; finishing is only via the
-              design page's Finish bar. */}
-          {STAIR_TOOL.includes(activeTool) && stairDraft && stairDraft.length > 0 && (
+              design page's Finish bar. Gated to plain 'stair' — 'stairU'
+              gets its own rectangle-shaped preview below instead, since a
+              raw point-to-point polyline wouldn't show the box shape the
+              3-click gesture is actually building. */}
+          {activeTool === 'stair' && stairDraft && stairDraft.length > 0 && (
             <>
               <Line
                 points={stairDraft.flatMap((p) => {
@@ -2342,6 +2374,62 @@ export function FloorPlanCanvas({
                   dash={[3, 3]}
                 />
               )}
+              {stairDraft.map((p, i) => {
+                const px = toPixels(p);
+                return <Circle key={i} x={px.x} y={px.y} radius={4} fill="#2D6CDF" />;
+              })}
+            </>
+          )}
+
+          {/* 'stairU' tool — 3-click width-line/length-line gesture (see
+              deriveUShapeStairFromRectangle). Before the 2nd click:
+              just the width line, same as the plain stair preview.
+              After the 2nd click: the full rectangle outline, computed
+              live against the cursor as the (not-yet-placed) 3rd point,
+              so the person sees the actual box — including its
+              computed 4th corner — before committing. */}
+          {activeTool === 'stairU' && stairDraft && stairDraft.length > 0 && (
+            <>
+              {stairDraft.length === 1 && snappedCursor && (
+                <Line
+                  points={[
+                    toPixels(stairDraft[0]).x,
+                    toPixels(stairDraft[0]).y,
+                    toPixels(snappedCursor).x,
+                    toPixels(snappedCursor).y,
+                  ]}
+                  stroke="#2D6CDF"
+                  strokeWidth={2}
+                  dash={[3, 3]}
+                />
+              )}
+              {stairDraft.length >= 2 &&
+                (() => {
+                  const p1 = stairDraft[0];
+                  const p2 = stairDraft[1];
+                  const p3 = snappedCursor ?? p2;
+                  const { flights } = deriveUShapeStairFromRectangle(p1, p2, p3);
+                  // The two flights' 4 endpoints are exactly the
+                  // rectangle's 4 corners, already in the right winding
+                  // order to draw as a closed outline (see
+                  // deriveUShapeStairFromRectangle's doc: flight 0 is
+                  // p2->p2Run, flight 1 is p1Run->p1).
+                  const corners = [flights[0].start, flights[0].end, flights[1].start, flights[1].end];
+                  const rectPoints = corners.flatMap((p) => {
+                    const px = toPixels(p);
+                    return [px.x, px.y];
+                  });
+                  return (
+                    <Line
+                      points={rectPoints}
+                      closed
+                      stroke="#2D6CDF"
+                      strokeWidth={2}
+                      dash={stairDraft.length === 2 ? [3, 3] : undefined}
+                      fill="rgba(45, 108, 223, 0.08)"
+                    />
+                  );
+                })()}
               {stairDraft.map((p, i) => {
                 const px = toPixels(p);
                 return <Circle key={i} x={px.x} y={px.y} radius={4} fill="#2D6CDF" />;

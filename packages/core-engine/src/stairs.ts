@@ -1,5 +1,5 @@
 import type { Point2D, Stair, StairFlight } from '@archibim/object-model';
-import { flightsTurnAtJoint, DEFAULT_STAIR_RISER_HEIGHT } from '@archibim/object-model';
+import { flightsTurnAtJoint, DEFAULT_STAIR_RISER_HEIGHT, DEFAULT_STAIR_STEPS } from '@archibim/object-model';
 
 export function flightLength(flight: StairFlight): number {
   return Math.hypot(flight.end.x - flight.start.x, flight.end.y - flight.start.y);
@@ -376,6 +376,74 @@ export function applyUShapeStairPreset(stair: Stair): StairFlight[] {
  * numberOfSteps, same as any other stair. */
 function treadDepthForPreset(_stairWidth: number): number {
   return 0.275;
+}
+
+/** Builds a U-shape (switchback) stair's {width, flights} directly from
+ * three drawn points — the 3-click "U-stair" tool in FloorPlanCanvas
+ * (see handleCreateStairU), distinct from applyUShapeStairPreset above
+ * (which reshapes an *already-drawn* stair using a guessed tread depth,
+ * not the user's own drawn dimensions).
+ *
+ *  - p1 -> p2 sets the stair's width (the click-1/click-2 "width line").
+ *  - p2 -> p3 sets the stair's total run direction and length (the
+ *    click-2/click-3 "length line"), starting from p2 — i.e. the width
+ *    line's second point is the shared corner both lines are drawn
+ *    from, matching the L-shaped two-line click gesture the tool asks
+ *    the user to draw (width first, then length from one end of it).
+ *
+ * The resulting rectangle's other two corners (p1's own run-direction
+ * corner, and the far corner) are computed, not clicked — same as any
+ * 2-point/3-point rectangle shortcut elsewhere in this app (see
+ * POLYGON_BOUNDARY_TOOLS's 2-click rectangle fast path).
+ *
+ * Both flights get DEFAULT_STAIR_STEPS steps at DEFAULT_STAIR_RISER_HEIGHT
+ * — left at the tool's own defaults rather than derived from the drawn
+ * run length, since the run length here is a real dimension the user
+ * chose (e.g. matching an existing stairwell), not a value the tool
+ * should silently reinterpret into a step count; the user sets the
+ * actual step count afterward in the Properties Panel, same as any
+ * freshly drawn stair. */
+export function deriveUShapeStairFromRectangle(
+  p1: Point2D,
+  p2: Point2D,
+  p3: Point2D
+): { width: number; flights: StairFlight[] } {
+  const width = Math.max(0.1, Math.hypot(p2.x - p1.x, p2.y - p1.y));
+
+  // Run direction: p2 -> p3, projected perpendicular to the width line
+  // so a slightly-off-axis 3rd click still yields a clean rectangle
+  // (right angle to the width line) instead of a sheared parallelogram.
+  const wx = (p2.x - p1.x) / width;
+  const wy = (p2.y - p1.y) / width;
+  // Perpendicular to the width line, two choices — pick whichever one
+  // the raw p2->p3 click roughly agrees with.
+  let rx = -wy;
+  let ry = wx;
+  const rawRx = p3.x - p2.x;
+  const rawRy = p3.y - p2.y;
+  if (rawRx * rx + rawRy * ry < 0) {
+    rx = -rx;
+    ry = -ry;
+  }
+  const length = Math.max(0.1, rawRx * rx + rawRy * ry);
+
+  // p4 = p1 + (run direction * length) — the rectangle's 4th corner,
+  // computed rather than clicked (see function doc).
+  const p1Run: Point2D = { x: p1.x + rx * length, y: p1.y + ry * length };
+  const p2Run: Point2D = { x: p2.x + rx * length, y: p2.y + ry * length };
+
+  // Two parallel flights running the long way (along the run
+  // direction), one along each long edge of the rectangle, switching
+  // back at the far end — the same switchback shape
+  // deriveStairLandings already knows how to add a mid-landing to (see
+  // buildTurnLandingBoundary's `dot < -0.5` case), so no separate
+  // landing needs to be built here.
+  const flights: StairFlight[] = [
+    { start: p2, end: p2Run, numberOfSteps: DEFAULT_STAIR_STEPS, riserHeight: DEFAULT_STAIR_RISER_HEIGHT },
+    { start: p1Run, end: p1, numberOfSteps: DEFAULT_STAIR_STEPS, riserHeight: DEFAULT_STAIR_RISER_HEIGHT },
+  ];
+
+  return { width, flights };
 }
 
 /** Centroid-ish reference point for the whole stair — used by

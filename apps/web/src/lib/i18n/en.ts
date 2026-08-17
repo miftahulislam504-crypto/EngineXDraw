@@ -224,6 +224,12 @@ export const en: Translations = {
       finish: 'Finish stair',
       cancel: 'Cancel',
     },
+    stairUDraft: {
+      promptWidthStart: 'Click the first width point',
+      promptWidthEnd: 'Click the second width point',
+      promptLength: 'Click to set the length — finishes the U-shape stair',
+      cancel: 'Cancel',
+    },
     toolGroups: {
       structure: 'Structure',
       openings: 'Openings',
@@ -249,6 +255,7 @@ export const en: Translations = {
     ramp: 'Ramp',
     railing: 'Railing',
     stair: 'Stair',
+    stairU: 'U-Stair',
     balcony: 'Balcony',
     curtainWall: 'Curtain Wall',
     skylight: 'Skylight',
@@ -280,6 +287,7 @@ export const en: Translations = {
     ramp: 'Click the bottom point, then the top point',
     railing: 'Click the start point, then the end point, along a wall or slab edge',
     stair: 'Click the bottom of the flight, then the top',
+    stairU: 'Click 2 points for the width, then a 3rd point for the length — builds a U-shape stair with a mid landing',
     balcony: 'Click one corner, then the opposite corner, for a rectangular balcony slab',
     curtainWall: 'Click to start, click again to place the next point — glazed wall with mullions',
     skylight: 'Click inside a roof to place a skylight opening',

@@ -224,6 +224,12 @@ export const bn: Translations = {
       finish: 'সিঁড়ি শেষ করুন',
       cancel: 'বাতিল',
     },
+    stairUDraft: {
+      promptWidthStart: 'width-এর প্রথম পয়েন্টে ক্লিক করুন',
+      promptWidthEnd: 'width-এর দ্বিতীয় পয়েন্টে ক্লিক করুন',
+      promptLength: 'length ঠিক করতে ক্লিক করুন — U-shape সিঁড়ি তৈরি হয়ে যাবে',
+      cancel: 'বাতিল',
+    },
     toolGroups: {
       structure: 'স্ট্রাকচার',
       openings: 'ওপেনিং',
@@ -249,6 +255,7 @@ export const bn: Translations = {
     ramp: 'র‍্যাম্প',
     railing: 'রেলিং',
     stair: 'সিঁড়ি',
+    stairU: 'U-সিঁড়ি',
     balcony: 'বারান্দা',
     curtainWall: 'কার্টেন ওয়াল',
     skylight: 'স্কাইলাইট',
@@ -280,6 +287,7 @@ export const bn: Translations = {
     ramp: 'নিচের পয়েন্টে, তারপর উপরের পয়েন্টে ক্লিক করুন',
     railing: 'দেয়াল বা স্ল্যাবের প্রান্ত বরাবর শুরুর পয়েন্টে, তারপর শেষের পয়েন্টে ক্লিক করুন',
     stair: 'ফ্লাইটের নিচে, তারপর উপরে ক্লিক করুন',
+    stairU: 'width-এর জন্য ২টা পয়েন্টে, তারপর length-এর জন্য ৩য় পয়েন্টে ক্লিক করুন — মাঝে landing সহ U-shape সিঁড়ি তৈরি হবে',
     balcony: 'আয়তাকার বারান্দা স্ল্যাবের জন্য এক কোণে, তারপর বিপরীত কোণে ক্লিক করুন',
     curtainWall: 'শুরু করতে ক্লিক করুন, পরের পয়েন্ট বসাতে আবার ক্লিক করুন — মালিয়নসহ কাচের দেয়াল',
     skylight: 'স্কাইলাইট ওপেনিং বসাতে ছাদের ভেতরে ক্লিক করুন',

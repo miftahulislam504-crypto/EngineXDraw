@@ -18,6 +18,7 @@ export type DesignTool =
   | 'ramp'
   | 'railing'
   | 'stair'
+  | 'stairU'
   | 'balcony'
   | 'curtainWall'
   | 'skylight'
@@ -132,7 +133,14 @@ interface DesignStudioState {
    * least one flight); a turn between flights needs its 2nd point not
    * to land exactly on the joint before it, since deriveStairLandings
    * needs a real gap to find the landing's direction — see stairs.ts.
-   * Null when not mid-draw. */
+   * Null when not mid-draw.
+   *
+   * Also reused (same array-of-Point2D shape) by the 'stairU' tool's
+   * 3-click width-line/length-line gesture — point[0]/point[1] are the
+   * width line, point[2] is the length line's far end. Which meaning
+   * applies depends on activeTool ('stair' vs 'stairU'); see
+   * FloorPlanCanvas's click handler and handleCreateStairU in the
+   * design page. */
   stairDraft: Point2D[] | null;
   setStairDraft: (points: Point2D[] | null) => void;
 

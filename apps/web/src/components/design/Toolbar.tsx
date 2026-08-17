@@ -19,7 +19,7 @@ const toolGroups: ToolGroup[] = [
   { groupKey: 'openings', tools: ['door', 'window', 'skylight'] },
   { groupKey: 'envelope', tools: ['curtainWall', 'roof', 'ceiling'] },
   { groupKey: 'substructure', tools: ['foundation', 'footing'] },
-  { groupKey: 'circulation', tools: ['ramp', 'railing', 'stair', 'balcony'] },
+  { groupKey: 'circulation', tools: ['ramp', 'railing', 'stair', 'stairU', 'balcony'] },
   { groupKey: 'siteFurnishing', tools: ['furniture', 'kitchen', 'bathroom', 'parking', 'landscape'] },
   { groupKey: 'annotation', tools: ['dimension', 'note', 'gridV', 'gridH', 'section'] },
 ];

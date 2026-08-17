@@ -31,6 +31,7 @@ import type {
   Opening,
   PlacedObject,
   PlacedObjectCategory,
+  Point2D,
   Railing,
   Ramp,
   Roof,
@@ -88,6 +89,7 @@ import {
   polygonArea,
   snapToNearestFooting,
   snapToNearestColumn,
+  deriveUShapeStairFromRectangle,
 } from '@archibim/core-engine';
 import { subscribeToBuildings, updateBuilding } from '@/lib/projects';
 import { useDesignHistoryStore } from '@/lib/design-history';
@@ -817,6 +819,21 @@ export default function DesignStudioPage() {
     }
     if (flights.length === 0) return;
     const data = { width: DEFAULT_STAIR_WIDTH, flights };
+    const id = await stairCrud.create(projectId, buildingId, floorId, data);
+    recordHistory({ action: 'create', kind: 'stair', id, data });
+  }
+
+  /** The 'stairU' tool's 3-click gesture, forwarded here from
+   * FloorPlanCanvas's onCreateStairU once the 3rd point lands (see its
+   * own doc). p1->p2 is the width line, p2->p3 is the length line;
+   * deriveUShapeStairFromRectangle turns those into a ready-to-save
+   * {width, flights} — same U-shape/switchback geometry
+   * applyUShapeStairPreset's Properties Panel button produces, but
+   * sized from the person's own drawn dimensions instead of a guessed
+   * tread depth (see that function's doc for the distinction). */
+  async function handleCreateStairU(p1: Point2D, p2: Point2D, p3: Point2D) {
+    if (!buildingId || !floorId) return;
+    const data = deriveUShapeStairFromRectangle(p1, p2, p3);
     const id = await stairCrud.create(projectId, buildingId, floorId, data);
     recordHistory({ action: 'create', kind: 'stair', id, data });
   }
@@ -1559,6 +1576,7 @@ export default function DesignStudioPage() {
             onCreateFooting={handleCreateFooting}
             onCreatePolygon={handleCreatePolygon}
             onCreateRamp={handleCreateRamp}
+            onCreateStairU={handleCreateStairU}
             onCreateRailing={handleCreateRailing}
             onCreateCurtainWall={handleCreateCurtainWall}
             onCreateSkylight={handleCreateSkylight}
@@ -1686,6 +1704,24 @@ export default function DesignStudioPage() {
               )}
               <Button variant="secondary" size="sm" onClick={() => setStairDraft(null)}>
                 {t.designStudio.stairDraft.cancel}
+              </Button>
+            </div>
+          )}
+          {/* 'stairU' tool — 3-click width-line/length-line prompt. No
+              Finish button: the click count is fixed at 3 (unlike the
+              open-ended 'stair' chain above), so FloorPlanCanvas's click
+              handler auto-finishes on the 3rd click and clears
+              stairDraft itself — this bar only needs to show which
+              click is next, plus a way to back out mid-gesture. */}
+          {activeTool === 'stairU' && stairDraft && stairDraft.length > 0 && stairDraft.length < 3 && (
+            <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-sheet border border-line bg-white/95 px-3 py-2 text-sm shadow-sm">
+              <span className="text-ink-muted">
+                {stairDraft.length === 1
+                  ? t.designStudio.stairUDraft.promptWidthEnd
+                  : t.designStudio.stairUDraft.promptLength}
+              </span>
+              <Button variant="secondary" size="sm" onClick={() => setStairDraft(null)}>
+                {t.designStudio.stairUDraft.cancel}
               </Button>
             </div>
           )}

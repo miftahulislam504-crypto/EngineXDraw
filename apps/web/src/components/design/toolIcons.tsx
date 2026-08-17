@@ -13,6 +13,7 @@ import {
   TrendingUp,
   MoveDiagonal,
   Footprints,
+  Redo2,
   Building,
   AppWindow,
   Sun,
@@ -51,6 +52,10 @@ export const TOOL_ICONS: Record<DesignTool, LucideIcon> = {
   ramp: TrendingUp,
   railing: MoveDiagonal,
   stair: Footprints,
+  // Redo2's U-turn-arrow shape reads at a glance as "switchback", the
+  // one visual trait that tells this apart from the plain 'stair' tool
+  // in the same toolbar group.
+  stairU: Redo2,
   balcony: Building,
   curtainWall: AppWindow,
   skylight: Sun,

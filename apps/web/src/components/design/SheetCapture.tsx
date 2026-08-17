@@ -270,6 +270,7 @@ export function SheetCapture({
           onCreateFooting={noop}
           onCreatePolygon={noop}
           onCreateRamp={noop}
+          onCreateStairU={noop}
           onCreateRailing={noop}
           onCreateCurtainWall={noop}
           onCreateSkylight={noop}

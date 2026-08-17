@@ -243,6 +243,16 @@ export interface Translations {
       finish: string;
       cancel: string;
     };
+    stairUDraft: {
+      // Shown per click: 0 points placed -> prompt for point 1, 1 point
+      // -> prompt for point 2 (width), 2 points -> prompt for point 3
+      // (length). Indexed by stairDraft.length, same pattern as
+      // polygonDraft/stairDraft's own point-count prompts.
+      promptWidthStart: string;
+      promptWidthEnd: string;
+      promptLength: string;
+      cancel: string;
+    };
     toolGroups: {
       structure: string;
       openings: string;

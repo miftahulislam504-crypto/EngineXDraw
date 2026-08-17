@@ -384,37 +384,61 @@ function treadDepthForPreset(_stairWidth: number): number {
  * (which reshapes an *already-drawn* stair using a guessed tread depth,
  * not the user's own drawn dimensions).
  *
- *  - p1 -> p2 sets the stair's width (the click-1/click-2 "width line").
+ *  - p1 -> p2 sets the TOTAL stairwell width (the click-1/click-2
+ *    "width line") — the full opening the person is drawing the stair
+ *    into, not a single flight's width.
  *  - p2 -> p3 sets the stair's total run direction and length (the
  *    click-2/click-3 "length line"), starting from p2 — i.e. the width
  *    line's second point is the shared corner both lines are drawn
  *    from, matching the L-shaped two-line click gesture the tool asks
  *    the user to draw (width first, then length from one end of it).
  *
- * The resulting rectangle's other two corners (p1's own run-direction
- * corner, and the far corner) are computed, not clicked — same as any
- * 2-point/3-point rectangle shortcut elsewhere in this app (see
- * POLYGON_BOUNDARY_TOOLS's 2-click rectangle fast path).
+ * The stairwell width is then split into two side-by-side flights with
+ * a landing-depth gap between them (see uShapeWellGap) — each flight
+ * getting half the remaining width — so the two flights plus the gap
+ * exactly fill the width the person drew, matching a real switchback
+ * stair (up one side, turn on a mid landing, down^H^H^Hup the other
+ * side) rather than leaving the whole stairwell empty between two
+ * flights pinned to its outer edges (the bug this function replaced —
+ * see git history / uShapeWellGap's doc for the failure mode).
  *
- * Both flights get DEFAULT_STAIR_STEPS steps at DEFAULT_STAIR_RISER_HEIGHT
- * — left at the tool's own defaults rather than derived from the drawn
- * run length, since the run length here is a real dimension the user
- * chose (e.g. matching an existing stairwell), not a value the tool
- * should silently reinterpret into a step count; the user sets the
- * actual step count afterward in the Properties Panel, same as any
- * freshly drawn stair. */
+ * Each flight's own numberOfSteps/riserHeight can be re-tuned
+ * afterward in the Properties Panel, same as any other stair; the
+ * total DEFAULT_STAIR_STEPS is split evenly (ceil on the lower flight
+ * for an odd count) between the two flights here so the preset stair
+ * already climbs a believable amount instead of doubling the total
+ * rise across both flights. */
+/** How wide (meters) the gap between the two flights' facing edges
+ * should be, measured across the stairwell — this becomes the mid
+ * landing's own depth (see buildTurnLandingBoundary's switchback case,
+ * which builds a landing exactly this deep, flush against both
+ * flights with zero extra space). A real BNBC-context stairwell keeps
+ * this small — just enough to walk across when turning — never the
+ * stairwell's full drawn width, which is what produced a stairwell-
+ * sized void between the two flights instead of a proper turn landing
+ * (the bug this function was rewritten to fix: the old version put
+ * flight 0 on one long edge of the rectangle and flight 1 on the
+ * opposite edge, leaving the *entire* rectangle width empty between
+ * them rather than a landing-sized strip). 0.25m matches a typical
+ * open-well residential stair; never wider than a third of the
+ * stairwell so two flights this wide plus the gap still fit inside
+ * the width the person actually drew. */
+function uShapeWellGap(stairWidth: number): number {
+  return Math.min(0.25, stairWidth / 3);
+}
+
 export function deriveUShapeStairFromRectangle(
   p1: Point2D,
   p2: Point2D,
   p3: Point2D
 ): { width: number; flights: StairFlight[] } {
-  const width = Math.max(0.1, Math.hypot(p2.x - p1.x, p2.y - p1.y));
+  const totalWidth = Math.max(0.1, Math.hypot(p2.x - p1.x, p2.y - p1.y));
 
   // Run direction: p2 -> p3, projected perpendicular to the width line
   // so a slightly-off-axis 3rd click still yields a clean rectangle
   // (right angle to the width line) instead of a sheared parallelogram.
-  const wx = (p2.x - p1.x) / width;
-  const wy = (p2.y - p1.y) / width;
+  const wx = (p2.x - p1.x) / totalWidth;
+  const wy = (p2.y - p1.y) / totalWidth;
   // Perpendicular to the width line, two choices — pick whichever one
   // the raw p2->p3 click roughly agrees with.
   let rx = -wy;
@@ -427,23 +451,44 @@ export function deriveUShapeStairFromRectangle(
   }
   const length = Math.max(0.1, rawRx * rx + rawRy * ry);
 
-  // p4 = p1 + (run direction * length) — the rectangle's 4th corner,
-  // computed rather than clicked (see function doc).
-  const p1Run: Point2D = { x: p1.x + rx * length, y: p1.y + ry * length };
-  const p2Run: Point2D = { x: p2.x + rx * length, y: p2.y + ry * length };
+  // Split the drawn width into two flights side by side, each
+  // `flightWidth` wide, separated by a landing-depth gap
+  // (uShapeWellGap) — NOT the old two-opposite-edges layout, which
+  // left the whole stairwell empty between the flights (see
+  // uShapeWellGap's doc). p1->p2 is still the outer edge the person
+  // drew; each flight's centerline sits half its own width in from
+  // that edge, so the pair of flights plus the gap between them
+  // exactly fill the drawn width with no leftover and no overlap.
+  const gap = uShapeWellGap(totalWidth);
+  const flightWidth = Math.max(0.1, (totalWidth - gap) / 2);
 
-  // Two parallel flights running the long way (along the run
-  // direction), one along each long edge of the rectangle, switching
-  // back at the far end — the same switchback shape
-  // deriveStairLandings already knows how to add a mid-landing to (see
-  // buildTurnLandingBoundary's `dot < -0.5` case), so no separate
-  // landing needs to be built here.
+  // Flight A runs along the p1 side of the drawn rectangle, offset
+  // half a flight-width in from the p1 edge.
+  const aOffset = flightWidth / 2;
+  const aStart: Point2D = { x: p1.x + wx * aOffset, y: p1.y + wy * aOffset };
+  const aEnd: Point2D = { x: aStart.x + rx * length, y: aStart.y + ry * length };
+
+  // Flight B runs along the p2 side, offset half a flight-width in
+  // from the p2 edge, and travels the opposite direction (switchback)
+  // — starting at the top of the run, ending back at the bottom, right
+  // next to flight A's start, so the pair reads as a single U shape.
+  const bOffset = flightWidth / 2;
+  const bFar: Point2D = { x: p2.x - wx * bOffset, y: p2.y - wy * bOffset };
+  const bNear: Point2D = { x: bFar.x + rx * length, y: bFar.y + ry * length };
+
+  // Total rise is split evenly across both flights (their own
+  // numberOfSteps/riserHeight can be re-tuned afterward in the
+  // Properties Panel, same as any stair) so the two flights climb
+  // equal amounts, matching the classic U-shape shopfloor convention.
+  const lowerSteps = Math.ceil(DEFAULT_STAIR_STEPS / 2);
+  const upperSteps = DEFAULT_STAIR_STEPS - lowerSteps;
+
   const flights: StairFlight[] = [
-    { start: p2, end: p2Run, numberOfSteps: DEFAULT_STAIR_STEPS, riserHeight: DEFAULT_STAIR_RISER_HEIGHT },
-    { start: p1Run, end: p1, numberOfSteps: DEFAULT_STAIR_STEPS, riserHeight: DEFAULT_STAIR_RISER_HEIGHT },
+    { start: aStart, end: aEnd, numberOfSteps: lowerSteps, riserHeight: DEFAULT_STAIR_RISER_HEIGHT },
+    { start: bNear, end: bFar, numberOfSteps: upperSteps, riserHeight: DEFAULT_STAIR_RISER_HEIGHT },
   ];
 
-  return { width, flights };
+  return { width: flightWidth, flights };
 }
 
 /** Centroid-ish reference point for the whole stair — used by

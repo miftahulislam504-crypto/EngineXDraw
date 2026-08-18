@@ -40,7 +40,7 @@ import { Button, Input, LengthInput } from '@archibim/shared-ui';
 import { useDesignStudioStore, type SelectionKind } from '@/lib/design-studio-store';
 import { useI18nStore, formatTemplate } from '@/lib/i18n';
 import type { Translations } from '@/lib/i18n/translations';
-import { getOpeningAutoTag, getGridLineAutoLabel, getSectionLineAutoLabel } from '@/lib/floors';
+import { getGridLineAutoLabel, getSectionLineAutoLabel } from '@/lib/floors';
 
 export interface PropertiesPanelProps {
   walls: Wall[];
@@ -435,12 +435,11 @@ export function PropertiesPanel({
               </select>
             </label>
           )}
-          <Input
-            label={t.properties.doorWindowTag}
-            value={opening.tag ?? ''}
-            onChange={(e) => onUpdateOpening(opening.id, { tag: e.target.value || undefined })}
-            placeholder={getOpeningAutoTag(opening, openings)}
-          />
+          {/* Door/window tag input removed — opening.tag is no longer
+              rendered anywhere on the plan (see FloorPlanCanvas.tsx),
+              so an editable field for it here would silently do
+              nothing visible, which is worse than not having it. Door
+              labels are placed manually with the Label tool now. */}
         </div>
       )}
 

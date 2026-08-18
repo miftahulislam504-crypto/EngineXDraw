@@ -46,7 +46,6 @@ import {
   deriveStairLandings,
   deriveUShapeStairFromRectangle,
   formatFeetInches,
-  sqMetersToSqFeet,
   findNearestColumnBelowCenter,
 } from '@archibim/core-engine';
 import {
@@ -55,7 +54,7 @@ import {
   type SelectionKind,
   POLYGON_BOUNDARY_TOOLS as RECTANGLE_TOOLS,
 } from '@/lib/design-studio-store';
-import { getOpeningAutoTag, getGridLineAutoLabel, getSectionLineAutoLabel } from '@/lib/floors';
+import { getGridLineAutoLabel, getSectionLineAutoLabel } from '@/lib/floors';
 
 export interface FloorPlanCanvasProps {
   walls: Wall[];
@@ -908,54 +907,6 @@ export function FloorPlanCanvas({
     [shafts, currentFloorLevel],
   );
 
-  // Door/window tag labels ("D1 · 2 ft 6 in") each render at a fixed
-  // vertical offset straight up from their own opening's center — the
-  // Text element below always uses offsetY with no x component,
-  // regardless of the wall's own angle. When two openings sit close
-  // together — common on a small room, e.g. a door and a window on
-  // adjacent walls a meter apart — their labels land on top of each
-  // other and become an unreadable stack of overlapping text (the exact
-  // clutter this stagger pass fixes). Greedy pass: for every opening tag
-  // anchor (using the same pure-vertical offset the real Text uses), if
-  // it's within the estimated label size of an already-placed anchor,
-  // push it further up step by step until it clears. Order is stable
-  // (openings array order), so re-renders don't jitter labels that
-  // aren't actually colliding with anything new.
-  const openingLabelOffset = useMemo(() => {
-    const LABEL_W = 80;
-    const LABEL_H = 16;
-    const STEP = 14;
-    const placed: { x: number; y: number }[] = [];
-    const extra = new Map<string, number>();
-    for (const opening of openings) {
-      const wall = walls.find((w) => w.id === opening.wallId);
-      if (!wall) continue;
-      const center = pointAtParameter(wall, opening.positionOnWall);
-      const centerPx = toPixels(center);
-      const gapHalfThicknessPx = (wall.thickness * pixelsPerMeter) / 2 + 1.5;
-      const baseOffset =
-        gapHalfThicknessPx + (opening.kind === 'DOOR' ? opening.width * pixelsPerMeter : 0) + 14;
-      let pushed = 0;
-      // Try up to 6 extra steps outward before giving up and letting it
-      // overlap — real plans run out of room too, this just buys space
-      // for the common case of 2-3 nearby openings.
-      for (let attempt = 0; attempt < 6; attempt++) {
-        const anchorX = centerPx.x;
-        const anchorY = centerPx.y - (baseOffset + pushed);
-        const collides = placed.some(
-          (p) => Math.abs(p.x - anchorX) < LABEL_W * 0.6 && Math.abs(p.y - anchorY) < LABEL_H,
-        );
-        if (!collides) {
-          placed.push({ x: anchorX, y: anchorY });
-          break;
-        }
-        pushed += STEP;
-      }
-      extra.set(opening.id, pushed);
-    }
-    return extra;
-  }, [openings, walls, toPixels, pixelsPerMeter]);
-
   const backgroundGridLines: number[][] = [];
   const gridPx = gridSize * pixelsPerMeter;
   for (let x = origin.x % gridPx; x < width; x += gridPx) {
@@ -1076,25 +1027,12 @@ export function FloorPlanCanvas({
               />
             );
           })}
-          {rooms.map((room) => {
-            const px = toPixels(room.centroid);
-            return (
-              <Text
-                key={`${room.id}-label`}
-                x={px.x}
-                y={px.y}
-                text={`${room.name}\n${sqMetersToSqFeet(room.areaSqm).toFixed(1)} sq ft`}
-                fontFamily="monospace"
-                fontSize={11}
-                fill="#5B6478"
-                align="center"
-                offsetX={30}
-                offsetY={10}
-                width={60}
-                listening={false}
-              />
-            );
-          })}
+          {/* Room auto area label ("Room 1 / 120.0 sq ft") removed per
+              explicit request — it's the "Room 1 120.0 sq" text stacking
+              on top of everything else visible in the screenshot. The
+              room boundary fill/outline above stays (useful spatial
+              reference, not a text tag), but the area number itself is
+              gone; if wanted, place it manually with the Label tool. */}
 
           {/* Horizontal planar elements render first, bottom-to-top by role, so
               walls/columns always appear on top of them */}
@@ -1657,7 +1595,6 @@ export function FloorPlanCanvas({
             const center = pointAtParameter(wall, opening.positionOnWall);
             const isDoor = opening.kind === 'DOOR';
             const isSelected = isElementSelected('opening', opening.id);
-            const tag = opening.tag ?? getOpeningAutoTag(opening, openings);
             const color = isSelected ? '#2D6CDF' : isDoor ? '#E8871E' : '#2D6CDF';
 
             const dx = wall.end.x - wall.start.x;
@@ -1821,24 +1758,12 @@ export function FloorPlanCanvas({
                     }
                   }}
                 />
-                <Text
-                  x={centerPx.x}
-                  y={centerPx.y}
-                  text={`${tag} · ${formatFeetInches(opening.width)}`}
-                  fontFamily="monospace"
-                  fontSize={10}
-                  fill={isDoor ? '#B4620F' : '#2D6CDF'}
-                  align="center"
-                  width={80}
-                  offsetX={40}
-                  offsetY={
-                    gapHalfThickness +
-                    (isDoor ? opening.width * pixelsPerMeter : 0) +
-                    14 +
-                    (openingLabelOffset.get(opening.id) ?? 0)
-                  }
-                  listening={false}
-                />
+                {/* Door/window auto tag label ("D1 · 2 ft 6 in") removed
+                    per explicit request — no automatic tags/dimensions
+                    anywhere on the plan anymore. If a person wants a
+                    door labeled, they place it themselves with the
+                    Label tool (see notes.map below), which they control
+                    completely: position, text, and size. */}
                 {isDoor && isSelected && onUpdateOpening && (
                   <Text
                     x={centerPx.x}
@@ -2120,21 +2045,36 @@ export function FloorPlanCanvas({
             // Person-chosen size (set in the placement popup, editable
             // later in the Properties panel) — 10 matches the original
             // fixed size, so notes created before fontSize existed are
-            // unaffected.
+            // unaffected. This is a literal screen-pixel value with no
+            // multiplication by pixelsPerMeter anywhere below, so it
+            // stays the same physical size on screen at any zoom level
+            // — only its position (px.x/px.y, which does scale with
+            // zoom) moves relative to the drawing, exactly like every
+            // other on-canvas label in this file.
             const fontSize = note.fontSize ?? 10;
-            const paddingX = 6;
-            const paddingY = fontSize * 0.6;
+            const paddingX = 4;
+            const paddingY = fontSize * 0.35;
+            const boxWidth = Math.max(fontSize * 2, note.text.length * fontSize * 0.55) + paddingX * 2;
+            const boxHeight = fontSize + paddingY * 2;
             return (
               <Fragment key={note.id}>
+                {/* Plain text, no background/border — matches the clean
+                    hand-drafted look being asked for (Image 1 reference:
+                    bold black text directly on the plan, nothing boxed).
+                    A fully transparent Rect sits underneath purely so
+                    Select-tool clicks/taps have something solid-shaped
+                    to hit; it's invisible until the note is selected, at
+                    which point a thin outline appears so it's clear
+                    what's currently selected. */}
                 <Rect
                   x={px.x - paddingX}
                   y={px.y - paddingY}
-                  width={Math.max(fontSize * 2.4, note.text.length * fontSize * 0.55)}
-                  height={fontSize + paddingY * 2}
-                  fill="#FEF9E7"
-                  stroke={isSelected ? '#2D6CDF' : '#D4B106'}
-                  strokeWidth={isSelected ? 2 : 1}
-                  cornerRadius={3}
+                  width={boxWidth}
+                  height={boxHeight}
+                  fill="transparent"
+                  stroke={isSelected ? '#2D6CDF' : undefined}
+                  strokeWidth={isSelected ? 1.5 : 0}
+                  dash={isSelected ? [3, 2] : undefined}
                   onClick={(e) => {
                     if (activeTool === 'select') {
                       e.cancelBubble = true;
@@ -2150,11 +2090,12 @@ export function FloorPlanCanvas({
                 />
                 <Text
                   x={px.x}
-                  y={px.y - paddingY + fontSize * 0.4}
+                  y={px.y - paddingY + fontSize * 0.15}
                   text={note.text}
                   fontFamily="sans-serif"
                   fontSize={fontSize}
-                  fill="#7A6200"
+                  fontStyle="bold"
+                  fill="#1A1D24"
                   listening={false}
                 />
               </Fragment>

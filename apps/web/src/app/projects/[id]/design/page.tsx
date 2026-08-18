@@ -304,10 +304,12 @@ export default function DesignStudioPage() {
     }
   }
 
-  // Copy Floor — duplicates the currently-open floor's structural
-  // elements (Wall, Column, Beam, Slab, Footing) onto one or more other
-  // floors, at identical x/y position. See copyFloorElements in
-  // lib/floors.ts for exactly what is and isn't copied.
+  // Copy Floor — duplicates the currently-open floor's structural and
+  // architectural elements (Wall, Column, Beam, Slab, Footing, Door/
+  // Window Opening, Stair) onto one or more other floors, at identical
+  // x/y position. See copyFloorElements in lib/floors.ts for exactly
+  // what is and isn't copied, and how openings get remapped onto their
+  // corresponding copied wall.
   const [isCopyFloorPanelOpen, setIsCopyFloorPanelOpen] = useState(false);
   const [copyFloorTargetIds, setCopyFloorTargetIds] = useState<string[]>([]);
   const [isCopyingFloor, setIsCopyingFloor] = useState(false);
@@ -327,6 +329,8 @@ export default function DesignStudioPage() {
           beams,
           slabs,
           footings,
+          openings,
+          stairs,
         });
       }
       showNoticeMessage(

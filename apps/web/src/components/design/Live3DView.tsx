@@ -222,13 +222,16 @@ export function WallMesh({ wall, segment, selected, colorOverride, roughness, me
   );
 }
 
-/** A light indicator inside the now-real hole so doors and windows still
- * read as distinct at a glance in 3D — a thin door leaf plane (angled
- * open, echoing the plan symbol) or a pair of window glazing panes.
- * The wall itself now genuinely has no material here (see WallMesh /
- * buildWallShape), so unlike the old OpeningMarker this is a real
- * secondary object occupying the opening, not a patch hiding a solid
- * wall behind it. */
+/** Fills the now-real wall hole (see WallMesh / buildWallShape) with an
+ * actual door or window object, rather than a single flat marker plane —
+ * a window gets a dark mullion frame sitting IN the wall's thickness plus
+ * a lightly-tinted glazing pane (reads as "black frame, white/clear
+ * glass" from both the 3D view and the true-orthographic elevation
+ * camera, instead of the old solid-blue pane look). A door gets a leaf
+ * swung open ~90°, matching the plan symbol's hinge/swing convention.
+ * hinge/openTip for the door come from the exact same helper
+ * FloorPlanCanvas uses for its 2D swing-arc symbol, so the two views can
+ * never disagree about which way a door opens. */
 export function OpeningMarker({ opening, wall }: { opening: Opening; wall: Wall }) {
   const dx = wall.end.x - wall.start.x;
   const dz = wall.end.y - wall.start.y;
@@ -238,31 +241,95 @@ export function OpeningMarker({ opening, wall }: { opening: Opening; wall: Wall 
   const sill = isDoor ? 0 : opening.sillHeight;
 
   if (!isDoor) {
-    // Window: a single glazed pane roughly centered in the wall's
-    // thickness, inset slightly from the opening's full height so a
-    // sill/head line reads at top and bottom.
+    // Window: a dark frame (aluminum/uPVC-style mullion, the common look
+    // for this market) built as four thin boxes around the opening's
+    // perimeter, filling the wall's own thickness so it reads correctly
+    // from every camera angle including the true-orthographic elevation
+    // — plus a slightly-inset glazing pane behind it. A center mullion
+    // is added for openings wide enough that a single unbroken pane
+    // would look unrealistic (two-lite window, the common residential
+    // pattern here).
+    const frameThickness = 0.06; // meters — visual width of the frame member
+    const frameDepth = Math.max(wall.thickness * 0.85, 0.08);
+    const w = opening.width;
+    const h = opening.height;
+    const midY = sill + h / 2;
+    const glassInsetW = w - frameThickness * 2;
+    const glassInsetH = h - frameThickness * 2;
+    const showCenterMullion = w > 1.1;
+
     return (
-      <mesh position={[center2D.x, sill + opening.height / 2, center2D.y]} rotation={[0, -angle, 0]} castShadow>
-        <planeGeometry args={[opening.width * 0.92, opening.height * 0.92]} />
-        <meshStandardMaterial color="#BFD7F2" transparent opacity={0.45} roughness={0.1} metalness={0.1} side={THREE.DoubleSide} />
-      </mesh>
+      <group position={[center2D.x, 0, center2D.y]} rotation={[0, -angle, 0]}>
+        {/* Frame members: top, bottom, left, right — dark, low-gloss */}
+        <mesh position={[0, sill + h - frameThickness / 2, 0]} castShadow>
+          <boxGeometry args={[w, frameThickness, frameDepth]} />
+          <meshStandardMaterial color="#2B2E33" roughness={0.55} metalness={0.2} />
+        </mesh>
+        <mesh position={[0, sill + frameThickness / 2, 0]} castShadow>
+          <boxGeometry args={[w, frameThickness, frameDepth]} />
+          <meshStandardMaterial color="#2B2E33" roughness={0.55} metalness={0.2} />
+        </mesh>
+        <mesh position={[-w / 2 + frameThickness / 2, midY, 0]} castShadow>
+          <boxGeometry args={[frameThickness, h, frameDepth]} />
+          <meshStandardMaterial color="#2B2E33" roughness={0.55} metalness={0.2} />
+        </mesh>
+        <mesh position={[w / 2 - frameThickness / 2, midY, 0]} castShadow>
+          <boxGeometry args={[frameThickness, h, frameDepth]} />
+          <meshStandardMaterial color="#2B2E33" roughness={0.55} metalness={0.2} />
+        </mesh>
+        {showCenterMullion && (
+          <mesh position={[0, midY, 0]} castShadow>
+            <boxGeometry args={[frameThickness * 0.8, glassInsetH, frameDepth]} />
+            <meshStandardMaterial color="#2B2E33" roughness={0.55} metalness={0.2} />
+          </mesh>
+        )}
+        {/* Glazing — near-white/clear glass, slightly reflective, sitting
+            centered in the frame's depth. */}
+        <mesh position={[0, midY, 0]}>
+          <boxGeometry args={[glassInsetW, glassInsetH, frameDepth * 0.3]} />
+          <meshStandardMaterial
+            color="#F3F8FB"
+            transparent
+            opacity={0.35}
+            roughness={0.05}
+            metalness={0.05}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      </group>
     );
   }
 
-  // Door: a leaf plane swung open ~90°, matching the plan symbol's
-  // hinge/swing convention rather than sitting flat and invisible in
-  // the wall plane like the old marker did. hinge/openTip come from the
-  // exact same helper FloorPlanCanvas uses for its 2D swing-arc symbol,
-  // so the two views can never disagree about which way a door opens.
+  // Door: a leaf swung open ~90°, given a little box depth (rather than a
+  // flat zero-thickness plane) so it reads as a real panel from any
+  // camera angle, plus a frame lining the opening the leaf sits within.
   const { hinge, openTip } = doorSwingGeometry(wall, opening);
   const leafMid = { x: (hinge.x + openTip.x) / 2, y: (hinge.y + openTip.y) / 2 };
   const leafAngle = Math.atan2(openTip.y - hinge.y, openTip.x - hinge.x);
+  const frameThickness = 0.05;
+  const frameDepth = Math.max(wall.thickness * 0.9, 0.1);
 
   return (
-    <mesh position={[leafMid.x, opening.height / 2, leafMid.y]} rotation={[0, -leafAngle, 0]} castShadow>
-      <planeGeometry args={[opening.width, opening.height * 0.98]} />
-      <meshStandardMaterial color="#B4620F" side={THREE.DoubleSide} />
-    </mesh>
+    <group>
+      {/* Door frame lining the opening, in the wall plane */}
+      <mesh position={[center2D.x, opening.height, center2D.y]} rotation={[0, -angle, 0]}>
+        <boxGeometry args={[opening.width, frameThickness, frameDepth]} />
+        <meshStandardMaterial color="#3A2A1E" roughness={0.6} />
+      </mesh>
+      <mesh position={[center2D.x - (opening.width / 2) * Math.cos(angle), opening.height / 2, center2D.y - (opening.width / 2) * Math.sin(angle)]} rotation={[0, -angle, 0]}>
+        <boxGeometry args={[frameThickness, opening.height, frameDepth]} />
+        <meshStandardMaterial color="#3A2A1E" roughness={0.6} />
+      </mesh>
+      <mesh position={[center2D.x + (opening.width / 2) * Math.cos(angle), opening.height / 2, center2D.y + (opening.width / 2) * Math.sin(angle)]} rotation={[0, -angle, 0]}>
+        <boxGeometry args={[frameThickness, opening.height, frameDepth]} />
+        <meshStandardMaterial color="#3A2A1E" roughness={0.6} />
+      </mesh>
+      {/* Door leaf, swung open */}
+      <mesh position={[leafMid.x, opening.height / 2, leafMid.y]} rotation={[0, -leafAngle, 0]} castShadow>
+        <boxGeometry args={[opening.width * 0.98, opening.height * 0.96, 0.045]} />
+        <meshStandardMaterial color="#8B5A2B" roughness={0.65} />
+      </mesh>
+    </group>
   );
 }
 

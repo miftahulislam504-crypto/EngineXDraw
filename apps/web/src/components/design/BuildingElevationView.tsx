@@ -250,6 +250,18 @@ export function BuildingElevationView({
           // that read as a doubled or split edge from the orthographic
           // elevation camera.
           const extendedSegments = computeExtendedWallSegments(elements.walls);
+          // Group this floor's openings by wallId so each WallMesh below
+          // can punch real holes for its own doors/windows — mirrors
+          // Live3DView's openingsByWallId. Without this, the elevation's
+          // walls rendered as solid boxes with no cutout, and the
+          // OpeningMarker for each opening drew invisibly behind that
+          // solid wall.
+          const openingsByWallId = new Map<string, typeof elements.openings>();
+          for (const opening of elements.openings) {
+            const list = openingsByWallId.get(opening.wallId) ?? [];
+            list.push(opening);
+            openingsByWallId.set(opening.wallId, list);
+          }
           return (
             <group key={floor.id} position={[0, base, 0]}>
               {elements.foundations.map((f) => (
@@ -289,6 +301,7 @@ export function BuildingElevationView({
                     colorOverride={material.color}
                     roughness={material.roughness}
                     metalness={material.metalness}
+                    wallOpenings={openingsByWallId.get(wall.id)}
                   />
                 );
               })}

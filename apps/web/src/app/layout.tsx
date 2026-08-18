@@ -3,6 +3,7 @@ import { Space_Grotesk, Inter, JetBrains_Mono, Noto_Sans_Bengali } from 'next/fo
 import './globals.css';
 import { I18nHydrator } from '@/components/I18nHydrator';
 import { DebugConsole } from '@/components/DebugConsole';
+import { PwaServiceWorker } from '@/components/PwaServiceWorker';
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ['latin'],
@@ -34,6 +35,24 @@ const notoSansBengali = Noto_Sans_Bengali({
 export const metadata: Metadata = {
   title: 'EngineX Draw',
   description: 'Think the building, not the drawing.',
+  manifest: '/manifest.json',
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/icons/icon.svg', type: 'image/svg+xml' },
+      { url: '/icons/icon-192x192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icons/icon-512x512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
+  },
+  appleWebApp: {
+    // 'default' rather than 'black-translucent' — the app already
+    // manages its own header bars (DashboardTopbar etc.), so the status
+    // bar shouldn't overlay content underneath it.
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'EngineX Draw',
+  },
 };
 
 // Pins the whole app's page-level zoom at 1x and disables the browser's
@@ -44,11 +63,16 @@ export const metadata: Metadata = {
 // on the whole app rather than just the drawing. The canvas keeps its
 // own zoom via FloorPlanCanvas's wheel/pinch handling, which works
 // against pixelsPerMeter regardless of this page-level lock.
+//
+// themeColor matches the app's ink/navy token — this is what colors the
+// Android status bar / task-switcher chrome and the installed PWA's
+// title bar once added to home screen.
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  themeColor: '#131B2E',
 };
 
 export default function RootLayout({
@@ -63,6 +87,7 @@ export default function RootLayout({
       >
         <I18nHydrator />
         <DebugConsole />
+        <PwaServiceWorker />
         {children}
       </body>
     </html>

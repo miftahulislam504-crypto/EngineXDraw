@@ -95,10 +95,27 @@ export function SheetCapture({
 }: SheetCaptureProps) {
   const { t } = useI18nStore();
 
+  // Deliberately keyed on primitive fields (strings/numbers), NOT on
+  // the building/project/sheet/titleBlockOverrides objects themselves.
+  // Firestore's onSnapshot callbacks (see subscribeToFloors etc. in
+  // lib/floors.ts) hand back a brand-new object reference on every
+  // snapshot even when the underlying document content is unchanged,
+  // so depending on the objects directly made this useMemo recompute
+  // on effectively every snapshot tick. That gave handleCanvasReady/
+  // handleStageReady below a new function identity each time too,
+  // which — since FloorPlanCanvas's onStageReady effect lists
+  // onStageReady itself as a dependency — re-fired onCaptured on every
+  // render, which set state in the parent, which re-rendered this
+  // component, which recomputed sidebar again... an infinite update
+  // loop that surfaced as React error #185 ("Maximum update depth
+  // exceeded") whenever a Floor Plan/Roof Plan/Site Plan sheet (or the
+  // Combined PDF export, which renders every sheet through this same
+  // component off-screen) was opened.
+  const titleBlock = mergeTitleBlockOverrides(building?.titleBlock, titleBlockOverrides);
   const sidebar = useMemo<SidebarContent>(
     () =>
       buildSidebarContent({
-        titleBlock: mergeTitleBlockOverrides(building?.titleBlock, titleBlockOverrides),
+        titleBlock,
         projectName: project?.projectName ?? '',
         buildingName: building?.name ?? '',
         buildingNo: building?.buildingNo ?? '',
@@ -110,7 +127,21 @@ export function SheetCapture({
         date: sheet.date,
         statusLabel: t.sheetsPage.titleBlockStatusDefault,
       }),
-    [building, titleBlockOverrides, project, sheet, t],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      JSON.stringify(titleBlock),
+      project?.projectName,
+      building?.name,
+      building?.buildingNo,
+      sheet.id,
+      sheet.name,
+      sheet.viewportType,
+      sheet.sheetNumber,
+      sheet.scaleLabel,
+      sheet.drawnBy,
+      sheet.date,
+      t,
+    ],
   );
 
   const handleCanvasReady = useCallback(

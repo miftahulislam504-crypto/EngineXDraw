@@ -291,6 +291,8 @@ export interface Translations {
     material: string;
     materialPlaceholder: string;
     libraryButton: string;
+    color: string;
+    resetColor: string;
     fireRating: string;
     acousticRating: string;
     structuralNote: string;
@@ -338,6 +340,7 @@ export interface Translations {
     siteBoundaryHint: string;
     bulkEditHeader: string; // use {count} and {kind} placeholders — header shown when a multi-select batch is active
     bulkEditHint: string; // use {count} placeholder — explains that changes apply to every selected element
+    bulkSelectAll: string; // use {kind} placeholder — button that grows the batch to every element of that kind on the floor
     bulkDeleteButton: string; // use {count} placeholder
     bulkApplyButton: string; // use {count} placeholder
     bulkFieldPlaceholder: string; // shown in a bulk-edit field when the batch's elements don't share the same current value

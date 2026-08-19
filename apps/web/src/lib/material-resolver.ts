@@ -46,12 +46,21 @@ export type MaterialLookup = ReturnType<typeof buildMaterialLookup>;
  * Resolves a single element's material against the lookup, falling back
  * to `fallbackColor` (the active theme's color for that element type) if
  * no material is assigned or the referenced item no longer exists.
+ *
+ * `colorHex` (a direct per-element override, currently only wall) wins
+ * over any assigned library material — see the field doc on Wall.colorHex
+ * for why direct overrides take precedence over a shared material
+ * definition.
  */
 export function resolveMaterial(
-  element: { libraryItemId?: string; materialLabel?: string },
+  element: { libraryItemId?: string; materialLabel?: string; colorHex?: string },
   lookup: MaterialLookup,
   fallbackColor: string,
 ): ResolvedMaterial {
+  if (element.colorHex) {
+    return { color: element.colorHex };
+  }
+
   const item =
     (element.libraryItemId ? lookup.byId.get(element.libraryItemId) : undefined) ??
     (element.materialLabel ? lookup.byName.get(element.materialLabel) : undefined);

@@ -168,6 +168,13 @@ interface DesignStudioState {
    * so every existing single-select call site keeps working unchanged. */
   multiSelection: { kind: SelectionKind; ids: string[] } | null;
   toggleInMultiSelection: (kind: SelectionKind, id: string) => void;
+  /** Replaces the active batch outright with every id given — used by
+   * BulkEditPanel's "Select all" button to grow the current kind's batch
+   * to every element of that kind on the floor in one step, rather than
+   * requiring the person to tap each one. Setting an empty array clears
+   * the batch, same as clearMultiSelection, so callers don't need to
+   * special-case "select all of a kind with zero elements". */
+  setMultiSelection: (kind: SelectionKind, ids: string[]) => void;
   clearMultiSelection: () => void;
 
   /** Which endpoint of the selected wall/beam is being dragged, if any. */
@@ -262,6 +269,7 @@ export const useDesignStudioStore = create<DesignStudioState>((set) => ({
       // around for PropertiesPanel/Toolbar to have to special-case.
       return { multiSelection: nextIds.length > 0 ? { kind, ids: nextIds } : null };
     }),
+  setMultiSelection: (kind, ids) => set({ multiSelection: ids.length > 0 ? { kind, ids } : null }),
   clearMultiSelection: () => set({ multiSelection: null }),
 
   draggingEndpoint: null,

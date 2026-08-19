@@ -185,6 +185,7 @@ export async function updateWall(
       | 'type'
       | 'materialLabel'
       | 'libraryItemId'
+      | 'colorHex'
       | 'fireRatingMinutes'
       | 'acousticRatingSTC'
       | 'structuralNote'
@@ -240,6 +241,7 @@ export async function updateWallsPatchBatch(
       | 'height'
       | 'type'
       | 'materialLabel'
+      | 'colorHex'
       | 'fireRatingMinutes'
       | 'acousticRatingSTC'
     >

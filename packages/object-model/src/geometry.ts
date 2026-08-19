@@ -31,6 +31,17 @@ export interface Wall {
   // written before this field existed remain valid.
   materialLabel?: string;
   libraryItemId?: string;
+  /** Direct color override, e.g. '#4A4A4A' — set by the wall Properties
+   * panel's color picker (single or bulk-select) for a quick paint job
+   * that doesn't require creating/picking a MATERIAL library item first.
+   * Takes precedence over materialLabel/libraryItemId in resolveMaterial
+   * (see material-resolver.ts) since picking a color directly is the
+   * more specific, more recent expression of intent — assigning a
+   * library material afterwards is still possible and will then win
+   * back, the same "most specific wins" rule most CAD tools use for
+   * per-instance overrides vs. a shared material definition.
+   */
+  colorHex?: string;
   fireRatingMinutes?: number;
   acousticRatingSTC?: number;
   structuralNote?: string;

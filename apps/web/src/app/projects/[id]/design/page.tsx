@@ -370,6 +370,7 @@ export default function DesignStudioPage() {
     setSelection,
     multiSelection,
     clearMultiSelection,
+    setMultiSelection,
     explodedView,
     mobileViewMode,
     setMobileViewMode,
@@ -1121,6 +1122,47 @@ export default function DesignStudioPage() {
    * granularity as every other edit, so undo after a bulk edit steps
    * back through the batch one element at a time instead of needing a
    * separate "bulk" history-entry shape. */
+  /** BulkEditPanel's "Select all" button — grows the active batch to
+   * every element of `kind` on the current floor. Reuses the same
+   * findAll-by-kind switch shape as handleBulkUpdate/
+   * handleDeleteMultiSelection below (kept separate rather than shared,
+   * since those two need Record<string, unknown>[] for patch/undo bookkeeping
+   * while this only needs id strings). Kinds with no bulk-edit fields
+   * (see BulkEditPanel's hasFields list) still work here — selecting all
+   * openings, for instance, is still useful for bulk delete even without
+   * bulk field edits. */
+  function handleSelectAllOfKind(kind: SelectionKind) {
+    const idsOf = <T extends { id: string }>(items: T[]) => items.map((i) => i.id);
+    const ids: string[] = (() => {
+      switch (kind) {
+        case 'wall': return idsOf(walls);
+        case 'opening': return idsOf(openings);
+        case 'column': return idsOf(columns);
+        case 'beam': return idsOf(beams);
+        case 'slab': return idsOf(slabs);
+        case 'ceiling': return idsOf(ceilings);
+        case 'foundation': return idsOf(foundations);
+        case 'footing': return idsOf(footings);
+        case 'roof': return idsOf(roofs);
+        case 'ramp': return idsOf(ramps);
+        case 'railing': return idsOf(railings);
+        case 'stair': return idsOf(stairs);
+        case 'balcony': return idsOf(balconies);
+        case 'curtainWall': return idsOf(curtainWalls);
+        case 'skylight': return idsOf(skylights);
+        case 'placedObject': return idsOf(placedObjects);
+        case 'dimension': return idsOf(dimensions);
+        case 'note': return idsOf(notes);
+        case 'gridLine': return idsOf(gridLines);
+        case 'sectionLine': return idsOf(sectionLines);
+        case 'shaft': return idsOf(shafts);
+        case 'siteBoundary': return siteBoundary ? [siteBoundary.id] : [];
+        default: return [];
+      }
+    })();
+    setMultiSelection(kind, ids);
+  }
+
   async function handleBulkUpdate(kind: SelectionKind, ids: string[], patch: Record<string, unknown>) {
     if (!buildingId || !floorId || ids.length === 0) return;
 
@@ -2026,6 +2068,7 @@ export default function DesignStudioPage() {
             onDelete={handleDeleteSelection}
             onBulkUpdate={handleBulkUpdate}
             onBulkDelete={handleDeleteMultiSelection}
+            onSelectAllOfKind={handleSelectAllOfKind}
           />
           {showRooms && (
             <RoomListPanel

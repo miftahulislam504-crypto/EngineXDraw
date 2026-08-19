@@ -77,6 +77,7 @@ export interface PropertiesPanelProps {
         | 'type'
         | 'materialLabel'
         | 'libraryItemId'
+        | 'colorHex'
         | 'fireRatingMinutes'
         | 'acousticRatingSTC'
         | 'structuralNote'
@@ -126,6 +127,11 @@ export interface PropertiesPanelProps {
   onBulkUpdate?: (kind: SelectionKind, ids: string[], patch: Record<string, unknown>) => void;
   /** Multi-select bulk delete: removes every id in the active batch. */
   onBulkDelete?: () => void;
+  /** "Select all" inside BulkEditPanel — grows the active batch to every
+   * element of its kind on the current floor. page.tsx owns every
+   * element array, so it's the one place that can resolve "all ids of
+   * this kind" without this panel needing every array as a prop too. */
+  onSelectAllOfKind?: (kind: SelectionKind) => void;
 }
 
 export function PropertiesPanel({
@@ -178,6 +184,7 @@ export function PropertiesPanel({
   onDelete,
   onBulkUpdate,
   onBulkDelete,
+  onSelectAllOfKind,
 }: PropertiesPanelProps) {
   const { selection, setSelection, multiSelection, clearMultiSelection } = useDesignStudioStore();
   const { t } = useI18nStore();
@@ -202,6 +209,7 @@ export function PropertiesPanel({
         onClose={clearMultiSelection}
         onBulkUpdate={onBulkUpdate}
         onBulkDelete={onBulkDelete}
+        onSelectAllOfKind={onSelectAllOfKind}
         t={t}
       />
     );
@@ -338,6 +346,29 @@ export function PropertiesPanel({
               {t.properties.propertiesHeader}
             </span>
             <div className="flex flex-col gap-3">
+              <label className="flex items-center justify-between gap-2">
+                <span className="font-mono text-[11px] uppercase tracking-wide text-ink-muted">
+                  {t.properties.color}
+                </span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={wall.colorHex ?? '#E7E9EE'}
+                    onChange={(e) => onUpdateWall(wall.id, { colorHex: e.target.value })}
+                    className="h-8 w-10 cursor-pointer rounded border border-line-strong bg-transparent p-0.5"
+                    aria-label={t.properties.color}
+                  />
+                  {wall.colorHex && (
+                    <button
+                      type="button"
+                      onClick={() => onUpdateWall(wall.id, { colorHex: undefined })}
+                      className="text-xs text-ink-faint underline hover:text-ink"
+                    >
+                      {t.properties.resetColor}
+                    </button>
+                  )}
+                </div>
+              </label>
               <div className="flex items-end gap-2">
                 <div className="flex-1">
                   <Input
@@ -1043,6 +1074,7 @@ function BulkEditPanel({
   onClose,
   onBulkUpdate,
   onBulkDelete,
+  onSelectAllOfKind,
   t,
 }: {
   multiSelection: { kind: SelectionKind; ids: string[] };
@@ -1062,6 +1094,7 @@ function BulkEditPanel({
   onClose: () => void;
   onBulkUpdate?: (kind: SelectionKind, ids: string[], patch: Record<string, unknown>) => void;
   onBulkDelete?: () => void;
+  onSelectAllOfKind?: (kind: SelectionKind) => void;
   t: Translations;
 }) {
   const { kind, ids } = multiSelection;
@@ -1132,10 +1165,28 @@ function BulkEditPanel({
       </div>
       <p className="mb-3 text-xs text-ink-faint">{formatTemplate(t.properties.bulkEditHint, { count })}</p>
 
+      {onSelectAllOfKind && (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => onSelectAllOfKind(kind)}
+          className="mb-3 w-full"
+        >
+          {formatTemplate(t.properties.bulkSelectAll, { kind: t.selectionKinds[kind] })}
+        </Button>
+      )}
+
       {hasFields && (
         <div className="flex flex-col gap-3">
           {kind === 'wall' && (
             <>
+              <BulkColorField
+                label={t.properties.color}
+                resetLabel={t.properties.resetColor}
+                field={fields.colorHex}
+                onToggle={(en, fb) => toggleField('colorHex', en, fb)}
+                onChange={(v) => setField('colorHex', v)}
+              />
               <BulkLengthField
                 label={t.properties.thickness}
                 inchStep={0.125}
@@ -1356,6 +1407,60 @@ function BulkEditPanel({
       <Button variant="danger" size="sm" onClick={onBulkDelete} className="mt-4 w-full">
         {formatTemplate(t.properties.bulkDeleteButton, { count })}
       </Button>
+    </div>
+  );
+}
+
+/** One checkbox + native color-input row for BulkEditPanel — same
+ * enable/disable pattern as BulkLengthField/BulkSelectField, for
+ * Wall.colorHex. Starts unchecked with a neutral default swatch rather
+ * than any one selected wall's current color, since a batch of walls
+ * being painted the same color has no single "current" value the way a
+ * shared numeric field like thickness might. */
+function BulkColorField({
+  label,
+  resetLabel,
+  field,
+  onToggle,
+  onChange,
+}: {
+  label: string;
+  resetLabel: string;
+  field: { enabled: boolean; value: unknown } | undefined;
+  onToggle: (enabled: boolean, fallback: string) => void;
+  onChange: (value: string) => void;
+}) {
+  const enabled = field?.enabled ?? false;
+  const value = typeof field?.value === 'string' ? field.value : '#E7E9EE';
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="checkbox"
+        checked={enabled}
+        onChange={(e) => onToggle(e.target.checked, value)}
+        className="h-4 w-4 shrink-0"
+        aria-label={label}
+      />
+      <label className="flex flex-1 items-center justify-between gap-2">
+        <span className="font-mono text-[11px] uppercase tracking-wide text-ink-muted">{label}</span>
+        <input
+          type="color"
+          value={value}
+          disabled={!enabled}
+          onChange={(e) => onChange(e.target.value)}
+          className="h-8 w-10 cursor-pointer rounded border border-line-strong bg-transparent p-0.5 disabled:cursor-not-allowed disabled:opacity-40"
+          aria-label={label}
+        />
+      </label>
+      {enabled && (
+        <button
+          type="button"
+          onClick={() => onToggle(false, value)}
+          className="text-xs text-ink-faint underline hover:text-ink"
+        >
+          {resetLabel}
+        </button>
+      )}
     </div>
   );
 }

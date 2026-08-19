@@ -340,12 +340,17 @@ export async function buildScheduleExport(
 
     // Stair Schedule
     for (const s of stairs) {
+      // Defensive: a stair document saved before the multi-flight
+      // schema (or otherwise missing `flights`) shouldn't take down the
+      // whole Hub schedule export — report it with zero flights/steps
+      // instead, same guard used in FloorPlanCanvas/Live3DView/stairs.ts.
+      const flights = Array.isArray(s.flights) ? s.flights : [];
       stairSchedule.push({
         id: s.id,
         floorId: floor.id,
         width: s.width,
-        numberOfFlights: s.flights.length,
-        totalSteps: s.flights.reduce((sum, f) => sum + f.numberOfSteps, 0),
+        numberOfFlights: flights.length,
+        totalSteps: flights.reduce((sum, f) => sum + f.numberOfSteps, 0),
       });
     }
 

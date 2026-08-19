@@ -30,11 +30,15 @@ export function flightRiseHeight(flight: StairFlight): number {
 }
 
 export function stairTotalRise(stair: Stair): number {
-  return stair.flights.reduce((sum, f) => sum + flightRiseHeight(f), 0);
+  // Defensive: `flights` can be missing on a stair document written
+  // before the multi-flight schema existed — treat that as zero rise
+  // rather than throwing, matching the guards in deriveStairLandings/
+  // FloorPlanCanvas/Live3DView.
+  return (stair.flights ?? []).reduce((sum, f) => sum + flightRiseHeight(f), 0);
 }
 
 export function stairTotalSteps(stair: Stair): number {
-  return stair.flights.reduce((sum, f) => sum + f.numberOfSteps, 0);
+  return (stair.flights ?? []).reduce((sum, f) => sum + f.numberOfSteps, 0);
 }
 
 /** A landing's footprint, plus which flight(s) it connects — for
@@ -208,7 +212,15 @@ function buildTurnLandingBoundary(a: StairFlight, b: StairFlight, stairWidth: nu
 
 export function deriveStairLandings(stair: Stair): StairLanding[] {
   const landings: StairLanding[] = [];
-  if (stair.flights.length === 0) return landings;
+  // Defensive: a Stair document written before `flights` existed (the
+  // old single-flight schema) or otherwise missing/malformed data would
+  // have `flights` as undefined/non-array here, which threw on
+  // `.length` and crashed every screen that renders a floor plan
+  // (Design Studio, the Sheet Manager's Floor Plan sheet, and the
+  // Combined PDF export's off-screen batch capture, since all three
+  // route through this same function). Treat that as "no stair to
+  // draw" instead of a hard crash.
+  if (!Array.isArray(stair.flights) || stair.flights.length === 0) return landings;
 
   const half = stair.width / 2;
   const endLandingDepth = Math.max(MIN_END_LANDING_DEPTH, stair.width);
@@ -325,7 +337,11 @@ function uShapeFlightGap(stairWidth: number): number {
  * flights to read it from — DEFAULT_STAIR_RISER_HEIGHT, the same
  * constant handleCreateStair uses for a brand new stair). */
 export function applyUShapeStairPreset(stair: Stair): StairFlight[] {
-  const first = stair.flights[0];
+  // Defensive: same missing-`flights` case as stairTotalRise/
+  // stairTotalSteps above — fall through to the "zero flights" default
+  // path below (origin at 0,0, +x direction) instead of throwing.
+  const flights = stair.flights ?? [];
+  const first = flights[0];
   const totalSteps = Math.max(2, stairTotalSteps(stair) || 12);
   const riserHeight = first?.riserHeight ?? DEFAULT_STAIR_RISER_HEIGHT;
 

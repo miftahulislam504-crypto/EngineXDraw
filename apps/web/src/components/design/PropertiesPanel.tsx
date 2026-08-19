@@ -597,7 +597,12 @@ export function PropertiesPanel({
               rise: formatFeetInches(stairTotalRise(stair)),
             })}
           </p>
-          {stair.flights.map((flight, i) => (
+          {/* Defensive: a stair document saved before the multi-flight
+              schema (or otherwise missing `flights`) has nothing valid
+              to list here — fall back to an empty array instead of
+              crashing the Properties Panel when such a stair is
+              selected. */}
+          {(Array.isArray(stair.flights) ? stair.flights : []).map((flight, i) => (
             <div key={i} className="flex flex-col gap-2 rounded-sheet border border-line p-2">
               <span className="font-mono text-[11px] uppercase tracking-wide text-ink-muted">
                 {formatTemplate(t.properties.flightLabel, { n: i + 1 })}
@@ -609,7 +614,7 @@ export function PropertiesPanel({
                 min={2}
                 value={flight.numberOfSteps}
                 onChange={(e) => {
-                  const next = [...stair.flights];
+                  const next = [...(stair.flights ?? [])];
                   next[i] = { ...flight, numberOfSteps: Number(e.target.value) };
                   onUpdateStair(stair.id, { flights: next });
                 }}
@@ -619,7 +624,7 @@ export function PropertiesPanel({
                 inchStep={0.125}
                 valueMeters={flight.riserHeight}
                 onChangeMeters={(riserHeight) => {
-                  const next = [...stair.flights];
+                  const next = [...(stair.flights ?? [])];
                   next[i] = { ...flight, riserHeight };
                   onUpdateStair(stair.id, { flights: next });
                 }}

@@ -1306,6 +1306,15 @@ export function FloorPlanCanvas({
             );
           })}
           {stairs.map((s) => {
+            // Defensive: skip any stair document missing a valid
+            // `flights` array (e.g. one saved before the U-shape/
+            // multi-flight stair schema existed) instead of crashing
+            // the whole canvas — this is what was taking down the
+            // Floor Plan sheet view and, since Combined PDF export
+            // renders every sheet through this exact same component
+            // off-screen, silently breaking the combined export too.
+            if (!Array.isArray(s.flights) || s.flights.length === 0) return null;
+
             const isSelected = isElementSelected('stair', s.id);
             const color = isSelected ? '#2D6CDF' : '#5A6472';
             const landings = deriveStairLandings(s);

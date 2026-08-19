@@ -518,6 +518,12 @@ export function RailingMesh({ railing, selected, colorOverride }: { railing: Rai
  * low-risk way to render a staircase silhouette without a custom
  * per-vertex profile mesh. */
 export function StairMesh({ stair, selected, colorOverride }: { stair: Stair; selected: boolean; colorOverride?: string }) {
+  // Defensive: a stair document saved before the multi-flight schema
+  // (or otherwise missing `flights`) has nothing valid to render here —
+  // skip it instead of crashing the whole 3D view, matching the same
+  // guard in FloorPlanCanvas/deriveStairLandings.
+  if (!Array.isArray(stair.flights) || stair.flights.length === 0) return null;
+
   const color = selected ? '#2D6CDF' : (colorOverride ?? '#B7C0D1');
   const landings = deriveStairLandings(stair);
   let elevationSoFar = 0;

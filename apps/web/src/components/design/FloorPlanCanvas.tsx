@@ -512,15 +512,12 @@ export function FloorPlanCanvas({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [setActiveTool, setDrawStart, setPolygonDraft, setStairDraft, setSelection, clearMultiSelection]);
 
-  // Phase B — Scale-accurate sheet export: the Stage ref callback only
-  // fires on mount/unmount, but pixelsPerMeter changes continuously as
-  // the person zooms (mouse wheel / pinch). Re-report it here so a
-  // caller reading it via onStageReady (i.e. the Sheet export flow)
-  // always has the value that matches what's currently on screen.
-  useEffect(() => {
-    if (stageRef.current) onStageReady?.(stageRef.current, pixelsPerMeter);
-  }, [pixelsPerMeter, onStageReady]);
-
+  // Note: re-reporting pixelsPerMeter to onStageReady on zoom changes is
+  // now handled by stageRefCallback itself (see its useCallback deps
+  // above) — a stable ref callback re-fires whenever its dependencies
+  // change, same as any other memoized callback, so a separate effect
+  // duplicating that call here would just invoke onStageReady twice per
+  // change.
 
   // Given a raw pointer position (pixels), returns the snapped point in
   // meters using the same snap rules the hover preview uses. Both the
@@ -924,16 +921,38 @@ export function FloorPlanCanvas({
     });
   }
 
+  // Deliberately a stable useCallback, NOT an inline arrow function.
+  // React re-invokes a ref callback with null-then-node on EVERY render
+  // in which the callback itself is a new function reference — an
+  // inline `ref={(node) => { ... }}` here is a brand-new function every
+  // render, so `onStageReady?.(node, pixelsPerMeter)` was firing on
+  // every single re-render unconditionally, regardless of whether
+  // onStageReady or pixelsPerMeter had actually changed. Since
+  // onStageReady (in read-only/Sheet-export usage) calls back up to
+  // onCaptured, which sets state in the parent page, that state update
+  // triggered a re-render, which recreated this inline ref callback,
+  // which fired onStageReady again... an infinite loop that surfaced as
+  // React error #185 ("Maximum update depth exceeded") on every Floor
+  // Plan/Roof Plan/Site Plan sheet (and, since Combined PDF export
+  // renders every sheet through this same component off-screen, broke
+  // that too). Memoizing on [onStageReady, pixelsPerMeter] means the
+  // callback only actually re-fires when one of those genuinely
+  // changes.
+  const stageRefCallback = useCallback(
+    (node: Konva.Stage | null) => {
+      stageRef.current = node;
+      if (node) onStageReady?.(node, pixelsPerMeter);
+    },
+    [onStageReady, pixelsPerMeter],
+  );
+
   return (
     <div ref={containerRef} className="h-full w-full min-h-[320px] min-w-0 touch-none overscroll-none">
       <Stage
         width={width}
         height={height}
         listening={!readOnly}
-        ref={(node) => {
-          stageRef.current = node;
-          if (node) onStageReady?.(node, pixelsPerMeter);
-        }}
+        ref={stageRefCallback}
         onMouseMove={readOnly ? undefined : handleMouseMove}
         onTouchMove={readOnly ? undefined : handleMouseMove}
         onMouseDown={readOnly ? undefined : handleStageMouseDown}
@@ -1309,10 +1328,7 @@ export function FloorPlanCanvas({
             // Defensive: skip any stair document missing a valid
             // `flights` array (e.g. one saved before the U-shape/
             // multi-flight stair schema existed) instead of crashing
-            // the whole canvas — this is what was taking down the
-            // Floor Plan sheet view and, since Combined PDF export
-            // renders every sheet through this exact same component
-            // off-screen, silently breaking the combined export too.
+            // the whole canvas.
             if (!Array.isArray(s.flights) || s.flights.length === 0) return null;
 
             const isSelected = isElementSelected('stair', s.id);

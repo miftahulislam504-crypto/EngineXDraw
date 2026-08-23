@@ -95,6 +95,9 @@ import {
   snapToNearestFooting,
   snapToNearestColumn,
   deriveUShapeStairFromRectangle,
+  isWallOverlappingWall,
+  isBeamOverlappingBeam,
+  isColumnOverlappingColumn,
 } from '@archibim/core-engine';
 import { subscribeToBuildings, updateBuilding } from '@/lib/projects';
 import { useDesignHistoryStore } from '@/lib/design-history';
@@ -620,6 +623,10 @@ export default function DesignStudioPage() {
   async function handleCreateWall(start: { x: number; y: number }, end: { x: number; y: number }) {
     if (!buildingId || !floorId) return;
     if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
+    if (isWallOverlappingWall(start, end, walls)) {
+      showBlockMessage(t.designStudio.structuralBlock.wallOverlapsWall);
+      return;
+    }
     const data = {
       start,
       end,
@@ -637,6 +644,10 @@ export default function DesignStudioPage() {
     if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
     if (!isBeamSupported(start, end, columns, walls)) {
       showBlockMessage(t.designStudio.structuralBlock.floatingBeamEnd);
+      return;
+    }
+    if (isBeamOverlappingBeam(start, end, beams)) {
+      showBlockMessage(t.designStudio.structuralBlock.beamOverlapsBeam);
       return;
     }
     const data = {
@@ -658,6 +669,10 @@ export default function DesignStudioPage() {
     // underneath it at all; snapping only applies when a footing already
     // happens to be close by.
     const snapped = snapToNearestFooting(center, footings);
+    if (isColumnOverlappingColumn(snapped, DEFAULT_COLUMN_WIDTH, DEFAULT_COLUMN_DEPTH, columns)) {
+      showBlockMessage(t.designStudio.structuralBlock.columnOverlapsColumn);
+      return;
+    }
     const data = {
       center: snapped,
       shape: 'RECTANGULAR' as const,

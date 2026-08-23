@@ -191,6 +191,137 @@ export function isBeamSupported(
   );
 }
 
+// ─── Same-type overlap gates ────────────────────────────────────────────
+// The checks above answer "is X resting on the right kind of support
+// underneath it". These answer a different question: "is X sitting
+// directly on top of another X of the same kind" — a wall drawn along
+// an existing wall's own centerline, a column dropped onto an existing
+// column, a beam re-traced over an existing beam. That's never a
+// legitimate design intent (nothing loads or reads that as two separate
+// members — it's a duplicate/mis-click), so these are hard create-time
+// blocks, same call pattern as isBeamSupported above.
+
+// How much of a new wall/beam's length has to overlap an existing
+// collinear one, and how close the two centerlines have to run, before
+// it counts as "the same member drawn twice" rather than two members
+// that merely share an endpoint (a T/L joint, which is normal and must
+// stay allowed) or cross at an angle (also normal).
+const COLLINEAR_ANGLE_TOLERANCE = 0.05; // radians, ~3°
+const COLLINEAR_OFFSET_TOLERANCE_M = 0.05; // meters between the two lines
+const MIN_OVERLAP_LENGTH_M = 0.1; // meters of shared run before it counts
+
+/** Signed angle-independent check: do segments a and b run along the
+ * same infinite line (parallel, and one's line passes within tolerance
+ * of the other's)? Used as the first filter before the more expensive
+ * overlap-length computation. */
+function areCollinear(a1: Point2D, a2: Point2D, b1: Point2D, b2: Point2D): boolean {
+  const dax = a2.x - a1.x;
+  const day = a2.y - a1.y;
+  const dbx = b2.x - b1.x;
+  const dby = b2.y - b1.y;
+  const lenA = Math.hypot(dax, day) || 1e-9;
+  const lenB = Math.hypot(dbx, dby) || 1e-9;
+  const cross = (dax * dby - day * dbx) / (lenA * lenB);
+  const angle = Math.asin(Math.max(-1, Math.min(1, cross)));
+  if (Math.abs(angle) > COLLINEAR_ANGLE_TOLERANCE) return false;
+  // Parallel (or near enough) — now check the perpendicular offset
+  // between the two infinite lines (not segments) using b1's distance
+  // to a's line; if a and b are truly parallel this is the same for
+  // every point on b, so checking just b1 is sufficient.
+  return perpendicularDistanceToLine(b1, a1, a2) <= COLLINEAR_OFFSET_TOLERANCE_M;
+}
+
+/** Perpendicular distance from a point to the INFINITE line through a→b
+ * (unlike pointToSegmentDistance, does not clamp to the segment) — the
+ * right measure for "do these two lines run along each other", since a
+ * clamped distance would wrongly read as large for two collinear
+ * segments that don't happen to overlap in their parameter range yet. */
+function perpendicularDistanceToLine(p: Point2D, a: Point2D, b: Point2D): number {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const len = Math.hypot(abx, aby);
+  if (len < 1e-9) return distance(p, a);
+  return Math.abs((p.x - a.x) * aby - (p.y - a.y) * abx) / len;
+}
+
+/** Length of overlap between two collinear segments, projected onto
+ * segment a's own direction — 0 if they don't overlap (including if
+ * they merely touch at a shared endpoint, which is a normal joint, not
+ * an overlap). Assumes areCollinear(a1,a2,b1,b2) is already true. */
+function collinearOverlapLength(a1: Point2D, a2: Point2D, b1: Point2D, b2: Point2D): number {
+  const dax = a2.x - a1.x;
+  const day = a2.y - a1.y;
+  const lenA = Math.hypot(dax, day) || 1e-9;
+  const ux = dax / lenA;
+  const uy = day / lenA;
+  const project = (p: Point2D) => (p.x - a1.x) * ux + (p.y - a1.y) * uy;
+  const aStart = 0;
+  const aEnd = lenA;
+  let bStart = project(b1);
+  let bEnd = project(b2);
+  if (bStart > bEnd) [bStart, bEnd] = [bEnd, bStart];
+  const overlapStart = Math.max(aStart, bStart);
+  const overlapEnd = Math.min(aEnd, bEnd);
+  return Math.max(0, overlapEnd - overlapStart);
+}
+
+/** True if a new wall (given by its endpoints) would run along the same
+ * line as an existing wall on the floor for a meaningful stretch — i.e.
+ * one wall drawn directly on top of another, not two walls that merely
+ * meet at a corner or cross. `excludeWallId` lets an in-place edit of an
+ * existing wall check against every OTHER wall without flagging itself. */
+export function isWallOverlappingWall(
+  start: Point2D,
+  end: Point2D,
+  walls: Wall[],
+  excludeWallId?: string,
+): boolean {
+  for (const w of walls) {
+    if (w.id === excludeWallId) continue;
+    if (!areCollinear(start, end, w.start, w.end)) continue;
+    if (collinearOverlapLength(start, end, w.start, w.end) >= MIN_OVERLAP_LENGTH_M) return true;
+  }
+  return false;
+}
+
+/** Same idea for beams — a new beam drawn along the same line as an
+ * existing beam for a meaningful stretch. */
+export function isBeamOverlappingBeam(
+  start: Point2D,
+  end: Point2D,
+  beams: Beam[],
+  excludeBeamId?: string,
+): boolean {
+  for (const b of beams) {
+    if (b.id === excludeBeamId) continue;
+    if (!areCollinear(start, end, b.start, b.end)) continue;
+    if (collinearOverlapLength(start, end, b.start, b.end) >= MIN_OVERLAP_LENGTH_M) return true;
+  }
+  return false;
+}
+
+/** True if a new column's footprint would overlap an existing column's
+ * footprint — centers closer together than the sum of their half-widths
+ * (using each column's larger of width/depth as a conservative circular
+ * radius, since columns can be rotated-rectangular and this is a cheap
+ * plan-level check, not a precise rotated-rect intersection). A column
+ * placed right next to (not on top of) another stays allowed. */
+export function isColumnOverlappingColumn(
+  center: Point2D,
+  width: number,
+  depth: number,
+  columns: Column[],
+  excludeColumnId?: string,
+): boolean {
+  const halfDiag = Math.max(width, depth) / 2;
+  for (const c of columns) {
+    if (c.id === excludeColumnId) continue;
+    const otherHalfDiag = Math.max(c.width, c.depth) / 2;
+    if (distance(center, c.center) < halfDiag + otherHalfDiag) return true;
+  }
+  return false;
+}
+
 /** Snaps a to-be-placed column's center onto the nearest footing's
  * center, if one is within a slightly more generous "you probably meant
  * this footing" radius — a convenience so the two naturally line up

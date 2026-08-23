@@ -212,6 +212,9 @@ export const en: Translations = {
       roofNotOnTopFloor: "Heads up — this roof isn't on the building's top floor. That's fine for a terrace or setback roof, but double-check it's intentional.",
       unsupportedBalcony: "Can't place this balcony — a cantilever needs at least one edge anchored along a wall. Draw it so one side runs along an existing wall.",
       floorCountExceedsHub: 'Heads up — you now have {drawn} floors drawn, but Hub has {hub} floors on file for this building. Worth checking which one is right.',
+      wallOverlapsWall: "Can't place this wall — it runs directly along an existing wall. Draw it somewhere else, or extend/edit the existing wall instead.",
+      beamOverlapsBeam: "Can't place this beam — it runs directly along an existing beam. Draw it somewhere else, or extend/edit the existing beam instead.",
+      columnOverlapsColumn: "Can't place this column — it overlaps an existing column. Place it somewhere else.",
     },
     polygonDraft: {
       vertexCount: '{n} point(s) placed',

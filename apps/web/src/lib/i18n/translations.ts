@@ -232,6 +232,9 @@ export interface Translations {
       roofNotOnTopFloor: string;
       unsupportedBalcony: string;
       floorCountExceedsHub: string; // use {drawn} and {hub} placeholders
+      wallOverlapsWall: string;
+      beamOverlapsBeam: string;
+      columnOverlapsColumn: string;
     };
     polygonDraft: {
       vertexCount: string; // use {n} as placeholder

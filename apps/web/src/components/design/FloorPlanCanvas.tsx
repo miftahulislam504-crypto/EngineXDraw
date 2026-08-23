@@ -1423,6 +1423,43 @@ export function FloorPlanCanvas({
             />
           ))}
 
+          {/* Walls render here — after every horizontal planar element
+              (foundation/slab/roof/shafts/ceiling/balcony) so they sit on
+              top of those, but BEFORE beams/stairs/footings/columns below.
+              Wall polygons paint as a solid opaque fill (`#131B2E`); if a
+              beam/column were drawn earlier than the wall (as they used to
+              be), that opaque wall fill would paint directly over them and
+              they'd visually vanish wherever a beam/column meets a wall.
+              Keeping wall paint order ahead of every other structural line
+              element guarantees beams/stairs/footings/columns are always
+              the topmost thing on screen, wall or no wall underneath. */}
+          {miteredPolygons.map((poly) => {
+            const wall = walls.find((w) => w.id === poly.wallId)!;
+            const isSelected = isElementSelected('wall', wall.id);
+            return (
+              <Line
+                key={wall.id}
+                points={boundaryToPixelPoints(poly.points)}
+                closed
+                fill={isSelected ? '#2D6CDF' : '#131B2E'}
+                stroke={isSelected ? '#1E4FB0' : undefined}
+                strokeWidth={isSelected ? 2 : 0}
+                onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    handleSelectClick('wall', wall.id);
+                  }
+                }}
+                onTap={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    handleSelectClick('wall', wall.id);
+                  }
+                }}
+              />
+            );
+          })}
+
           {/* Line-based elements */}
           {beams.map((beam) => {
             const a = toPixels(beam.start);
@@ -1715,33 +1752,6 @@ export function FloorPlanCanvas({
                   if (activeTool === 'select') {
                     e.cancelBubble = true;
                     handleSelectClick('gutter', g.id);
-                  }
-                }}
-              />
-            );
-          })}
-
-          {miteredPolygons.map((poly) => {
-            const wall = walls.find((w) => w.id === poly.wallId)!;
-            const isSelected = isElementSelected('wall', wall.id);
-            return (
-              <Line
-                key={wall.id}
-                points={boundaryToPixelPoints(poly.points)}
-                closed
-                fill={isSelected ? '#2D6CDF' : '#131B2E'}
-                stroke={isSelected ? '#1E4FB0' : undefined}
-                strokeWidth={isSelected ? 2 : 0}
-                onClick={(e) => {
-                  if (activeTool === 'select') {
-                    e.cancelBubble = true;
-                    handleSelectClick('wall', wall.id);
-                  }
-                }}
-                onTap={(e) => {
-                  if (activeTool === 'select') {
-                    e.cancelBubble = true;
-                    handleSelectClick('wall', wall.id);
                   }
                 }}
               />

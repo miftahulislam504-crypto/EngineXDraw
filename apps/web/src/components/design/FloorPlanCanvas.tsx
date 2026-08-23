@@ -49,6 +49,7 @@ import {
   deriveUShapeStairFromRectangle,
   formatFeetInches,
   findNearestColumnBelowCenter,
+  findNearestColumnCenter,
 } from '@archibim/core-engine';
 import {
   useDesignStudioStore,
@@ -248,6 +249,20 @@ function nextDoorSwingDirection(current: DoorSwingDirection | undefined): DoorSw
 }
 
 const CHAINING_LINE_TOOLS: DesignTool[] = ['wall', 'beam', 'railing', 'curtainWall', 'parapet', 'gutter'];
+// Tools whose second point is "type a length, then aim the direction
+// with the cursor" (see pendingWallLength/pointAtLockedLength), rather
+// than a free click. Wall started this pattern; Beam follows the same
+// flow since a beam's length between two supports matters just as much
+// as a wall's — see the length-prompt bar in the design page and the
+// pendingWallLength branches in snapFromPointer/handleMouseMove below.
+const LENGTH_LOCKED_TOOLS: DesignTool[] = ['wall', 'beam'];
+// How close a tap needs to land to an existing column's center for the
+// Beam tool's *first* point to snap onto it. A beam is meant to bear on
+// a column's centerline, not wherever on the column outline was
+// tapped — same reasoning (and the same 0.3m default) as the endpoint
+// snap wall drawing already uses, just aimed at column centers instead
+// of wall corners.
+const BEAM_COLUMN_CENTER_SNAP_TOLERANCE_M = 0.3;
 const ONESHOT_LINE_TOOLS: DesignTool[] = ['ramp', 'dimension', 'section'];
 // 'stairU' shares stairDraft's point-array state and all of STAIR_TOOL's
 // snap/preview/Escape-clearing wiring with 'stair' — the only
@@ -588,16 +603,31 @@ export function FloorPlanCanvas({
     (pos: Point2D) => {
       const cursorMeters = toMeters(pos);
 
-      // Wall tool with a typed length already locked in: the second
+      // Wall/Beam tool with a typed length already locked in: the second
       // point is pinned to exactly that distance from drawStart, along
       // whatever direction the cursor is currently aimed (strict
       // 0°/90° if Ortho mode is on, free angle otherwise). This
-      // intentionally bypasses the usual endpoint/wall-span/grid
+      // intentionally bypasses the usual endpoint/wall-span/grid/column
       // snapping below — the person already committed to an exact
-      // length by typing it, so snapping the distance to a nearby wall
-      // or grid point would silently override the number they entered.
-      if (activeTool === 'wall' && drawStart && pendingWallLength != null) {
+      // length by typing it, so snapping the distance to a nearby wall,
+      // grid point, or column would silently override the number they
+      // entered.
+      if (LENGTH_LOCKED_TOOLS.includes(activeTool) && drawStart && pendingWallLength != null) {
         return pointAtLockedLength(drawStart, cursorMeters, pendingWallLength, orthoMode);
+      }
+
+      // Beam tool's first point: snap onto the nearest column's center
+      // (if one is close enough) before falling through to the usual
+      // wall/grid snapping below. A beam bearing on a column needs to
+      // land exactly on its centerline — checked before drawStart is
+      // set, i.e. only while placing the *first* point of the segment.
+      if (activeTool === 'beam' && !drawStart) {
+        const columnCenter = findNearestColumnCenter(
+          cursorMeters,
+          columns,
+          BEAM_COLUMN_CENTER_SNAP_TOLERANCE_M,
+        );
+        if (columnCenter) return columnCenter;
       }
 
       if (SNAP_AWARE_TOOLS.includes(activeTool)) {
@@ -621,7 +651,18 @@ export function FloorPlanCanvas({
       }
       return cursorMeters;
     },
-    [toMeters, activeTool, walls, gridSize, drawStart, polygonDraft, stairDraft, pendingWallLength, orthoMode],
+    [
+      toMeters,
+      activeTool,
+      walls,
+      columns,
+      gridSize,
+      drawStart,
+      polygonDraft,
+      stairDraft,
+      pendingWallLength,
+      orthoMode,
+    ],
   );
 
   function handleMouseMove(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
@@ -676,8 +717,19 @@ export function FloorPlanCanvas({
     // See snapFromPointer above — same length-lock bypass, kept here too
     // since mousemove's live preview computes its own snap independently
     // of the click handler rather than calling snapFromPointer.
-    if (activeTool === 'wall' && drawStart && pendingWallLength != null) {
+    if (LENGTH_LOCKED_TOOLS.includes(activeTool) && drawStart && pendingWallLength != null) {
       setSnappedCursor(pointAtLockedLength(drawStart, cursorMeters, pendingWallLength, orthoMode));
+      setGuide(null);
+    } else if (activeTool === 'beam' && !drawStart) {
+      // Same column-center snap as snapFromPointer, mirrored here so the
+      // hover preview shows the beam's first point landing on the
+      // column before the tap actually commits it.
+      const columnCenter = findNearestColumnCenter(
+        cursorMeters,
+        columns,
+        BEAM_COLUMN_CENTER_SNAP_TOLERANCE_M,
+      );
+      setSnappedCursor(columnCenter ?? cursorMeters);
       setGuide(null);
     } else if (SNAP_AWARE_TOOLS.includes(activeTool)) {
       const lastPoint = RECTANGLE_TOOLS.includes(activeTool)
@@ -716,15 +768,16 @@ export function FloorPlanCanvas({
     setSnappedCursor(point);
 
     if (CHAINING_LINE_TOOLS.includes(activeTool)) {
-      // Wall specifically: the first point opens a length-input prompt
-      // (see the design page's floating bar) instead of immediately
-      // arming a second-point click. Until a length has been typed and
-      // confirmed there, a tap on the canvas shouldn't commit a wall —
-      // it would use whatever the raw cursor position happens to be,
-      // defeating the point of asking for an exact length. Ortho mode
-      // still applies once the length is locked in, via
-      // snapFromPointer's pointAtLockedLength branch above.
-      if (activeTool === 'wall' && drawStart && pendingWallLength == null) {
+      // Wall and Beam specifically: the first point opens a length-input
+      // prompt (see the design page's floating bar) instead of
+      // immediately arming a second-point click. Until a length has
+      // been typed and confirmed there, a tap on the canvas shouldn't
+      // commit a segment — it would use whatever the raw cursor
+      // position happens to be, defeating the point of asking for an
+      // exact length. Ortho mode still applies once the length is
+      // locked in, via snapFromPointer's pointAtLockedLength branch
+      // above.
+      if (LENGTH_LOCKED_TOOLS.includes(activeTool) && drawStart && pendingWallLength == null) {
         return;
       }
       if (!drawStart) {
@@ -2473,14 +2526,14 @@ export function FloorPlanCanvas({
                   strokeWidth={2}
                   dash={[6, 4]}
                 />
-                {/* Wall tool with a length already locked in — label the
-                    preview with that fixed length so it's clear the
+                {/* Wall/Beam tool with a length already locked in — label
+                    the preview with that fixed length so it's clear the
                     number typed in the prompt is what's about to be
                     placed, not whatever distance the cursor happens to
                     be at. Positioned at the segment's midpoint, offset
                     upward slightly so it doesn't sit directly on the
                     dashed line. */}
-                {activeTool === 'wall' && pendingWallLength != null && (
+                {LENGTH_LOCKED_TOOLS.includes(activeTool) && pendingWallLength != null && (
                   <Text
                     x={(toPixels(drawStart).x + toPixels(snappedCursor).x) / 2}
                     y={(toPixels(drawStart).y + toPixels(snappedCursor).y) / 2 - 16}

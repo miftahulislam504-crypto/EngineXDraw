@@ -1963,18 +1963,22 @@ export default function DesignStudioPage() {
               </Button>
             </div>
           )}
-          {/* Wall tool — length prompt. Appears the moment the first
-              point is placed (drawStart set), before any length has
-              been locked in (pendingWallLength still null). Confirming
-              hands off to FloorPlanCanvas's aim-with-cursor flow (see
-              pointAtLockedLength there); Cancel backs out of the wall
-              entirely rather than just closing the prompt, since
-              there's no useful state to return to otherwise. Once a
-              length is locked in, this bar is replaced by a small aim
+          {/* Wall/Beam tool — length prompt. Appears the moment the
+              first point is placed (drawStart set), before any length
+              has been locked in (pendingWallLength still null). For
+              Beam, that first point has already snapped onto the
+              nearest column's center (see FloorPlanCanvas's
+              findNearestColumnCenter call), so this prompt is really
+              asking "how far from that column, in which direction".
+              Confirming hands off to FloorPlanCanvas's aim-with-cursor
+              flow (see pointAtLockedLength there); Cancel backs out of
+              the segment entirely rather than just closing the prompt,
+              since there's no useful state to return to otherwise. Once
+              a length is locked in, this bar is replaced by a small aim
               hint so it doesn't sit on screen fighting for space with
               the live length label FloorPlanCanvas draws on the canvas
               itself. */}
-          {activeTool === 'wall' && drawStart && pendingWallLength == null && (
+          {(activeTool === 'wall' || activeTool === 'beam') && drawStart && pendingWallLength == null && (
             <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-sheet border border-line bg-white/95 px-3 py-2 text-sm shadow-sm">
               <label className="text-ink-muted" htmlFor="wall-length-feet-input">
                 {t.designStudio.wallLengthPrompt.label}
@@ -2040,7 +2044,7 @@ export default function DesignStudioPage() {
               </Button>
             </div>
           )}
-          {activeTool === 'wall' && drawStart && pendingWallLength != null && (
+          {(activeTool === 'wall' || activeTool === 'beam') && drawStart && pendingWallLength != null && (
             <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-sheet border border-line bg-white/95 px-3 py-2 text-sm text-ink-muted shadow-sm">
               <span>{t.designStudio.wallLengthPrompt.aimHint}</span>
               <Button variant="secondary" size="sm" onClick={() => setDrawStart(null)}>

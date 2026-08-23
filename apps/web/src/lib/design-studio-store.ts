@@ -94,18 +94,23 @@ interface DesignStudioState {
   drawStart: Point2D | null;
   setDrawStart: (point: Point2D | null) => void;
 
-  /** Wall tool only: once the first point is placed, a length-input
-   * prompt asks for the exact distance to the second point (in meters)
-   * before the person aims a direction with the cursor/finger. Null
-   * means no length has been typed yet for the current wall segment
-   * (the prompt is showing, or the tool isn't 'wall'); once set, the
-   * live preview and the click that places the second point both
-   * project exactly this far from drawStart, along whatever direction
-   * the cursor indicates (see pointAtLockedLength in core-engine). Reset
-   * to null every time a new segment starts (after committing a wall,
-   * or when drawStart is cleared) so each segment's length is entered
-   * fresh — chaining into a second wall shouldn't silently reuse the
-   * first wall's length. */
+  /** Wall and Beam tools only: once the first point is placed, a
+   * length-input prompt asks for the exact distance to the second point
+   * (in meters) before the person aims a direction with the
+   * cursor/finger. Null means no length has been typed yet for the
+   * current segment (the prompt is showing, or the tool is neither
+   * 'wall' nor 'beam'); once set, the live preview and the click that
+   * places the second point both project exactly this far from
+   * drawStart, along whatever direction the cursor indicates (see
+   * pointAtLockedLength in core-engine). Reset to null every time a new
+   * segment starts (after committing a wall/beam, or when drawStart is
+   * cleared) so each segment's length is entered fresh — chaining into
+   * a second segment shouldn't silently reuse the previous one's
+   * length. Beam's first point additionally snaps to the nearest
+   * column's center (see BEAM_COLUMN_CENTER_SNAP_TOLERANCE_M in
+   * FloorPlanCanvas) before this prompt ever appears, since a beam is
+   * expected to bear on a column's centerline, not wherever it was
+   * tapped. */
   pendingWallLength: number | null;
   setPendingWallLength: (length: number | null) => void;
 

@@ -1,4 +1,4 @@
-import type { Point2D, Wall } from '@archibim/object-model';
+import type { Column, Point2D, Wall } from '@archibim/object-model';
 import { distance } from './geometry-utils';
 
 export interface SnapContext {
@@ -59,6 +59,34 @@ export function findNearestColumnBelowCenter(
 
 function wallEndpoints(walls: Wall[]): Point2D[] {
   return walls.flatMap((w) => [w.start, w.end]);
+}
+
+/**
+ * Nearest same-floor column center, within tolerance — used for the
+ * Beam tool's *first* point. A beam is expected to start bearing
+ * exactly on a column's centerline (not wherever on the column outline
+ * was tapped), the same reasoning as findNearestColumnBelowCenter above
+ * but for columns on the current floor rather than the floor below.
+ * Kept as its own export rather than folded into resolveSnap's
+ * wall-focused SnapContext, since only the Beam tool's first click
+ * needs it — the second point uses pointAtLockedLength instead (typed
+ * length + aimed direction), not this kind of proximity snap at all.
+ */
+export function findNearestColumnCenter(
+  cursor: Point2D,
+  columns: Column[],
+  tolerance = 0.3,
+): Point2D | null {
+  let nearest: Point2D | null = null;
+  let nearestDist = tolerance;
+  for (const c of columns) {
+    const d = distance(cursor, c.center);
+    if (d <= nearestDist) {
+      nearest = c.center;
+      nearestDist = d;
+    }
+  }
+  return nearest;
 }
 
 function findNearestEndpoint(

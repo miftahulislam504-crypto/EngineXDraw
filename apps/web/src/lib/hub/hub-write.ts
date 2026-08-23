@@ -526,6 +526,15 @@ export async function buildArchitecturalExport(
 // এর floorAreas/roomSchedule/wallSchedule/doorSchedule/windowSchedule
 // field, প্রতিটা row floorId দিয়ে ট্যাগ করা, মিটার এককে (Estimate নিজেই
 // ft-এ কনভার্ট করে, দেখুন lib/integration/architectural-mapper.ts)।
+// wallSchedule-এ thicknessIn/wallType-ও থাকে (২০২৬-০৮-২৩ যোগ, audit fix)
+// — Estimate-এর Masonry BOQ auto-calc এই দুইটার ওপর নির্ভর করে; আগে এই
+// দুইটা পাঠানো হতো না বলে সেই auto-calc নীরবে সবসময় স্কিপ হয়ে যেত।
+// finishSchedule ইচ্ছাকৃতভাবে এখনো পাঠানো হয় না — Draw-এর
+// finishFloor/finishWalls/finishCeiling (Room type) মুক্ত-টেক্সট ফিল্ড
+// (কোনো fixed dropdown না, RoomListPanel.tsx দ্রষ্টব্য), তাই string
+// থেকে অনুমান করে area category (plaster/tiles/paint/waterproofing)
+// ঠিক করা অনির্ভরযোগ্য — ভুল category-তে area বসিয়ে দেওয়ার চেয়ে
+// Estimate-এর mapper-কে undefined/skip করতে দেওয়া নিরাপদ।
 //
 // ⚠️ এই shape আর নিচের publishArchitecturalToHub()-এর পাঠানো পূর্ণ
 // geometry (levels/grids/elements/...) — দুটোই এখন একই
@@ -547,6 +556,14 @@ interface WallScheduleRow {
   floorId: string;
   lengthM: number;
   height: number;
+  // ২০২৬-০৮-২৩ যোগ (audit fix) — Estimate-এর architectural-mapper.ts
+  // Masonry BOQ auto-calc-এর জন্য এই দুইটা field আশা করে (thicknessIn/
+  // wallType, দেখুন MasonryWallSegment) কিন্তু আগে এখানে পাঠানো হতো না
+  // — mapper তখন নীরবে (warning সহ) Masonry auto-calc স্কিপ করত। এখন
+  // পাঠানো হচ্ছে, তাই optional না — এই ফাংশন সবসময় দুটোই বসায়
+  // (mapWallType()-এর কোনো Draw WallType-ই undefined ফেরত দেয় না)।
+  thicknessIn: number;
+  wallType: 'external' | 'internal' | 'parapet';
 }
 interface OpeningScheduleRow {
   id: string;
@@ -559,6 +576,27 @@ interface FloorAreaRow {
 
 function lengthOf(start: { x: number; y: number }, end: { x: number; y: number }): number {
   return Math.hypot(end.x - start.x, end.y - start.y);
+}
+
+const M_TO_FT = 3.28084; // architectural-mapper.ts-এর নিজস্ব M_TO_FT-এর সাথে সামঞ্জস্যপূর্ণ ধ্রুবক
+const FT_TO_IN = 12;
+
+/**
+ * Draw-এর WallType ('EXTERIOR'|'INTERIOR'|'PARTITION') কে Estimate-এর
+ * MasonryWallSegment['wallType'] ('external'|'internal'|'parapet')-এ
+ * ম্যাপ করে — এই দুই enum-এর মান এক না, তাই সরাসরি lowercase করলে হবে
+ * না।
+ *
+ * PARTITION কে 'internal'-এ ম্যাপ করা হয়েছে, 'parapet'-এ না: parapet
+ * মানে ছাদের কিনারার নিচু দেয়াল (roof-এর অংশ), আর PARTITION মানে
+ * ভেতরের হালকা room-divider — দুটো ভিন্ন জিনিস, একই না শুধু কারণ
+ * দুটোই "বাইরের দেয়াল না"। Draw-এর object-model-এ parapet বলে আলাদা
+ * কোনো ধারণা নেই (packages/object-model/src/geometry.ts-এর WallType
+ * দ্রষ্টব্য) — তাই এই mapper কখনো 'parapet' produce করবে না, এটা
+ * honest limitation, অনুমান-ভিত্তিক ভুল category-করণ না।
+ */
+function mapWallType(type: 'EXTERIOR' | 'INTERIOR' | 'PARTITION'): 'external' | 'internal' | 'parapet' {
+  return type === 'EXTERIOR' ? 'external' : 'internal';
 }
 
 /** exportData.elements (সব floor একসাথে, BuildingElementRef[], levelId
@@ -594,8 +632,23 @@ function buildScheduleExport(exportData: ArchitecturalExport): {
       const start = geometry.start as { x: number; y: number } | undefined;
       const end = geometry.end as { x: number; y: number } | undefined;
       const height = geometry.height;
-      if (start && end && typeof height === 'number') {
-        wallSchedule.push({ id: el.id, floorId: el.levelId, lengthM: lengthOf(start, end), height });
+      const thicknessM = geometry.thickness;
+      const rawWallType = geometry.wallType;
+      if (
+        start &&
+        end &&
+        typeof height === 'number' &&
+        typeof thicknessM === 'number' &&
+        (rawWallType === 'EXTERIOR' || rawWallType === 'INTERIOR' || rawWallType === 'PARTITION')
+      ) {
+        wallSchedule.push({
+          id: el.id,
+          floorId: el.levelId,
+          lengthM: lengthOf(start, end),
+          height,
+          thicknessIn: thicknessM * M_TO_FT * FT_TO_IN,
+          wallType: mapWallType(rawWallType),
+        });
       }
     } else if (el.type === 'door') {
       doorSchedule.push({ id: el.id, floorId: el.levelId });

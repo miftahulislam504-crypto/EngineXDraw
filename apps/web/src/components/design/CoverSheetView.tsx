@@ -42,6 +42,7 @@ export const VIEWPORT_TYPE_LABEL_KEY = {
   roofPlan: 'viewportRoofPlan',
   sitePlan: 'viewportSitePlan',
   coverSheet: 'viewportCoverSheet',
+  infoSheet: 'viewportInfoSheet',
 } as const;
 
 export function CoverSheetView({ project, building, sheets, excludeSheetId }: CoverSheetViewProps) {

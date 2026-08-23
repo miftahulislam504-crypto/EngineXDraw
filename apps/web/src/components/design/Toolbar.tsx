@@ -17,10 +17,10 @@ interface ToolGroup {
 const toolGroups: ToolGroup[] = [
   { groupKey: 'structure', tools: ['select', 'wall', 'column', 'beam', 'slab', 'shaft', 'siteBoundary'] },
   { groupKey: 'openings', tools: ['door', 'window', 'skylight'] },
-  { groupKey: 'envelope', tools: ['curtainWall', 'roof', 'ceiling'] },
+  { groupKey: 'envelope', tools: ['curtainWall', 'roof', 'ceiling', 'parapet', 'gutter'] },
   { groupKey: 'substructure', tools: ['foundation', 'footing'] },
   { groupKey: 'circulation', tools: ['ramp', 'railing', 'stair', 'stairU', 'balcony'] },
-  { groupKey: 'siteFurnishing', tools: ['furniture', 'kitchen', 'bathroom', 'parking', 'landscape'] },
+  { groupKey: 'siteFurnishing', tools: ['furniture', 'kitchen', 'bathroom', 'parking', 'landscape', 'roofDrain', 'downspout'] },
   { groupKey: 'annotation', tools: ['dimension', 'note', 'gridV', 'gridH', 'section'] },
 ];
 

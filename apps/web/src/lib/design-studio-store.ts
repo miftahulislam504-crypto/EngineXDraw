@@ -27,6 +27,10 @@ export type DesignTool =
   | 'bathroom'
   | 'parking'
   | 'landscape'
+  | 'parapet'
+  | 'gutter'
+  | 'roofDrain'
+  | 'downspout'
   | 'dimension'
   | 'note'
   | 'gridV'
@@ -73,7 +77,9 @@ export type SelectionKind =
   | 'gridLine'
   | 'sectionLine'
   | 'shaft'
-  | 'siteBoundary';
+  | 'siteBoundary'
+  | 'parapet'
+  | 'gutter';
 
 export interface Selection {
   kind: SelectionKind;

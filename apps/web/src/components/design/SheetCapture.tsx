@@ -14,11 +14,21 @@ import type {
   TitleBlockInfo,
 } from '@archibim/object-model';
 import { EMPTY_FLOOR_ELEMENTS, type FloorElements } from '@/lib/floors';
-import { buildSidebarContent, mergeTitleBlockOverrides, type CoverSheetExportData, type SheetExportImage, type SidebarContent } from '@/lib/sheet-export';
+import {
+  buildSidebarContent,
+  mergeTitleBlockOverrides,
+  type CoverSheetExportData,
+  type InfoSheetExportData,
+  type SheetExportImage,
+  type SidebarContent,
+} from '@/lib/sheet-export';
+import { buildInfoSheetRows, infoSheetTitle } from '@/lib/info-sheet';
+import { computeSetbackBuildableArea } from '@archibim/core-engine';
 import { BuildingElevationView } from './BuildingElevationView';
 import { BuildingSectionView } from './BuildingSectionView';
 import { FloorPlanCanvas } from './FloorPlanCanvas';
 import { CoverSheetView, VIEWPORT_TYPE_LABEL_KEY } from './CoverSheetView';
+import { InfoSheetView } from './InfoSheetView';
 import { useI18nStore } from '@/lib/i18n';
 
 const noop = () => {};
@@ -27,11 +37,13 @@ const noop = () => {};
  * FloorPlanCanvas capture pipeline Floor Plan uses — see
  * SheetViewportType's own doc comment in object-model/sheets.ts. */
 const FLOOR_BASED_TYPES = ['floorPlan', 'roofPlan', 'sitePlan'] as const;
+const INFO_SHEET_BODY_KINDS = new Set(['designCriteria', 'codesStandards', 'siteLocation', 'siteSurvey']);
 
 export interface SheetCaptureResult {
   sheetId: string;
   image?: SheetExportImage;
   coverSheetData?: CoverSheetExportData;
+  infoSheetData?: InfoSheetExportData;
   sidebar: SidebarContent;
 }
 
@@ -122,7 +134,7 @@ export function SheetCapture({
         drawingTitle: sheet.name,
         viewportType: sheet.viewportType,
         sheetNumber: sheet.sheetNumber,
-        scaleLabel: sheet.viewportType === 'coverSheet' ? undefined : sheet.scaleLabel,
+        scaleLabel: sheet.viewportType === 'coverSheet' || sheet.viewportType === 'infoSheet' ? undefined : sheet.scaleLabel,
         drawnBy: sheet.drawnBy,
         date: sheet.date,
         statusLabel: t.sheetsPage.titleBlockStatusDefault,
@@ -191,6 +203,23 @@ export function SheetCapture({
   const floorPlanElements = isFloorBasedSheet && sheet.floorId ? floorElements[sheet.floorId] : undefined;
   const floorPlanFloorLevel = floors.find((f) => f.id === sheet.floorId)?.level ?? 0;
 
+  // Audit Gap Closure Phase 2 — the required building-line inset only
+  // makes sense on a Site Plan (a Floor Plan sheet is about one floor's
+  // walls/rooms, not the plot), and only once both a drawn SiteBoundary
+  // and a known land area exist to compute it from. Recomputed on every
+  // render rather than memoized: this is a handful of arithmetic ops on
+  // 4 points, not worth the dependency-array bookkeeping a useMemo would
+  // add here.
+  const setbackBuildableArea =
+    sheet.viewportType === 'sitePlan' && siteBoundary && project?.siteInfo?.landAreaSqm && building
+      ? computeSetbackBuildableArea(
+          siteBoundary.boundary,
+          siteBoundary.frontEdge,
+          project.siteInfo.landAreaSqm,
+          building.numberOfFloors,
+        )
+      : null;
+
   // Cover Sheet has no viewport to capture — it's ready as soon as its
   // own data (project/building/allSheets) is available, so this fires
   // the callback directly from an effect instead of waiting on an
@@ -239,10 +268,52 @@ export function SheetCapture({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sheet.id, sheet.viewportType, project, building, allSheets, t, sidebar]);
 
+  // Info Sheet (Audit Gap Closure Phase 1) has no viewport to capture
+  // either — same "ready as soon as its own data is available" reasoning
+  // as Cover Sheet above. projectInfo/clientInfo/siteInfo build their
+  // rows from Project/Building via buildInfoSheetRows (shared with
+  // InfoSheetView so the on-screen page and the exported PDF can never
+  // disagree); designCriteria/codesStandards instead carry
+  // sheet.infoSheetBody straight through as free text.
+  useEffect(() => {
+    if (sheet.viewportType !== 'infoSheet' || !sheet.infoSheetKind) return;
+    const kind = sheet.infoSheetKind;
+    const isBodyKind = INFO_SHEET_BODY_KINDS.has(kind);
+    onCaptured({
+      sheetId: sheet.id,
+      infoSheetData: {
+        sheetTitle: infoSheetTitle(kind, t),
+        notProvidedLabel: t.sheetsPage.coverSheetNotProvided,
+        rows: isBodyKind
+          ? []
+          : buildInfoSheetRows(kind as Extract<typeof kind, 'projectInfo' | 'clientInfo' | 'siteInfo'>, project, building, t),
+        bodyText: isBodyKind ? (sheet.infoSheetBody ?? '') : undefined,
+        bodyEmptyState: t.sheetsPage.infoSheetBodyEmptyState,
+      },
+      sidebar,
+    });
+    // Same reasoning as the Cover Sheet effect above for omitting
+    // onCaptured from deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheet.id, sheet.viewportType, sheet.infoSheetKind, sheet.infoSheetBody, project, building, t, sidebar]);
+
   if (sheet.viewportType === 'coverSheet') {
     return (
       <div className="rounded-sheet border-2 border-line-strong bg-white p-3">
         <CoverSheetView project={project} building={building} sheets={allSheets} excludeSheetId={sheet.id} />
+      </div>
+    );
+  }
+
+  if (sheet.viewportType === 'infoSheet' && sheet.infoSheetKind) {
+    return (
+      <div className="rounded-sheet border-2 border-line-strong bg-white p-3">
+        <InfoSheetView
+          infoSheetKind={sheet.infoSheetKind}
+          infoSheetBody={sheet.infoSheetBody}
+          project={project}
+          building={building}
+        />
       </div>
     );
   }
@@ -257,6 +328,7 @@ export function SheetCapture({
           height={560}
           libraryItems={libraryItems}
           onCanvasReady={handleCanvasReady}
+          showMaterialCallouts
         />
       )}
       {sheet.viewportType === 'section' && sectionLine && (
@@ -294,6 +366,8 @@ export function SheetCapture({
           sectionLines={floorPlanElements?.sectionLines ?? EMPTY_FLOOR_ELEMENTS.sectionLines}
           shafts={shafts}
           siteBoundary={siteBoundary}
+          parapets={floorPlanElements?.parapets ?? EMPTY_FLOOR_ELEMENTS.parapets}
+          gutters={floorPlanElements?.gutters ?? EMPTY_FLOOR_ELEMENTS.gutters}
           currentFloorLevel={floorPlanFloorLevel}
           onCreateWall={noop}
           onCreateBeam={noop}
@@ -304,6 +378,8 @@ export function SheetCapture({
           onCreateStairU={noop}
           onCreateRailing={noop}
           onCreateCurtainWall={noop}
+          onCreateParapet={noop}
+          onCreateGutter={noop}
           onCreateSkylight={noop}
           onCreatePlacedObject={noop}
           onCreateOpening={noop}
@@ -319,6 +395,9 @@ export function SheetCapture({
           onStageReady={handleStageReady}
           northAngleDeg={building?.northAngleDeg ?? 0}
           showBackgroundGrid={false}
+          sheetEmphasis={sheet.sheetEmphasis}
+          sheetEmphasisLinear={sheet.sheetEmphasisLinear}
+          setbackBuildableArea={setbackBuildableArea}
         />
       )}
     </div>

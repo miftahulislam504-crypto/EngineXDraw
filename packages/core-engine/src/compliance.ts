@@ -288,6 +288,81 @@ export interface ActualSetback {
   sideM?: number;
 }
 
+/**
+ * Audit Gap Closure Phase 2 — the *required* setback line drawn as a
+ * dashed inset rectangle inside a SiteBoundary, for the Setback &
+ * Building Line sheet (item in the audit's Site & Planning gap list).
+ * Deliberately separate from computeGeometricSetback above: that
+ * function measures the ACTUAL clearance from a drawn footprint to the
+ * plot edges (a compliance check, needs a footprint to exist);  this one
+ * draws the REQUIRED clearance as a buildable-area outline on a Site
+ * Plan / Setback sheet before a footprint is even drawn, so it only
+ * needs the SiteBoundary itself plus the BNBC-required distances from
+ * lookupSetback.
+ *
+ * Assumes boundary is an axis-aligned rectangle in {top, right, bottom,
+ * left} corner order — the same assumption SiteBoundary's own doc
+ * comment states and rectBoundary (the only way to draw one) guarantees
+ * — so this insets each of the four sides by its own required distance
+ * rather than doing the general polygon-offset math
+ * siteBoundaryEdges/computeGeometricSetback use for the (already
+ * axis-aligned in practice, but not asserted-to-be) SiteBoundary those
+ * two handle. Returns null rather than throwing when boundary doesn't
+ * look like a rectangle (fewer than 4 points) — a caller should fall
+ * back to just drawing the plot boundary itself with no inset line, not
+ * crash the sheet render over one malformed SiteBoundary document.
+ */
+export interface SetbackBuildableArea {
+  /** The 4-point inset rectangle a building may be built within, in the
+   * same corner order as the input boundary. */
+  buildableBoundary: Point2D[];
+  frontM: number;
+  rearM: number;
+  sideM: number;
+}
+
+export function computeSetbackBuildableArea(
+  boundary: Point2D[],
+  frontEdge: SiteBoundaryEdge,
+  landAreaSqm: number,
+  numberOfFloors: number,
+): SetbackBuildableArea | null {
+  if (boundary.length < 4) return null;
+  const required = lookupSetback(landAreaSqm, numberOfFloors);
+  const xs = boundary.map((p) => p.x);
+  const ys = boundary.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+
+  // top/bottom here are screen-space (smaller y = higher on the plan,
+  // matching the same convention rectBoundary and every other on-canvas
+  // rectangle tool in this codebase already use.
+  const insetTop = frontEdge === 'top' ? required.frontM : frontEdge === 'bottom' ? required.rearM : required.sideM;
+  const insetBottom = frontEdge === 'bottom' ? required.frontM : frontEdge === 'top' ? required.rearM : required.sideM;
+  const insetLeft = frontEdge === 'left' ? required.frontM : frontEdge === 'right' ? required.rearM : required.sideM;
+  const insetRight = frontEdge === 'right' ? required.frontM : frontEdge === 'left' ? required.rearM : required.sideM;
+
+  const bx0 = minX + insetLeft;
+  const bx1 = maxX - insetRight;
+  const by0 = minY + insetTop;
+  const by1 = maxY - insetBottom;
+
+  return {
+    buildableBoundary: [
+      { x: bx0, y: by0 },
+      { x: bx1, y: by0 },
+      { x: bx1, y: by1 },
+      { x: bx0, y: by1 },
+    ],
+    frontM: required.frontM,
+    rearM: required.rearM,
+    sideM: required.sideM,
+  };
+}
+
+
 export function checkSetback(landAreaSqm: number, numberOfFloors: number, actual: ActualSetback): ComplianceIssue[] {
   const required = lookupSetback(landAreaSqm, numberOfFloors);
   if (actual.frontM === undefined && actual.rearM === undefined && actual.sideM === undefined) {

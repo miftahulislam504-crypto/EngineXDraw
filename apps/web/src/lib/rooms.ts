@@ -10,7 +10,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from './firebase-client';
-import type { Room, Wall } from '@archibim/object-model';
+import type { PaintSpec, Room, Wall } from '@archibim/object-model';
 import { detectRooms, type DetectedRoom } from '@archibim/core-engine';
 
 function roomsCol(projectId: string, buildingId: string, floorId: string) {
@@ -46,15 +46,41 @@ export async function getRoomsOnce(
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Room);
 }
 
+/** Firestore's updateDoc rejects `undefined` values nested inside a map
+ * field (unlike a top-level field, which the SDK silently drops) — so a
+ * PaintSpec with e.g. `sheen: undefined` (the "cleared the dropdown"
+ * state RoomListPanel produces) would throw at write time without this.
+ * Strips only undefined leaf values, keeping the object structure
+ * otherwise intact. */
+function stripUndefinedDeep(obj: PaintSpec): Partial<PaintSpec> {
+  const out: Partial<PaintSpec> = {};
+  for (const key of Object.keys(obj) as (keyof PaintSpec)[]) {
+    const value = obj[key];
+    if (value === undefined) continue;
+    (out as Record<string, unknown>)[key] = value;
+  }
+  return out;
+}
+
 export async function updateRoom(
   projectId: string,
   buildingId: string,
   floorId: string,
   roomId: string,
-  patch: Partial<Pick<Room, 'name' | 'number' | 'occupancyType' | 'finishFloor' | 'finishWalls' | 'finishCeiling'>>,
+  patch: Partial<
+    Pick<
+      Room,
+      'name' | 'number' | 'occupancyType' | 'finishFloor' | 'finishWalls' | 'finishCeiling' | 'paintWalls' | 'paintCeiling'
+    >
+  >,
 ) {
-  await updateDoc(doc(roomsCol(projectId, buildingId, floorId), roomId), {
+  const cleanedPatch = {
     ...patch,
+    ...(patch.paintWalls ? { paintWalls: stripUndefinedDeep(patch.paintWalls) } : {}),
+    ...(patch.paintCeiling ? { paintCeiling: stripUndefinedDeep(patch.paintCeiling) } : {}),
+  };
+  await updateDoc(doc(roomsCol(projectId, buildingId, floorId), roomId), {
+    ...cleanedPatch,
     updatedAt: serverTimestamp(),
   });
 }

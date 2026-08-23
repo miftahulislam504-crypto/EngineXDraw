@@ -20,6 +20,8 @@ import {
   RailingMesh,
   StairMesh,
   CurtainWallMesh,
+  ParapetMesh,
+  GutterMesh,
   SkylightMesh,
 } from './Live3DView';
 
@@ -269,6 +271,12 @@ export function BuildingRenderStudioView({
               ))}
               {elements.curtainWalls.map((cw) => (
                 <CurtainWallMesh key={cw.id} curtainWall={cw} selected={false} glassColorOverride={materialTheme.glassColor} />
+              ))}
+              {elements.parapets.map((p) => (
+                <ParapetMesh key={p.id} parapet={p} selected={false} />
+              ))}
+              {elements.gutters.map((g) => (
+                <GutterMesh key={g.id} gutter={g} selected={false} />
               ))}
               {elements.skylights.map((sky) => {
                 const roof = elements.roofs.find((r) => r.id === sky.roofId);

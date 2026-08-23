@@ -11,9 +11,11 @@ import type {
   DoorSwingDirection,
   Footing,
   Foundation,
+  Gutter,
   GridLine,
   Note,
   Opening,
+  Parapet,
   PlacedObject,
   Railing,
   Ramp,
@@ -65,6 +67,8 @@ export interface PropertiesPanelProps {
   sectionLines: SectionLine[];
   shafts: Shaft[];
   siteBoundary: SiteBoundary | null;
+  parapets: Parapet[];
+  gutters: Gutter[];
   onUpdateWall: (
     id: string,
     patch: Partial<
@@ -106,6 +110,11 @@ export interface PropertiesPanelProps {
   onUpdateStair: (id: string, patch: Partial<Pick<Stair, 'width' | 'flights'>>) => void;
   onUpdateBalcony: (id: string, patch: Partial<Pick<Balcony, 'thickness' | 'elevation'>>) => void;
   onUpdateCurtainWall: (id: string, patch: Partial<Pick<CurtainWall, 'height' | 'mullionSpacing'>>) => void;
+  onUpdateParapet: (
+    id: string,
+    patch: Partial<Pick<Parapet, 'height' | 'thickness' | 'elevation' | 'materialLabel' | 'libraryItemId'>>,
+  ) => void;
+  onUpdateGutter: (id: string, patch: Partial<Pick<Gutter, 'widthMm' | 'elevation' | 'materialLabel' | 'libraryItemId'>>) => void;
   onUpdateSkylight: (id: string, patch: Partial<Pick<Skylight, 'width' | 'depth'>>) => void;
   onUpdatePlacedObject: (
     id: string,
@@ -114,7 +123,10 @@ export interface PropertiesPanelProps {
   onUpdateDimension: (id: string, patch: Partial<Pick<Dimension, 'offset' | 'label'>>) => void;
   onUpdateNote: (id: string, patch: Partial<Pick<Note, 'text' | 'fontSize'>>) => void;
   onUpdateGridLine: (id: string, patch: Partial<Pick<GridLine, 'position' | 'label'>>) => void;
-  onUpdateSectionLine: (id: string, patch: Partial<Pick<SectionLine, 'viewDirection' | 'label'>>) => void;
+  onUpdateSectionLine: (
+    id: string,
+    patch: Partial<Pick<SectionLine, 'viewDirection' | 'label' | 'detailTarget'>>,
+  ) => void;
   onViewSection?: (sectionLineId: string) => void;
   onUpdateShaft: (id: string, patch: Partial<Pick<Shaft, 'shaftType' | 'startLevel' | 'endLevel' | 'label'>>) => void;
   onUpdateSiteBoundary: (id: string, patch: Partial<Pick<SiteBoundary, 'frontEdge'>>) => void;
@@ -157,6 +169,8 @@ export function PropertiesPanel({
   sectionLines,
   shafts,
   siteBoundary,
+  parapets,
+  gutters,
   onUpdateWall,
   onOpenMaterialLibrary,
   onUpdateOpening,
@@ -172,6 +186,8 @@ export function PropertiesPanel({
   onUpdateStair,
   onUpdateBalcony,
   onUpdateCurtainWall,
+  onUpdateParapet,
+  onUpdateGutter,
   onUpdateSkylight,
   onUpdatePlacedObject,
   onUpdateDimension,
@@ -239,6 +255,8 @@ export function PropertiesPanel({
     selection.kind === 'balcony' ? balconies.find((b) => b.id === selection.id) : undefined;
   const curtainWall =
     selection.kind === 'curtainWall' ? curtainWalls.find((c) => c.id === selection.id) : undefined;
+  const parapet = selection.kind === 'parapet' ? parapets.find((p) => p.id === selection.id) : undefined;
+  const gutter = selection.kind === 'gutter' ? gutters.find((g) => g.id === selection.id) : undefined;
   const skylight =
     selection.kind === 'skylight' ? skylights.find((s) => s.id === selection.id) : undefined;
   const placedObject =
@@ -269,6 +287,8 @@ export function PropertiesPanel({
     !stair &&
     !balcony &&
     !curtainWall &&
+    !parapet &&
+    !gutter &&
     !skylight &&
     !placedObject &&
     !dimension &&
@@ -652,6 +672,72 @@ export function PropertiesPanel({
         </div>
       )}
 
+      {parapet && (
+        <div className="flex flex-col gap-3">
+          <LengthInput
+            label={t.properties.height}
+            valueMeters={parapet.height}
+            onChangeMeters={(height) => onUpdateParapet(parapet.id, { height })}
+          />
+          <LengthInput
+            label={t.properties.thickness}
+            valueMeters={parapet.thickness}
+            onChangeMeters={(thickness) => onUpdateParapet(parapet.id, { thickness })}
+          />
+          <LengthInput
+            label={t.properties.elevation}
+            valueMeters={parapet.elevation}
+            onChangeMeters={(elevation) => onUpdateParapet(parapet.id, { elevation })}
+          />
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <Input
+                label={t.properties.material}
+                value={parapet.materialLabel ?? ''}
+                onChange={(e) => onUpdateParapet(parapet.id, { materialLabel: e.target.value })}
+                placeholder={t.properties.materialPlaceholder}
+              />
+            </div>
+            {onOpenMaterialLibrary && (
+              <Button variant="secondary" size="sm" onClick={() => onOpenMaterialLibrary(parapet.id, 'wall')}>
+                {t.properties.libraryButton}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {gutter && (
+        <div className="flex flex-col gap-3">
+          <Input
+            label={t.properties.gutterWidth}
+            type="number"
+            value={gutter.widthMm}
+            onChange={(e) => onUpdateGutter(gutter.id, { widthMm: Number(e.target.value) || 0 })}
+          />
+          <LengthInput
+            label={t.properties.elevation}
+            valueMeters={gutter.elevation}
+            onChangeMeters={(elevation) => onUpdateGutter(gutter.id, { elevation })}
+          />
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <Input
+                label={t.properties.material}
+                value={gutter.materialLabel ?? ''}
+                onChange={(e) => onUpdateGutter(gutter.id, { materialLabel: e.target.value })}
+                placeholder={t.properties.materialPlaceholder}
+              />
+            </div>
+            {onOpenMaterialLibrary && (
+              <Button variant="secondary" size="sm" onClick={() => onOpenMaterialLibrary(gutter.id, 'wall')}>
+                {t.properties.libraryButton}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       {skylight && (
         <div className="flex flex-col gap-3">
           <LengthInput
@@ -789,6 +875,86 @@ export function PropertiesPanel({
               <option value="left">{t.properties.viewDirectionLeft}</option>
               <option value="right">{t.properties.viewDirectionRight}</option>
             </select>
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="font-mono text-[11px] uppercase tracking-wide text-ink-muted">
+              {t.properties.sectionDetailTarget}
+            </span>
+            <select
+              value={sectionLine.detailTarget ? `${sectionLine.detailTarget.kind}:${sectionLine.detailTarget.elementId}` : ''}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (!raw) {
+                  onUpdateSectionLine(sectionLine.id, { detailTarget: undefined });
+                  return;
+                }
+                const [kind, elementId] = raw.split(':') as [
+                  'stair' | 'wall' | 'balcony' | 'railing' | 'parapet' | 'opening',
+                  string,
+                ];
+                onUpdateSectionLine(sectionLine.id, { detailTarget: { kind, elementId } });
+              }}
+              className="rounded-sheet border border-line-strong px-3 py-2 text-sm"
+            >
+              <option value="">{t.properties.sectionDetailTargetNone}</option>
+              {stairs.length > 0 && (
+                <optgroup label={t.properties.sectionDetailTargetStairGroup}>
+                  {stairs.map((s, i) => (
+                    <option key={s.id} value={`stair:${s.id}`}>
+                      {t.properties.sectionDetailTargetStairGroup} {i + 1}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {walls.length > 0 && (
+                <optgroup label={t.properties.sectionDetailTargetWallGroup}>
+                  {walls.map((w, i) => (
+                    <option key={w.id} value={`wall:${w.id}`}>
+                      {t.properties.sectionDetailTargetWallGroup} {i + 1} ({w.type}, {Math.round(w.thickness * 1000)}mm)
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {balconies.length > 0 && (
+                <optgroup label={t.properties.sectionDetailTargetBalconyGroup}>
+                  {balconies.map((b, i) => (
+                    <option key={b.id} value={`balcony:${b.id}`}>
+                      {t.properties.sectionDetailTargetBalconyGroup} {i + 1}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {railings.length > 0 && (
+                <optgroup label={t.properties.sectionDetailTargetRailingGroup}>
+                  {railings.map((r, i) => (
+                    <option key={r.id} value={`railing:${r.id}`}>
+                      {t.properties.sectionDetailTargetRailingGroup} {i + 1}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {parapets.length > 0 && (
+                <optgroup label={t.properties.sectionDetailTargetParapetGroup}>
+                  {parapets.map((p, i) => (
+                    <option key={p.id} value={`parapet:${p.id}`}>
+                      {t.properties.sectionDetailTargetParapetGroup} {i + 1}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {openings.length > 0 && (
+                <optgroup label={t.properties.sectionDetailTargetOpeningGroup}>
+                  {openings.map((o, i) => (
+                    <option key={o.id} value={`opening:${o.id}`}>
+                      {o.kind === 'DOOR' ? 'D' : 'W'}
+                      {i + 1}
+                      {o.tag ? ` (${o.tag})` : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+            <p className="text-xs text-ink-faint">{t.properties.sectionDetailTargetHint}</p>
           </label>
           {onViewSection && (
             <Button variant="secondary" size="sm" onClick={() => onViewSection(sectionLine.id)}>

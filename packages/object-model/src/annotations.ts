@@ -89,6 +89,33 @@ export interface SectionLine {
    * order among section lines on the floor, doubled with a dash the way
    * real section marks are labeled ("A-A", "B-B", …). */
   label?: string;
+  /**
+   * Audit Gap Closure Phase 4 (items 13-14 — Staircase Section, Typical
+   * Wall Section) & Phase 6 (items 18, 22-23-25 — Door & Window Details,
+   * Balcony Details, Railing Details, Parapet Details) — marks this
+   * SectionLine as a DETAIL cut rather than a whole-building cut. A
+   * detail section is still cut with the exact same clipping-plane
+   * mechanism BuildingSectionView already uses (this app has no separate
+   * "detail" geometry engine, nor does it need one — the 3D model IS the
+   * source of truth for any of these six elements' real geometry), but
+   * the camera frames tightly around ONE target element instead of the
+   * whole building height, and the detail renderer adds dimension
+   * annotations specific to that element kind (width/height/sill for an
+   * opening, riser/tread for a stair, thickness for a wall, height/
+   * thickness for a parapet, boundary/thickness for a balcony, height
+   * for a railing) — annotations a whole-building Section view has no
+   * reason to draw. Undefined means an ordinary whole-building section,
+   * unchanged from today's behavior.
+   */
+  detailTarget?: {
+    kind: 'stair' | 'wall' | 'balcony' | 'railing' | 'parapet' | 'opening';
+    /** id of the Stair/Wall/Balcony/Railing/Parapet/Opening this detail
+     * section is cut through — looked up in the same floor's
+     * FloorElements at render/export time rather than duplicating any
+     * of its geometry here, so the detail always reflects the
+     * element's current state. */
+    elementId: string;
+  };
   createdAt: FirestoreTimestampLike;
   updatedAt: FirestoreTimestampLike;
 }

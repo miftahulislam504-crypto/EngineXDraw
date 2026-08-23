@@ -14,8 +14,10 @@ import type {
   Floor,
   Footing,
   Foundation,
+  Gutter,
   LibraryItem,
   Opening,
+  Parapet,
   PlacedObject,
   Railing,
   Ramp,
@@ -55,6 +57,9 @@ export interface Live3DViewProps {
   rooms: Room[];
   explodedView?: boolean;
   height?: number;
+  /** Audit Gap Closure Phase 5 (items 16-17) */
+  parapets?: Parapet[];
+  gutters?: Gutter[];
   /** Phase A — Elevation/Render material fidelity: the MATERIAL-category
    * subset of the shared library, used to resolve each wall/roof's
    * assigned material to an actual render color instead of always
@@ -630,6 +635,63 @@ export function CurtainWallMesh({ curtainWall, selected, glassColorOverride }: {
   );
 }
 
+/**
+ * Audit Gap Closure Phase 5 (item 16) — a solid extruded box exactly
+ * like a Wall segment, positioned at `elevation` (the roof surface, not
+ * floor level 0 — see Parapet's own doc comment in object-model for why
+ * it carries its own elevation rather than referencing a Roof). Reuses
+ * CurtainWallMesh's exact box-geometry shape (length/height/thickness
+ * from start/end/height/thickness) with an opaque brick-tone material
+ * instead of glass, since a parapet is a solid masonry/concrete upstand,
+ * not a glazed assembly.
+ */
+export function ParapetMesh({ parapet, selected }: { parapet: Parapet; selected: boolean }) {
+  const dx = parapet.end.x - parapet.start.x;
+  const dz = parapet.end.y - parapet.start.y;
+  const angle = Math.atan2(dz, dx);
+  const length = Math.hypot(dx, dz);
+  const center = {
+    x: (parapet.start.x + parapet.end.x) / 2,
+    z: (parapet.start.y + parapet.end.y) / 2,
+  };
+  return (
+    <group position={[center.x, parapet.elevation, center.z]} rotation={[0, -angle, 0]}>
+      <mesh position={[0, parapet.height / 2, 0]} castShadow>
+        <boxGeometry args={[length, parapet.height, parapet.thickness]} />
+        <meshStandardMaterial color={selected ? '#2D6CDF' : '#8B5E3C'} />
+      </mesh>
+    </group>
+  );
+}
+
+/**
+ * Audit Gap Closure Phase 5 (item 17) — a thin extruded channel at the
+ * roof edge, one flat box rather than an actual trough profile (see
+ * Gutter's own doc comment for why the object model doesn't attempt a
+ * true cross-section) — enough to make a gutter run visibly present in
+ * the 3D view and Roof Drainage Layout sheet without pretending to model
+ * real drainage-channel geometry this app has no other use for.
+ */
+export function GutterMesh({ gutter, selected }: { gutter: Gutter; selected: boolean }) {
+  const dx = gutter.end.x - gutter.start.x;
+  const dz = gutter.end.y - gutter.start.y;
+  const angle = Math.atan2(dz, dx);
+  const length = Math.hypot(dx, dz);
+  const center = {
+    x: (gutter.start.x + gutter.end.x) / 2,
+    z: (gutter.start.y + gutter.end.y) / 2,
+  };
+  const widthM = gutter.widthMm / 1000;
+  return (
+    <group position={[center.x, gutter.elevation, center.z]} rotation={[0, -angle, 0]}>
+      <mesh position={[0, 0.03, 0]}>
+        <boxGeometry args={[length, 0.06, widthM]} />
+        <meshStandardMaterial color={selected ? '#2D6CDF' : '#2D9C8A'} />
+      </mesh>
+    </group>
+  );
+}
+
 /** Marker plane over a roof opening — same simplification as door/window
  * openings (no true cutout in the roof mesh underneath). topElevation is
  * the roof's top face height (elevation + thickness), passed in by the
@@ -668,6 +730,8 @@ export function PlacedObjectMesh({ object, selected }: { object: PlacedObject; s
     BATHROOM: '#2D6CDF',
     PARKING: '#1C8A5E',
     LANDSCAPE: '#3F7A4E',
+    ROOF_DRAIN: '#2D6CDF',
+    DOWNSPOUT: '#5A5A5A',
   };
   return (
     <mesh
@@ -712,6 +776,8 @@ export function FloorGroup({
   placedObjects,
   rooms,
   materialLookup,
+  parapets = [],
+  gutters = [],
 }: {
   elevation: number;
   walls: Wall[];
@@ -732,6 +798,9 @@ export function FloorGroup({
   placedObjects: PlacedObject[];
   rooms: Room[];
   materialLookup: ReturnType<typeof buildMaterialLookup>;
+  /** Audit Gap Closure Phase 5 (items 16-17) */
+  parapets?: Parapet[];
+  gutters?: Gutter[];
 }) {
   const extendedSegments = useMemo(() => computeExtendedWallSegments(walls), [walls]);
   const openingsByWallId = useMemo(() => {
@@ -847,6 +916,12 @@ export function FloorGroup({
       {curtainWalls.map((cw) => (
         <CurtainWallMesh key={cw.id} curtainWall={cw} selected={false} />
       ))}
+      {parapets.map((p) => (
+        <ParapetMesh key={p.id} parapet={p} selected={false} />
+      ))}
+      {gutters.map((g) => (
+        <GutterMesh key={g.id} gutter={g} selected={false} />
+      ))}
       {skylights.map((sky) => {
         const roof = roofs.find((r) => r.id === sky.roofId);
         if (!roof) return null;
@@ -885,6 +960,8 @@ export function Live3DView({
   libraryItems = [],
   floors,
   floorElements,
+  parapets = [],
+  gutters = [],
 }: Live3DViewProps) {
   // Multi-floor mode is on whenever both floors and floorElements are
   // supplied and floors is non-empty — same "both present" contract
@@ -982,6 +1059,8 @@ export function Live3DView({
                     placedObjects={elements.placedObjects}
                     rooms={elements.rooms}
                     materialLookup={materialLookup}
+                    parapets={elements.parapets}
+                    gutters={elements.gutters}
                   />
                 );
               })
@@ -1006,6 +1085,8 @@ export function Live3DView({
               placedObjects={placedObjects}
               rooms={rooms}
               materialLookup={materialLookup}
+              parapets={parapets}
+              gutters={gutters}
             />
           )}
 

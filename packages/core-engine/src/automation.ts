@@ -18,6 +18,7 @@ import type {
   ModelIssueElementType,
   Opening,
   OccupancyType,
+  PaintSpec,
   Point2D,
   Railing,
   Roof,
@@ -351,6 +352,78 @@ export function buildFinishScheduleRows(rooms: Room[]): FinishScheduleRow[] {
       finishWalls: r.finishWalls ?? '',
       finishCeiling: r.finishCeiling ?? '',
     }));
+}
+
+/**
+ * Audit Gap Closure Phase 7 (item 26 — Paint Schedule) — one row per
+ * PAINTED SURFACE (a room can contribute up to two rows: walls and
+ * ceiling), not one row per room the way FinishScheduleRow is, because a
+ * real paint schedule is organized by what's being painted and with
+ * what, not by room — the same room's walls and ceiling can carry
+ * completely different paint specs and a supplier needs to quote each
+ * surface separately. Only rooms where that surface's PaintSpec has been
+ * entered (paintWalls/paintCeiling isn't undefined) produce a row — a
+ * room with an unset paint spec doesn't appear at all rather than
+ * appearing with blank cells, since "not painted / not yet specified"
+ * and "painted, spec not decided" are different states a schedule
+ * shouldn't conflate by listing both as empty rows.
+ */
+export interface PaintScheduleRow {
+  roomNumber: string;
+  roomName: string;
+  surface: 'Walls' | 'Ceiling';
+  colorName: string;
+  code: string;
+  sheen: string;
+  areaSqm: number;
+}
+
+/** Sheen enum values in the order a real paint spec sheet lists them,
+ * least to most reflective — used only to render a human label, since
+ * PaintSpec.sheen itself is the camelCase machine value. */
+const SHEEN_LABEL: Record<NonNullable<PaintSpec['sheen']>, string> = {
+  matte: 'Matte',
+  eggshell: 'Eggshell',
+  satin: 'Satin',
+  semiGloss: 'Semi-Gloss',
+  gloss: 'Gloss',
+};
+
+export function buildPaintScheduleRows(rooms: Room[]): PaintScheduleRow[] {
+  const sorted = [...rooms].sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true }));
+  const rows: PaintScheduleRow[] = [];
+  for (const r of sorted) {
+    if (r.paintWalls) {
+      // Wall paint area approximated from perimeter × a nominal 3m
+      // storey height rather than true wall-face area (openings
+      // subtracted, actual per-floor wall height) — this app has no
+      // per-room wall-height or door/window-deduction figure computed
+      // anywhere else either, so a supplier-facing estimate from real
+      // perimeter is more honest than inventing a false-precision
+      // opening-deducted number from data this schedule doesn't have.
+      rows.push({
+        roomNumber: r.number,
+        roomName: r.name,
+        surface: 'Walls',
+        colorName: r.paintWalls.colorName ?? '',
+        code: r.paintWalls.code ?? '',
+        sheen: r.paintWalls.sheen ? SHEEN_LABEL[r.paintWalls.sheen] : '',
+        areaSqm: r.perimeterM * 3,
+      });
+    }
+    if (r.paintCeiling) {
+      rows.push({
+        roomNumber: r.number,
+        roomName: r.name,
+        surface: 'Ceiling',
+        colorName: r.paintCeiling.colorName ?? '',
+        code: r.paintCeiling.code ?? '',
+        sheen: r.paintCeiling.sheen ? SHEEN_LABEL[r.paintCeiling.sheen] : '',
+        areaSqm: r.areaSqm,
+      });
+    }
+  }
+  return rows;
 }
 
 /** Foundation is boundary-based (like Slab), so "size" reads as plan

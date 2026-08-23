@@ -29,6 +29,10 @@ import {
   Scissors,
   Box,
   Fence,
+  Droplets,
+  ArrowDownToLine,
+  Waves,
+  LayoutPanelTop,
   type LucideIcon,
 } from 'lucide-react';
 import type { DesignTool } from '@/lib/design-studio-store';
@@ -71,6 +75,11 @@ export const TOOL_ICONS: Record<DesignTool, LucideIcon> = {
   section: Scissors,
   shaft: Box,
   siteBoundary: Fence,
+  // Audit Gap Closure Phase 5 (items 16-17)
+  parapet: LayoutPanelTop,
+  gutter: Waves,
+  roofDrain: Droplets,
+  downspout: ArrowDownToLine,
 };
 
 /** Icon shown per tool GROUP (the row-1 buttons that expand a popover

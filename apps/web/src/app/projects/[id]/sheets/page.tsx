@@ -7,7 +7,9 @@ import { Button, Input, PageHeader } from '@archibim/shared-ui';
 import type {
   Building,
   Floor,
+  InfoSheetKind,
   LibraryItem,
+  PlacedObjectCategory,
   Project,
   Roof,
   SectionLine,
@@ -55,12 +57,128 @@ const FLOOR_BASED_VIEWPORTS: SheetViewportType[] = ['floorPlan', 'roofPlan', 'si
  * an unsorted list. */
 const SHEET_LIST_GROUP_ORDER: SheetViewportType[] = [
   'coverSheet',
+  'infoSheet',
   'floorPlan',
   'elevation',
   'section',
   'roofPlan',
   'sitePlan',
 ];
+
+/** Options for the Info Sheet Kind selector, in the same order they're
+ * listed in the audit gap report (Project → Client → Site → Design
+ * Criteria → Codes/Standards → Site Location → Site Survey). */
+const INFO_SHEET_KINDS: InfoSheetKind[] = [
+  'projectInfo',
+  'clientInfo',
+  'siteInfo',
+  'designCriteria',
+  'codesStandards',
+  'siteLocation',
+  'siteSurvey',
+];
+
+/** Options for the "Emphasize" checkbox group on the New Sheet form —
+ * every PlacedObjectCategory that has a corresponding audit gap item
+ * calling for a dedicated emphasis sheet: Parking Layout, Landscape/
+ * Open Space Plan, Furniture Layout (Phase 2), Toilet Layout, Kitchen
+ * Layout (Phase 6 items 20-21), and Roof Drainage Layout's inlet/
+ * downspout half (Phase 6 item 24 — the gutter half of that sheet is
+ * sheetEmphasisLinear, a separate field, since Gutter isn't a
+ * PlacedObjectCategory). */
+const EMPHASIS_CATEGORIES = [
+  'PARKING',
+  'LANDSCAPE',
+  'FURNITURE',
+  'KITCHEN',
+  'BATHROOM',
+  'ROOF_DRAIN',
+  'DOWNSPOUT',
+] as const satisfies readonly PlacedObjectCategory[];
+
+/** Maps each emphasis-picker PlacedObjectCategory to its Translations
+ * key — same explicit-lookup reasoning as INFO_SHEET_KIND_LABEL_KEY
+ * above (a typo shows up as a type error here, not a blank checkbox
+ * label). Deliberately its own translated label set rather than reusing
+ * libraryCategories: LibraryCategory and PlacedObjectCategory are
+ * different enums for different purposes (a library catalog entry vs. a
+ * placed instance category) and LibraryCategory has no PARKING member
+ * at all, so the two can't share one dictionary. */
+const EMPHASIS_CATEGORY_LABEL_KEY: Record<
+  (typeof EMPHASIS_CATEGORIES)[number],
+  | 'sheetEmphasisParking'
+  | 'sheetEmphasisLandscape'
+  | 'sheetEmphasisFurniture'
+  | 'sheetEmphasisKitchen'
+  | 'sheetEmphasisBathroom'
+  | 'sheetEmphasisRoofDrain'
+  | 'sheetEmphasisDownspout'
+> = {
+  PARKING: 'sheetEmphasisParking',
+  LANDSCAPE: 'sheetEmphasisLandscape',
+  FURNITURE: 'sheetEmphasisFurniture',
+  KITCHEN: 'sheetEmphasisKitchen',
+  BATHROOM: 'sheetEmphasisBathroom',
+  ROOF_DRAIN: 'sheetEmphasisRoofDrain',
+  DOWNSPOUT: 'sheetEmphasisDownspout',
+};
+
+/** Options for the "Emphasize (linear)" checkbox group — Parapet and
+ * Gutter, the two Phase 5 element types that live in their own
+ * collections rather than as PlacedObject instances (see
+ * Sheet.sheetEmphasisLinear's own doc comment in object-model/sheets.ts
+ * for why this is a separate field from EMPHASIS_CATEGORIES above). */
+const EMPHASIS_LINEAR_KINDS = ['parapet', 'gutter'] as const;
+
+const EMPHASIS_LINEAR_LABEL_KEY: Record<(typeof EMPHASIS_LINEAR_KINDS)[number], 'sheetEmphasisParapet' | 'sheetEmphasisGutter'> = {
+  parapet: 'sheetEmphasisParapet',
+  gutter: 'sheetEmphasisGutter',
+};
+
+/** Maps each InfoSheetKind to its Translations key — an explicit lookup
+ * rather than string-concatenating the key at render time, so a typo or
+ * a future rename shows up as a type error here instead of an empty
+ * option label in the New Sheet form. */
+const INFO_SHEET_KIND_LABEL_KEY: Record<
+  InfoSheetKind,
+  | 'infoSheetKindProjectInfo'
+  | 'infoSheetKindClientInfo'
+  | 'infoSheetKindSiteInfo'
+  | 'infoSheetKindDesignCriteria'
+  | 'infoSheetKindCodesStandards'
+  | 'infoSheetKindSiteLocation'
+  | 'infoSheetKindSiteSurvey'
+> = {
+  projectInfo: 'infoSheetKindProjectInfo',
+  clientInfo: 'infoSheetKindClientInfo',
+  siteInfo: 'infoSheetKindSiteInfo',
+  designCriteria: 'infoSheetKindDesignCriteria',
+  codesStandards: 'infoSheetKindCodesStandards',
+  siteLocation: 'infoSheetKindSiteLocation',
+  siteSurvey: 'infoSheetKindSiteSurvey',
+};
+
+/** Which InfoSheetKinds are free-text (infoSheetBody) rather than
+ * data-backed rows — same set SheetCapture/InfoSheetView use, kept here
+ * too so this form's conditional rendering can't silently drift from
+ * what actually gets exported. */
+const INFO_SHEET_BODY_KINDS = new Set<InfoSheetKind>(['designCriteria', 'codesStandards', 'siteLocation', 'siteSurvey']);
+
+/** Placeholder text key for each free-text InfoSheetKind — a Partial
+ * record (only the four body kinds have an entry) rather than every
+ * InfoSheetKind, since the other three never render this textarea at
+ * all. */
+const INFO_SHEET_BODY_PLACEHOLDER_KEY: Partial<
+  Record<
+    InfoSheetKind,
+    'infoSheetBodyPlaceholderDesignCriteria' | 'infoSheetBodyPlaceholderCodesStandards' | 'infoSheetBodyPlaceholderSiteLocation' | 'infoSheetBodyPlaceholderSiteSurvey'
+  >
+> = {
+  designCriteria: 'infoSheetBodyPlaceholderDesignCriteria',
+  codesStandards: 'infoSheetBodyPlaceholderCodesStandards',
+  siteLocation: 'infoSheetBodyPlaceholderSiteLocation',
+  siteSurvey: 'infoSheetBodyPlaceholderSiteSurvey',
+};
 
 const VIEWPORT_TYPE_GROUP_LABEL_KEY = VIEWPORT_TYPE_LABEL_KEY;
 
@@ -104,6 +222,10 @@ export default function SheetsPage() {
   const [floorId, setFloorId] = useState('');
   const [direction, setDirection] = useState<(typeof DIRECTIONS)[number]>('N');
   const [sectionLineId, setSectionLineId] = useState('');
+  const [infoSheetKind, setInfoSheetKind] = useState<InfoSheetKind>('projectInfo');
+  const [infoSheetBody, setInfoSheetBody] = useState('');
+  const [sheetEmphasis, setSheetEmphasis] = useState<PlacedObjectCategory[]>([]);
+  const [sheetEmphasisLinear, setSheetEmphasisLinear] = useState<Array<'parapet' | 'gutter'>>([]);
   const [scaleLabel, setScaleLabel] = useState('1:100');
   const [drawnBy, setDrawnBy] = useState('');
   const [date, setDate] = useState('');
@@ -263,17 +385,33 @@ export default function SheetsPage() {
       floorId: FLOOR_BASED_VIEWPORTS.includes(viewportType) ? floorId || undefined : undefined,
       direction: viewportType === 'elevation' ? direction : undefined,
       sectionLineId: viewportType === 'section' ? sectionLineId || undefined : undefined,
-      // A Cover Sheet has no drawing viewport at all, so no scale
-      // applies — kept blank rather than whatever's typed into the
-      // scale field (that field is hidden for this viewport type below,
-      // but the state value could still be stale from a previous
+      infoSheetKind: viewportType === 'infoSheet' ? infoSheetKind : undefined,
+      infoSheetBody:
+        viewportType === 'infoSheet' && INFO_SHEET_BODY_KINDS.has(infoSheetKind)
+          ? infoSheetBody.trim() || undefined
+          : undefined,
+      sheetEmphasis:
+        (viewportType === 'sitePlan' || viewportType === 'floorPlan') && sheetEmphasis.length > 0
+          ? sheetEmphasis
+          : undefined,
+      sheetEmphasisLinear:
+        (viewportType === 'sitePlan' || viewportType === 'floorPlan') && sheetEmphasisLinear.length > 0
+          ? sheetEmphasisLinear
+          : undefined,
+      // A Cover Sheet or Info Sheet has no drawing viewport at all, so no
+      // scale applies — kept blank rather than whatever's typed into the
+      // scale field (that field is hidden for these viewport types
+      // below, but the state value could still be stale from a previous
       // selection).
-      scaleLabel: viewportType === 'coverSheet' ? '' : scaleLabel.trim(),
+      scaleLabel: viewportType === 'coverSheet' || viewportType === 'infoSheet' ? '' : scaleLabel.trim(),
       drawnBy: drawnBy.trim() || undefined,
       date: date.trim() || undefined,
     });
     setName('');
     setSheetNumber('');
+    setInfoSheetBody('');
+    setSheetEmphasis([]);
+    setSheetEmphasisLinear([]);
   }
 
   async function handleDelete(sheetId: string) {
@@ -691,7 +829,21 @@ export default function SheetsPage() {
                                     ? `${t.sheetsPage.viewportRoofPlan} — ${floors.find((f) => f.id === sheet.floorId)?.name ?? ''}`
                                     : sheet.viewportType === 'sitePlan'
                                       ? t.sheetsPage.viewportSitePlan
-                                      : t.sheetsPage.viewportCoverSheet}
+                                      : sheet.viewportType === 'infoSheet'
+                                        ? `${t.sheetsPage.viewportInfoSheet} — ${sheet.infoSheetKind ? t.sheetsPage[INFO_SHEET_KIND_LABEL_KEY[sheet.infoSheetKind]] : ''}`
+                                        : t.sheetsPage.viewportCoverSheet}
+                            {(() => {
+                              const catLabels = (sheet.sheetEmphasis ?? [])
+                                .filter((cat): cat is (typeof EMPHASIS_CATEGORIES)[number] =>
+                                  (EMPHASIS_CATEGORIES as readonly string[]).includes(cat),
+                                )
+                                .map((cat) => t.sheetsPage[EMPHASIS_CATEGORY_LABEL_KEY[cat]]);
+                              const linearLabels = (sheet.sheetEmphasisLinear ?? []).map(
+                                (kind) => t.sheetsPage[EMPHASIS_LINEAR_LABEL_KEY[kind]],
+                              );
+                              const allLabels = [...catLabels, ...linearLabels];
+                              return allLabels.length > 0 ? ` (${allLabels.join(', ')})` : '';
+                            })()}
                           </div>
                         </div>
                       </div>
@@ -753,6 +905,7 @@ export default function SheetsPage() {
                 <option value="roofPlan">{t.sheetsPage.viewportRoofPlan}</option>
                 <option value="sitePlan">{t.sheetsPage.viewportSitePlan}</option>
                 <option value="coverSheet">{t.sheetsPage.viewportCoverSheet}</option>
+                <option value="infoSheet">{t.sheetsPage.viewportInfoSheet}</option>
               </select>
             </label>
 
@@ -813,13 +966,94 @@ export default function SheetsPage() {
                     {allSectionLines.map(({ floor, line }) => (
                       <option key={line.id} value={line.id}>
                         {floor.name} — {line.label ?? line.id.slice(0, 6)}
+                        {line.detailTarget
+                          ? ` (${line.detailTarget.kind === 'stair' ? t.sheetsPage.sectionLineDetailStair : t.sheetsPage.sectionLineDetailWall})`
+                          : ''}
                       </option>
                     ))}
                   </select>
                 </label>
               ))}
 
-            {viewportType !== 'coverSheet' && (
+            {viewportType === 'infoSheet' && (
+              <>
+                <label className="flex flex-col gap-1.5">
+                  <span className="font-mono text-[11px] uppercase tracking-wide text-ink-muted">
+                    {t.sheetsPage.infoSheetKind}
+                  </span>
+                  <select
+                    value={infoSheetKind}
+                    onChange={(e) => setInfoSheetKind(e.target.value as InfoSheetKind)}
+                    className="rounded-sheet border border-line-strong px-3 py-2 text-sm"
+                  >
+                    {INFO_SHEET_KINDS.map((kind) => (
+                      <option key={kind} value={kind}>
+                        {t.sheetsPage[INFO_SHEET_KIND_LABEL_KEY[kind]]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {INFO_SHEET_BODY_KINDS.has(infoSheetKind) && (
+                  <label className="flex flex-col gap-1.5">
+                    <span className="font-mono text-[11px] uppercase tracking-wide text-ink-muted">
+                      {t.sheetsPage.infoSheetBodyLabel}
+                    </span>
+                    <textarea
+                      value={infoSheetBody}
+                      onChange={(e) => setInfoSheetBody(e.target.value)}
+                      placeholder={
+                        INFO_SHEET_BODY_PLACEHOLDER_KEY[infoSheetKind]
+                          ? t.sheetsPage[INFO_SHEET_BODY_PLACEHOLDER_KEY[infoSheetKind]!]
+                          : ''
+                      }
+                      rows={6}
+                      className="rounded-sheet border border-line-strong px-3 py-2 font-mono text-xs"
+                    />
+                  </label>
+                )}
+              </>
+            )}
+
+            {(viewportType === 'sitePlan' || viewportType === 'floorPlan') && (
+              <div className="flex flex-col gap-1.5">
+                <span className="font-mono text-[11px] uppercase tracking-wide text-ink-muted">
+                  {t.sheetsPage.sheetEmphasisLabel}
+                </span>
+                <div className="flex flex-wrap gap-3">
+                  {EMPHASIS_CATEGORIES.map((cat) => (
+                    <label key={cat} className="flex items-center gap-1.5 text-sm text-ink">
+                      <input
+                        type="checkbox"
+                        checked={sheetEmphasis.includes(cat)}
+                        onChange={(e) =>
+                          setSheetEmphasis((prev) =>
+                            e.target.checked ? [...prev, cat] : prev.filter((c) => c !== cat),
+                          )
+                        }
+                      />
+                      {t.sheetsPage[EMPHASIS_CATEGORY_LABEL_KEY[cat]]}
+                    </label>
+                  ))}
+                  {EMPHASIS_LINEAR_KINDS.map((kind) => (
+                    <label key={kind} className="flex items-center gap-1.5 text-sm text-ink">
+                      <input
+                        type="checkbox"
+                        checked={sheetEmphasisLinear.includes(kind)}
+                        onChange={(e) =>
+                          setSheetEmphasisLinear((prev) =>
+                            e.target.checked ? [...prev, kind] : prev.filter((k) => k !== kind),
+                          )
+                        }
+                      />
+                      {t.sheetsPage[EMPHASIS_LINEAR_LABEL_KEY[kind]]}
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-ink-faint">{t.sheetsPage.sheetEmphasisHint}</p>
+              </div>
+            )}
+
+            {viewportType !== 'coverSheet' && viewportType !== 'infoSheet' && (
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-end gap-2">
                   <div className="min-w-0 flex-1">

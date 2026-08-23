@@ -4,8 +4,8 @@ import { useEffect, useMemo, useRef } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, OrthographicCamera, Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
-import type { Floor, LibraryItem, SectionLine } from '@archibim/object-model';
-import { computeFloorBaseElevations, formatFeetInches } from '@archibim/core-engine';
+import type { Balcony, Floor, LibraryItem, Parapet, Railing, SectionLine } from '@archibim/object-model';
+import { computeFloorBaseElevations, formatFeetInches, treadDepth, stairReferencePoint, pointAtParameter } from '@archibim/core-engine';
 import type { FloorElements } from '@/lib/floors';
 import { numberToLetters } from '@/lib/floors';
 import { buildMaterialLookup, resolveMaterial } from '@/lib/material-resolver';
@@ -20,6 +20,8 @@ import {
   RailingMesh,
   StairMesh,
   CurtainWallMesh,
+  ParapetMesh,
+  GutterMesh,
   SkylightMesh,
 } from './Live3DView';
 
@@ -100,6 +102,70 @@ export function BuildingSectionView({
   const baseElevations = useMemo(() => computeFloorBaseElevations(floors), [floors]);
   const materialLookup = useMemo(() => buildMaterialLookup(libraryItems), [libraryItems]);
 
+  // Audit Gap Closure Phase 4 — resolves the actual Stair/Wall document
+  // this detail section targets, plus which floor's base elevation it
+  // sits on (needed to convert the stair's floor-relative rise into a
+  // world-space Y for both camera framing and the riser/tread labels).
+  // Undefined whenever sectionLine has no detailTarget, or the target
+  // element/floor can no longer be found (e.g. it was deleted after the
+  // SectionLine was drawn through it) — callers below treat that as "no
+  // detail framing", falling back to the ordinary whole-building camera
+  // exactly as if detailTarget had never been set, rather than crashing
+  // the section render over one stale reference.
+  const detail = useMemo(() => {
+    if (!sectionLine.detailTarget) return null;
+    const floor = floors.find((f) => f.id === sectionLine.floorId);
+    if (!floor) return null;
+    const elements = floorElements[floor.id];
+    if (!elements) return null;
+    const base = baseElevations.get(floor.id) ?? 0;
+    if (sectionLine.detailTarget.kind === 'stair') {
+      const stair = elements.stairs.find((s) => s.id === sectionLine.detailTarget!.elementId);
+      if (!stair) return null;
+      const ref = stairReferencePoint(stair);
+      const totalRise = (stair.flights ?? []).reduce((sum, f) => sum + f.numberOfSteps * f.riserHeight, 0);
+      return { kind: 'stair' as const, stair, floor, base, ref, totalRise };
+    }
+    if (sectionLine.detailTarget.kind === 'wall') {
+      const wall = elements.walls.find((w) => w.id === sectionLine.detailTarget!.elementId);
+      if (!wall) return null;
+      return { kind: 'wall' as const, wall, floor, base };
+    }
+    // Audit Gap Closure Phase 6 (items 22-23-25) — Balcony/Railing/
+    // Parapet detail targets, same "look up the live document, don't
+    // duplicate its geometry" reasoning as stair/wall above.
+    if (sectionLine.detailTarget.kind === 'balcony') {
+      const balcony = elements.balconies.find((b) => b.id === sectionLine.detailTarget!.elementId);
+      if (!balcony) return null;
+      const xs = balcony.boundary.map((p) => p.x);
+      const ys = balcony.boundary.map((p) => p.y);
+      const center = { x: xs.reduce((a, b) => a + b, 0) / xs.length, y: ys.reduce((a, b) => a + b, 0) / ys.length };
+      return { kind: 'balcony' as const, balcony, floor, base, center };
+    }
+    if (sectionLine.detailTarget.kind === 'railing') {
+      const railing = elements.railings.find((r) => r.id === sectionLine.detailTarget!.elementId);
+      if (!railing) return null;
+      return { kind: 'railing' as const, railing, floor, base };
+    }
+    if (sectionLine.detailTarget.kind === 'parapet') {
+      const parapet = elements.parapets.find((p) => p.id === sectionLine.detailTarget!.elementId);
+      if (!parapet) return null;
+      return { kind: 'parapet' as const, parapet, floor, base };
+    }
+    // Audit Gap Closure Phase 6 (item 18) — Door & Window Details. An
+    // Opening has no world position of its own — positionOnWall is
+    // parametric along whichever Wall it's cut into — so this resolves
+    // the owning Wall too and computes the real point with the exact
+    // same pointAtParameter helper the wall-joinery code already uses,
+    // rather than approximating it here a second way.
+    const opening = elements.openings.find((o) => o.id === sectionLine.detailTarget!.elementId);
+    if (!opening) return null;
+    const wall = elements.walls.find((w) => w.id === opening.wallId);
+    if (!wall) return null;
+    const ref = pointAtParameter(wall, opening.positionOnWall);
+    return { kind: 'opening' as const, opening, wall, floor, base, ref };
+  }, [sectionLine, floors, floorElements, baseElevations]);
+
   const bounds = useMemo(() => {
     let minX = Infinity;
     let maxX = -Infinity;
@@ -145,12 +211,62 @@ export function BuildingSectionView({
       y: (sectionLine.start.y + sectionLine.end.y) / 2,
     };
 
-    const farDist = Math.max(bounds.spanX, bounds.spanZ, bounds.maxTop) * 4 + 50;
-    const midY = bounds.maxTop / 2;
-
     const planePoint = new THREE.Vector3(sectionLine.start.x, 0, sectionLine.start.y);
     const planeNormal = new THREE.Vector3(keptNormal.x, 0, keptNormal.y).normalize();
     const cutPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, planePoint);
+
+    // Audit Gap Closure Phase 4 — a detail target overrides the vertical
+    // center/zoom/far-plane with a tight frame around just that element
+    // (a stair's total rise, or a generous fixed band around a wall's
+    // height), instead of the whole-building framing below. The
+    // clip-plane and horizontal camera position stay identical to the
+    // whole-building case — a detail section is still cut from the same
+    // line, just viewed up close.
+    if (detail) {
+      const detailBase = detail.base;
+      // Audit Gap Closure Phase 6 (item 18) — an Opening's vertical
+      // extent starts at sillHeight above the floor, not at floor level
+      // like every other detail kind here — this offset shifts the
+      // framed band up to match, so a Door & Window Details camera
+      // centers on the actual door/window leaf rather than half on the
+      // wall below the sill.
+      const detailBaseOffset = detail.kind === 'opening' ? detail.opening.sillHeight : 0;
+      // Audit Gap Closure Phase 6 (items 22-23-25) — Balcony/Railing/
+      // Parapet each contribute their own real height/thickness to frame
+      // around, same reasoning as stair/wall above.
+      const detailHeight =
+        detail.kind === 'stair'
+          ? Math.max(detail.totalRise, 1)
+          : detail.kind === 'wall'
+            ? Math.max(detail.wall.height, 1)
+            : detail.kind === 'balcony'
+              ? Math.max(detail.balcony.thickness * 4, 1) // a balcony slab is thin — a fixed generous band frames the edge detail rather than a nearly-invisible sliver
+              : detail.kind === 'railing'
+                ? Math.max(detail.railing.height, 1)
+                : detail.kind === 'parapet'
+                  ? Math.max(detail.parapet.height, 1)
+                  : Math.max(detail.opening.height, 1);
+      const detailMidY = detailBase + detailBaseOffset + detailHeight / 2;
+      const detailFar = Math.max(bounds.spanX, bounds.spanZ, detailHeight) * 4 + 50;
+      const camPos: [number, number, number] = [
+        mid.x - keptNormal.x * detailFar,
+        detailMidY,
+        mid.y - keptNormal.y * detailFar,
+      ];
+      return {
+        plane: cutPlane,
+        cameraPosition: camPos,
+        target: [mid.x, detailMidY, mid.y] as [number, number, number],
+        // Tighter zoom than the whole-building formula below — a detail
+        // sheet wants the target element filling most of the frame, not
+        // a slice of a much taller building.
+        zoom: Math.max(20, Math.min(160, 260 / Math.max(detailHeight * 1.3, 1))),
+        far: detailFar,
+      };
+    }
+
+    const farDist = Math.max(bounds.spanX, bounds.spanZ, bounds.maxTop) * 4 + 50;
+    const midY = bounds.maxTop / 2;
 
     const camPos: [number, number, number] = [
       mid.x - keptNormal.x * farDist,
@@ -165,7 +281,7 @@ export function BuildingSectionView({
       zoom: Math.max(10, Math.min(80, 500 / Math.max(len, bounds.maxTop * 1.5, 1))),
       far: farDist,
     };
-  }, [sectionLine, bounds]);
+  }, [sectionLine, bounds, detail]);
 
   // Phase C — Sheet annotation: grid bubbles for a section cut. The cut
   // can run at any angle (unlike an Elevation, which is always locked to
@@ -326,6 +442,12 @@ export function BuildingSectionView({
               {elements.curtainWalls.map((cw) => (
                 <CurtainWallMesh key={cw.id} curtainWall={cw} selected={false} />
               ))}
+              {elements.parapets.map((p) => (
+                <ParapetMesh key={p.id} parapet={p} selected={false} />
+              ))}
+              {elements.gutters.map((g) => (
+                <GutterMesh key={g.id} gutter={g} selected={false} />
+              ))}
               {elements.skylights.map((sky) => {
                 const roof = elements.roofs.find((r) => r.id === sky.roofId);
                 if (!roof) return null;
@@ -391,6 +513,125 @@ export function BuildingSectionView({
               </group>
             );
           })}
+
+        {detail && detail.kind === 'stair' && (
+          <group key="stair-detail-dims">
+            {(() => {
+              // Audit Gap Closure Phase 4 (item 13) — one riser/tread
+              // label per flight, stacked along the section cut so each
+              // label sits roughly where that flight's steps actually
+              // are, rather than one summary number for the whole stair
+              // (a real stair detail dimensions each flight, since
+              // flights can have different riser heights).
+              let runningRise = 0;
+              return detail.stair.flights.map((flight, i) => {
+                const flightRise = flight.numberOfSteps * flight.riserHeight;
+                const labelY = detail.base + runningRise + flightRise / 2;
+                runningRise += flightRise;
+                const tread = treadDepth(flight);
+                const labelPos: [number, number, number] = [detail.ref.x, labelY, detail.ref.y];
+                return (
+                  <Html key={`flight-${i}`} position={labelPos} center={false} occlude={false}>
+                    <div className="pointer-events-none whitespace-nowrap rounded bg-white/90 px-1.5 py-0.5 font-mono text-[10px] font-medium text-[#C4692C] shadow-sm">
+                      {flight.numberOfSteps} R @ {Math.round(flight.riserHeight * 1000)}mm / T {Math.round(tread * 1000)}mm
+                    </div>
+                  </Html>
+                );
+              });
+            })()}
+            <Html position={[detail.ref.x, detail.base + detail.totalRise + 0.3, detail.ref.y]} center={false} occlude={false}>
+              <div className="pointer-events-none whitespace-nowrap rounded bg-white/90 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#C4692C] shadow-sm">
+                Total rise {formatFeetInches(detail.totalRise)}
+              </div>
+            </Html>
+          </group>
+        )}
+
+        {detail && detail.kind === 'wall' && (
+          <group key="wall-detail-dims">
+            <Html
+              position={[
+                (detail.wall.start.x + detail.wall.end.x) / 2,
+                detail.base + detail.wall.height + 0.3,
+                (detail.wall.start.y + detail.wall.end.y) / 2,
+              ]}
+              center={false}
+              occlude={false}
+            >
+              <div className="pointer-events-none whitespace-nowrap rounded bg-white/90 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#C4692C] shadow-sm">
+                {detail.wall.type} wall — {Math.round(detail.wall.thickness * 1000)}mm thick, {formatFeetInches(detail.wall.height)} high
+                {detail.wall.fireRatingMinutes ? ` · ${detail.wall.fireRatingMinutes}min fire rating` : ''}
+              </div>
+            </Html>
+          </group>
+        )}
+
+        {detail && detail.kind === 'balcony' && (
+          <group key="balcony-detail-dims">
+            <Html
+              position={[detail.center.x, detail.base + detail.balcony.thickness + 0.3, detail.center.y]}
+              center={false}
+              occlude={false}
+            >
+              <div className="pointer-events-none whitespace-nowrap rounded bg-white/90 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#C4692C] shadow-sm">
+                Balcony slab — {Math.round(detail.balcony.thickness * 1000)}mm thick
+              </div>
+            </Html>
+          </group>
+        )}
+
+        {detail && detail.kind === 'railing' && (
+          <group key="railing-detail-dims">
+            <Html
+              position={[
+                (detail.railing.start.x + detail.railing.end.x) / 2,
+                detail.base + detail.railing.height + 0.3,
+                (detail.railing.start.y + detail.railing.end.y) / 2,
+              ]}
+              center={false}
+              occlude={false}
+            >
+              <div className="pointer-events-none whitespace-nowrap rounded bg-white/90 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#C4692C] shadow-sm">
+                Railing — {formatFeetInches(detail.railing.height)} high, {Math.round(detail.railing.postSpacing * 1000)}mm post spacing
+              </div>
+            </Html>
+          </group>
+        )}
+
+        {detail && detail.kind === 'parapet' && (
+          <group key="parapet-detail-dims">
+            <Html
+              position={[
+                (detail.parapet.start.x + detail.parapet.end.x) / 2,
+                detail.base + detail.parapet.height + 0.3,
+                (detail.parapet.start.y + detail.parapet.end.y) / 2,
+              ]}
+              center={false}
+              occlude={false}
+            >
+              <div className="pointer-events-none whitespace-nowrap rounded bg-white/90 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#C4692C] shadow-sm">
+                Parapet — {formatFeetInches(detail.parapet.height)} high, {Math.round(detail.parapet.thickness * 1000)}mm thick
+              </div>
+            </Html>
+          </group>
+        )}
+
+        {detail && detail.kind === 'opening' && (
+          <group key="opening-detail-dims">
+            <Html
+              position={[detail.ref.x, detail.base + detail.opening.sillHeight + detail.opening.height + 0.3, detail.ref.y]}
+              center={false}
+              occlude={false}
+            >
+              <div className="pointer-events-none whitespace-nowrap rounded bg-white/90 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#C4692C] shadow-sm">
+                {detail.opening.kind === 'DOOR' ? 'Door' : 'Window'}
+                {detail.opening.tag ? ` ${detail.opening.tag}` : ''} — {Math.round(detail.opening.width * 1000)}mm ×{' '}
+                {Math.round(detail.opening.height * 1000)}mm
+                {detail.opening.kind === 'WINDOW' ? `, sill ${Math.round(detail.opening.sillHeight * 1000)}mm` : ''}
+              </div>
+            </Html>
+          </group>
+        )}
 
         <OrbitControls target={target} enableRotate={false} makeDefault />
       </Canvas>

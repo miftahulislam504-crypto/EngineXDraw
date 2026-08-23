@@ -3,6 +3,7 @@ import type { MaterialThemeId, EnvironmentPreset } from '@/lib/render-theme';
 import type {
   LibraryCategory,
   OccupancyType,
+  PaintSpec,
   Wall,
   ShaftType,
   SiteBoundaryEdge,
@@ -279,6 +280,7 @@ export interface Translations {
   wallTypes: Record<Wall['type'], string>;
   doorSwingDirections: Record<DoorSwingDirection, string>;
   occupancyTypes: Record<OccupancyType, string>;
+  paintSheens: Record<NonNullable<PaintSpec['sheen']>, string>;
   libraryCategories: Record<Exclude<LibraryCategory, 'CUSTOM'>, string>;
   shaftTypes: Record<ShaftType, string>;
   properties: {
@@ -290,6 +292,7 @@ export interface Translations {
     propertiesHeader: string;
     material: string;
     materialPlaceholder: string;
+    gutterWidth: string;
     libraryButton: string;
     color: string;
     resetColor: string;
@@ -330,6 +333,15 @@ export interface Translations {
     viewDirectionLeft: string;
     viewDirectionRight: string;
     viewSectionButton: string;
+    sectionDetailTarget: string;
+    sectionDetailTargetNone: string;
+    sectionDetailTargetStairGroup: string;
+    sectionDetailTargetWallGroup: string;
+    sectionDetailTargetBalconyGroup: string;
+    sectionDetailTargetRailingGroup: string;
+    sectionDetailTargetParapetGroup: string;
+    sectionDetailTargetOpeningGroup: string;
+    sectionDetailTargetHint: string;
     shaftType: string;
     startLevel: string;
     endLevel: string;
@@ -360,6 +372,13 @@ export interface Translations {
     wallFinishPlaceholder: string;
     ceilingFinish: string;
     ceilingFinishPlaceholder: string;
+    paintWalls: string;
+    paintCeiling: string;
+    paintColorName: string;
+    paintColorNamePlaceholder: string;
+    paintCode: string;
+    paintCodePlaceholder: string;
+    paintSheen: string;
   };
   libraryPanel: {
     title: string;
@@ -439,9 +458,25 @@ export interface Translations {
     viewportRoofPlan: string;
     viewportSitePlan: string;
     viewportCoverSheet: string;
+    viewportInfoSheet: string;
+    infoSheetKind: string;
+    infoSheetKindProjectInfo: string;
+    infoSheetKindClientInfo: string;
+    infoSheetKindSiteInfo: string;
+    infoSheetKindDesignCriteria: string;
+    infoSheetKindCodesStandards: string;
+    infoSheetKindSiteLocation: string;
+    infoSheetKindSiteSurvey: string;
+    infoSheetBodyLabel: string;
+    infoSheetBodyPlaceholderDesignCriteria: string;
+    infoSheetBodyPlaceholderCodesStandards: string;
+    infoSheetBodyPlaceholderSiteLocation: string;
+    infoSheetBodyPlaceholderSiteSurvey: string;
     floor: string;
     direction: string;
     sectionLine: string;
+    sectionLineDetailStair: string;
+    sectionLineDetailWall: string;
     noSectionLinesYet: string;
     scaleLabel: string;
     scaleLabelPlaceholder: string;
@@ -480,6 +515,44 @@ export interface Translations {
     coverSheetRevisionColDate: string;
     coverSheetRevisionColDescription: string;
     coverSheetRevisionPlaceholder: string;
+
+    // Info Sheets (Audit Gap Closure Phase 1 — viewportType === 'infoSheet')
+    infoSheetProjectInfoTitle: string;
+    infoSheetClientInfoTitle: string;
+    infoSheetSiteInfoTitle: string;
+    infoSheetDesignCriteriaTitle: string;
+    infoSheetCodesStandardsTitle: string;
+    infoSheetSiteLocationTitle: string;
+    infoSheetSiteSurveyTitle: string;
+    infoSheetRowProjectName: string;
+    infoSheetRowProjectCode: string;
+    infoSheetRowLocation: string;
+    infoSheetRowDescription: string;
+    infoSheetRowStatus: string;
+    infoSheetRowClientName: string;
+    infoSheetRowBuildingName: string;
+    infoSheetRowBuildingType: string;
+    infoSheetRowFloorCount: string;
+    infoSheetRowTotalArea: string;
+    infoSheetRowSiteAddress: string;
+    infoSheetRowLandArea: string;
+    infoSheetRowZoningType: string;
+    infoSheetRowRoadWidth: string;
+    infoSheetRowSetbackFront: string;
+    infoSheetRowSetbackRear: string;
+    infoSheetRowSetbackSide: string;
+    infoSheetBodyEmptyState: string;
+    sheetEmphasisLabel: string;
+    sheetEmphasisHint: string;
+    sheetEmphasisParking: string;
+    sheetEmphasisLandscape: string;
+    sheetEmphasisFurniture: string;
+    sheetEmphasisKitchen: string;
+    sheetEmphasisBathroom: string;
+    sheetEmphasisRoofDrain: string;
+    sheetEmphasisDownspout: string;
+    sheetEmphasisParapet: string;
+    sheetEmphasisGutter: string;
 
     // Batch/Combined PDF export (Phase 4)
     batchExportTitle: string;
@@ -675,6 +748,7 @@ export interface Translations {
     stairSchedule: string;
     railingSchedule: string;
     finishSchedule: string;
+    paintSchedule: string;
     foundationSchedule: string;
     footingSchedule: string;
     gridLineSchedule: string;
@@ -700,6 +774,10 @@ export interface Translations {
     scheduleColFinishFloor: string;
     scheduleColFinishWalls: string;
     scheduleColFinishCeiling: string;
+    scheduleColSurface: string;
+    scheduleColPaintColor: string;
+    scheduleColPaintCode: string;
+    scheduleColPaintSheen: string;
     scheduleColThickness: string;
     scheduleColGridLabel: string;
     scheduleColOrientation: string;

@@ -11,7 +11,7 @@ import { subscribeToShafts } from '@/lib/shafts';
 import { subscribeToSiteBoundary } from '@/lib/siteBoundary';
 import { subscribeToSheet, subscribeToSheets } from '@/lib/sheets';
 import { subscribeToLibrary, ensureLibrarySeeded } from '@/lib/library';
-import { exportSheetToPdf, exportCoverSheetToPdf } from '@/lib/sheet-export';
+import { exportSheetToPdf, exportCoverSheetToPdf, exportInfoSheetToPdf } from '@/lib/sheet-export';
 import { SheetCapture, type SheetCaptureResult } from '@/components/design/SheetCapture';
 import { useI18nStore } from '@/lib/i18n';
 
@@ -113,7 +113,8 @@ export default function SheetDetailPage() {
     setCapture(result);
   }, []);
 
-  const canExport = !!sheet && capture?.sheetId === sheet.id && (!!capture.image || !!capture.coverSheetData);
+  const canExport =
+    !!sheet && capture?.sheetId === sheet.id && (!!capture.image || !!capture.coverSheetData || !!capture.infoSheetData);
 
   async function handleExport() {
     if (!sheet || !capture || capture.sheetId !== sheet.id) return;
@@ -121,6 +122,8 @@ export default function SheetDetailPage() {
     try {
       if (capture.coverSheetData) {
         exportCoverSheetToPdf(sheet, capture.coverSheetData, capture.sidebar);
+      } else if (capture.infoSheetData) {
+        exportInfoSheetToPdf(sheet, capture.infoSheetData, capture.sidebar);
       } else if (capture.image) {
         await exportSheetToPdf(sheet, capture.image, capture.sidebar);
       }
@@ -170,7 +173,7 @@ export default function SheetDetailPage() {
               <span>{sheet.name}</span>
               <span>
                 {t.sheetsPage.sheetNumber}: {sheet.sheetNumber || '—'}
-                {sheet.viewportType !== 'coverSheet' && (
+                {sheet.viewportType !== 'coverSheet' && sheet.viewportType !== 'infoSheet' && (
                   <>
                     {' '}
                     · {t.sheetsPage.scaleLabel}: {sheet.scaleLabel || '—'}

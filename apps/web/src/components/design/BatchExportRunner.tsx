@@ -84,6 +84,7 @@ export function BatchExportRunner({
       sheet: s,
       image: captures[s.id].image,
       coverSheetData: captures[s.id].coverSheetData,
+      infoSheetData: captures[s.id].infoSheetData,
       sidebar: captures[s.id].sidebar,
     }));
     exportSheetsBatchToPdf(inputs, overrides, filename)

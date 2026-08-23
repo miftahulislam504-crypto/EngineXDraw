@@ -11,7 +11,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from './firebase-client';
-import type { Floor, SectionLine, Sheet, SheetSize } from '@archibim/object-model';
+import type { Floor, InfoSheetKind, SectionLine, Sheet, SheetSize } from '@archibim/object-model';
 
 function sheetsCol(projectId: string, buildingId: string) {
   return collection(db, 'projects', projectId, 'buildings', buildingId, 'sheets');
@@ -119,15 +119,29 @@ const ELEVATION_ORDER_LENGTH = 4;
  *     with no floorId/direction/sectionLineId at all (see
  *     SheetViewportType's own doc comment for why); always generated
  *     exactly once per building, never once per floor
+ *   - Seven Info Sheets (A001–A007 — Audit Gap Closure Phases 1 & 2):
+ *     Project Information, Client/Owner Information, Site Information,
+ *     Design Criteria & Assumptions, Applicable Codes & Standards, Site
+ *     Location Plan, Site Survey Plan. Same "exactly once per building"
+ *     reasoning as the Cover Sheet, matched by viewportType +
+ *     infoSheetKind rather than by floorId/direction/sectionLineId (see
+ *     hasInfoSheet below) since InfoSheetKind is what distinguishes one
+ *     Info Sheet from another. Generated whenever the Cover Sheet is
+ *     (same `floors.length > 0` gate) since these are front-matter
+ *     sheets a drawing set carries alongside the Cover Sheet, not sheets
+ *     tied to any one floor. Site Location Plan/Site Survey Plan are
+ *     text-sheet InfoSheetKinds rather than drawn-geometry sheets
+ *     because this app has no GIS/map or topographic-survey feature to
+ *     draw either from (see InfoSheetKind's own doc comment).
  *   - No cover render sheet: SheetViewportType has no 'render' variant
  *     (see sheets.ts's own type) — the photoreal Visualization view
  *     isn't a Sheet in this app's model, so it's out of scope here
  *
  * Idempotent by design: skips any viewport that already has a sheet
- * (matched by viewportType + floorId/direction/sectionLineId), so
- * calling this again after adding a new floor or drawing a new section
- * line only creates the sheets that are newly missing rather than
- * duplicating what's already there.
+ * (matched by viewportType + floorId/direction/sectionLineId/
+ * infoSheetKind, whichever applies), so calling this again after adding
+ * a new floor or drawing a new section line only creates the sheets
+ * that are newly missing rather than duplicating what's already there.
  *
  * Returns how many sheets of each kind were actually created, so the
  * caller can show a meaningful "created 6, skipped 3 already existing"
@@ -158,6 +172,8 @@ export async function generateStandardSheetSet(
   const hasSitePlanSheet = (floorId: string) =>
     existingSheets.some((s) => s.viewportType === 'sitePlan' && s.floorId === floorId);
   const hasCoverSheet = () => existingSheets.some((s) => s.viewportType === 'coverSheet');
+  const hasInfoSheet = (kind: InfoSheetKind) =>
+    existingSheets.some((s) => s.viewportType === 'infoSheet' && s.infoSheetKind === kind);
 
   const toCreate: Array<Omit<Sheet, 'id' | 'buildingId' | 'createdAt' | 'updatedAt'>> = [];
   let eligibleCount = floors.length + ELEVATION_ORDER_LENGTH + sectionLines.length;
@@ -263,6 +279,32 @@ export async function generateStandardSheetSet(
         date,
       });
     }
+
+    const INFO_SHEET_SET: Array<{ kind: InfoSheetKind; name: string; sheetNumber: string }> = [
+      { kind: 'projectInfo', name: 'Project Information', sheetNumber: 'A001' },
+      { kind: 'clientInfo', name: 'Client/Owner Information', sheetNumber: 'A002' },
+      { kind: 'siteInfo', name: 'Site Information', sheetNumber: 'A003' },
+      { kind: 'designCriteria', name: 'Design Criteria & Assumptions', sheetNumber: 'A004' },
+      { kind: 'codesStandards', name: 'Applicable Codes & Standards', sheetNumber: 'A005' },
+      { kind: 'siteLocation', name: 'Site Location Plan', sheetNumber: 'A006' },
+      { kind: 'siteSurvey', name: 'Site Survey Plan', sheetNumber: 'A007' },
+    ];
+    INFO_SHEET_SET.forEach(({ kind, name, sheetNumber }) => {
+      eligibleCount += 1;
+      if (hasInfoSheet(kind)) return;
+      toCreate.push({
+        name,
+        sheetNumber,
+        size,
+        viewportType: 'infoSheet',
+        infoSheetKind: kind,
+        // Same "no drawing viewport, no scale" reasoning as the Cover
+        // Sheet just above.
+        scaleLabel: '',
+        drawnBy,
+        date,
+      });
+    });
   }
 
   for (const sheet of toCreate) {

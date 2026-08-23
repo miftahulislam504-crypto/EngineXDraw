@@ -22,6 +22,19 @@ export interface ResolvedMaterial {
   color: string;
   roughness?: number;
   metalness?: number;
+  /**
+   * Audit Gap Closure Phase 3 (item 12 — Building Material/Finish
+   * Elevation) — the human-readable material name to print in an
+   * elevation callout tag, e.g. "Face Brick" or "Terracotta Tile
+   * Cladding". Comes from the matched LibraryItem's own `name` field
+   * when one resolves; falls back to the element's raw `materialLabel`
+   * string when no library item matched (the same "best-effort, not a
+   * hard foreign key" fallback path resolveMaterial's own doc comment
+   * already describes for color); undefined only when neither exists,
+   * meaning this element has no material assigned at all and a caller
+   * drawing callouts should skip labeling it.
+   */
+  name?: string;
 }
 
 /** Builds an id→item and name→item lookup once per library snapshot,
@@ -58,7 +71,7 @@ export function resolveMaterial(
   fallbackColor: string,
 ): ResolvedMaterial {
   if (element.colorHex) {
-    return { color: element.colorHex };
+    return { color: element.colorHex, name: element.materialLabel };
   }
 
   const item =
@@ -66,7 +79,7 @@ export function resolveMaterial(
     (element.materialLabel ? lookup.byName.get(element.materialLabel) : undefined);
 
   if (!item || !item.colorHex) {
-    return { color: fallbackColor };
+    return { color: fallbackColor, name: element.materialLabel };
   }
-  return { color: item.colorHex, roughness: item.roughness, metalness: item.metalness };
+  return { color: item.colorHex, roughness: item.roughness, metalness: item.metalness, name: item.name };
 }

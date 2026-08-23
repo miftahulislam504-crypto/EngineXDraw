@@ -20,6 +20,8 @@ import {
   RailingMesh,
   StairMesh,
   CurtainWallMesh,
+  ParapetMesh,
+  GutterMesh,
   SkylightMesh,
 } from './Live3DView';
 
@@ -40,6 +42,21 @@ export interface BuildingElevationViewProps {
    * placed object, same idea as Room Tags reusing Room data). Defaults
    * to on since it's genuinely useful reference info, not clutter. */
   showLevels?: boolean;
+  /**
+   * Audit Gap Closure Phase 3 (item 12 — Building Material/Finish
+   * Elevation) — draws one leader-line + name tag per DISTINCT material
+   * actually visible on this elevation face (walls and the roof), e.g.
+   * "Face Brick" pointing at the brick-faced walls. Deliberately one
+   * callout per unique material rather than one per wall/roof element —
+   * a real finish-elevation sheet tags each material ONCE with a leader
+   * to a representative surface, not every individual wall segment,
+   * which is what any real drafting convention does and what keeps a
+   * building with many walls sharing one material readable instead of
+   * covered in duplicate tags. Defaults to off: this is Sheet/print-time
+   * annotation, not something the free-look Design Studio elevation
+   * needs cluttering its live-editing view.
+   */
+  showMaterialCallouts?: boolean;
   /** Fires whenever the underlying WebGL canvas element and/or the
    * camera's effective world-units-per-pixel changes — used by the
    * Sheet export flow both to capture this view as an image AND to know
@@ -115,6 +132,7 @@ export function BuildingElevationView({
   direction,
   height = 600,
   showLevels = true,
+  showMaterialCallouts = false,
   onCanvasReady,
   libraryItems = [],
 }: BuildingElevationViewProps) {
@@ -176,6 +194,42 @@ export function BuildingElevationView({
     }
     return Array.from(seen.values()).sort((a, b) => a.position - b.position);
   }, [floors, floorElements, direction]);
+
+  // Audit Gap Closure Phase 3 (item 12) — one entry per distinct material
+  // name actually in use on this elevation face, each carrying the world
+  // position of the FIRST wall/roof segment found with that material (a
+  // representative anchor point for the leader line — see
+  // showMaterialCallouts's own doc comment for why one tag per material
+  // rather than one per element). Walls contribute their visual midpoint
+  // at mid-height; roofs contribute their boundary's centroid at roof
+  // elevation. Recomputed whenever the floor geometry or the library
+  // (which is what materialLookup/resolveMaterial actually read) changes.
+  const materialCallouts = useMemo(() => {
+    if (!showMaterialCallouts) return [];
+    const seen = new Map<string, { name: string; position: [number, number, number] }>();
+    for (const floor of floors) {
+      const elements = floorElements[floor.id];
+      if (!elements) continue;
+      const base = baseElevations.get(floor.id) ?? 0;
+      for (const wall of elements.walls) {
+        const material = resolveMaterial(wall, materialLookup, '#E7E9EE');
+        if (!material.name || seen.has(material.name)) continue;
+        const midX = (wall.start.x + wall.end.x) / 2;
+        const midZ = (wall.start.y + wall.end.y) / 2;
+        seen.set(material.name, { name: material.name, position: [midX, base + wall.height / 2, midZ] });
+      }
+      for (const roof of elements.roofs) {
+        const material = resolveMaterial(roof, materialLookup, '#8B5E4A');
+        if (!material.name || seen.has(material.name)) continue;
+        const xs = roof.boundary.map((p) => p.x);
+        const ys = roof.boundary.map((p) => p.y);
+        const cx = xs.reduce((a, b) => a + b, 0) / xs.length;
+        const cz = ys.reduce((a, b) => a + b, 0) / ys.length;
+        seen.set(material.name, { name: material.name, position: [cx, base + roof.elevation, cz] });
+      }
+    }
+    return Array.from(seen.values());
+  }, [floors, floorElements, baseElevations, materialLookup, showMaterialCallouts]);
 
   const far = Math.max(bounds.spanX, bounds.spanZ, bounds.maxTop) * 4 + 50;
   const midY = bounds.maxTop / 2;
@@ -365,6 +419,12 @@ export function BuildingElevationView({
               {elements.curtainWalls.map((cw) => (
                 <CurtainWallMesh key={cw.id} curtainWall={cw} selected={false} />
               ))}
+              {elements.parapets.map((p) => (
+                <ParapetMesh key={p.id} parapet={p} selected={false} />
+              ))}
+              {elements.gutters.map((g) => (
+                <GutterMesh key={g.id} gutter={g} selected={false} />
+              ))}
               {elements.skylights.map((sky) => {
                 const roof = elements.roofs.find((r) => r.id === sky.roofId);
                 if (!roof) return null;
@@ -414,6 +474,31 @@ export function BuildingElevationView({
             </group>
           );
         })}
+
+        {showMaterialCallouts &&
+          materialCallouts.map((callout, index) => {
+            // Leader line runs outward from the material's anchor point,
+            // toward the camera-facing side, offset vertically per-index
+            // so multiple callouts don't stack on the same horizontal
+            // line and become unreadable.
+            const outwardOffset = 2.5 + index * 0.6;
+            const [ax, ay, az] = callout.position;
+            let tip: [number, number, number];
+            if (direction === 'N') tip = [ax, ay, az + outwardOffset];
+            else if (direction === 'S') tip = [ax, ay, az - outwardOffset];
+            else if (direction === 'E') tip = [ax + outwardOffset, ay, az];
+            else tip = [ax - outwardOffset, ay, az];
+            return (
+              <group key={`material-callout-${callout.name}`}>
+                <Line points={[callout.position, tip]} color="#2D6CDF" lineWidth={1} />
+                <Html position={tip} center={false} occlude={false}>
+                  <div className="pointer-events-none -translate-y-1/2 whitespace-nowrap rounded bg-white/90 px-1.5 py-0.5 font-mono text-[10px] font-medium text-[#2D6CDF] shadow-sm">
+                    {callout.name}
+                  </div>
+                </Html>
+              </group>
+            );
+          })}
 
         {showLevels &&
           floors.map((floor, floorIndex) => {

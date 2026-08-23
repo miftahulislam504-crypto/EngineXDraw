@@ -247,6 +247,7 @@ const VIEWPORT_DRAWING_TYPE_LABEL: Record<SheetViewportType, string> = {
   elevation: 'ARCHITECTURAL DRAWING',
   section: 'ARCHITECTURAL DRAWING',
   coverSheet: 'ARCHITECTURAL DRAWING',
+  infoSheet: 'ARCHITECTURAL DRAWING',
 };
 
 /** One bordered info block in the sidebar — a small muted label row
@@ -872,6 +873,101 @@ function drawCoverSheetPage(pdf: jsPDF, sheet: Sheet, data: CoverSheetExportData
   drawSidebar(pdf, layout.sidebarX, margin, layout.sidebarWidth, heightMm - margin * 2, sidebar);
 }
 
+/**
+ * Audit Gap Closure Phase 1 — the five front-matter Info Sheets (Project
+ * Information, Client/Owner Information, Site Information, Design
+ * Criteria & Assumptions, Applicable Codes & Standards). Same "text-only
+ * page, no captured drawing viewport" shape as CoverSheetExportData —
+ * see infoSheetKind's own doc comment in object-model/sheets.ts for why
+ * these share one export data shape instead of five.
+ *
+ * `rows` is a flat label/value list (rendered as a two-column info
+ * table, same drawSimpleTable helper the Cover Sheet's Drawing Index
+ * uses) for the three data-backed kinds (projectInfo/clientInfo/
+ * siteInfo); `bodyText` is the free-text block (rendered as wrapped
+ * paragraph lines) for the two free-text kinds (designCriteria/
+ * codesStandards). A sheet only ever populates one of the two —
+ * whichever InfoSheetKind it is — the other stays empty.
+ */
+export interface InfoSheetExportData {
+  sheetTitle: string;
+  notProvidedLabel: string;
+  rows: Array<{ label: string; value: string }>;
+  bodyText?: string;
+  bodyEmptyState: string;
+}
+
+function drawInfoSheetPage(pdf: jsPDF, sheet: Sheet, data: InfoSheetExportData, sidebar: SidebarContent) {
+  const { widthMm, heightMm } = SHEET_SIZES[sheet.size];
+  const margin = 8;
+  const layout = computeSidebarLayout(widthMm, heightMm, margin);
+  const { bodyX, bodyY, bodyWidth: frameWidth, bodyHeight: frameHeight } = layout;
+  const bodyPad = 6;
+
+  pdf.setLineWidth(0.5);
+  pdf.setDrawColor(0, 0, 0);
+  pdf.rect(bodyX, bodyY, frameWidth, frameHeight);
+
+  let y = bodyY + bodyPad + 6;
+  const contentX = bodyX + bodyPad;
+  const contentRight = bodyX + frameWidth - bodyPad;
+
+  pdf.setFontSize(15);
+  pdf.setFont('helvetica', 'bold');
+  pdf.text(data.sheetTitle, contentX, y);
+  y += 10;
+
+  if (data.rows.length > 0) {
+    // A plain label/value list rather than drawSimpleTable — that helper
+    // always draws a header row + separator line, which reads as an odd
+    // blank strip above two unlabeled columns when there's no real
+    // column header to show (this is a front-matter info page, not a
+    // schedule table).
+    const labelWidth = 55;
+    const rowHeight = 6.5;
+    pdf.setFontSize(9);
+    for (const row of data.rows) {
+      if (y + rowHeight > bodyY + frameHeight - bodyPad) break; // stop at the frame rather than overflow the sheet border
+      pdf.setFont('helvetica', 'normal');
+      pdf.setTextColor(90, 90, 90);
+      pdf.text(row.label, contentX, y);
+      pdf.setTextColor(20, 20, 20);
+      pdf.text(row.value || data.notProvidedLabel, contentX + labelWidth, y);
+      y += rowHeight;
+    }
+    pdf.setTextColor(0, 0, 0);
+    y += 4;
+  }
+
+  if (data.bodyText !== undefined) {
+    pdf.setFontSize(9);
+    pdf.setFont('helvetica', 'normal');
+    const maxWidth = contentRight - contentX;
+    const trimmed = data.bodyText.trim();
+    if (!trimmed) {
+      pdf.text(data.bodyEmptyState, contentX, y);
+      y += 6;
+    } else {
+      const lines: string[] = pdf.splitTextToSize(trimmed, maxWidth);
+      const lineHeight = 5;
+      for (const line of lines) {
+        if (y > bodyY + frameHeight - bodyPad) break; // stop drawing past the frame rather than overflow the sheet border
+        pdf.text(line, contentX, y);
+        y += lineHeight;
+      }
+    }
+  }
+
+  drawSidebar(pdf, layout.sidebarX, margin, layout.sidebarWidth, heightMm - margin * 2, sidebar);
+}
+
+export function exportInfoSheetToPdf(sheet: Sheet, data: InfoSheetExportData, sidebar: SidebarContent) {
+  const { widthMm, heightMm } = SHEET_SIZES[sheet.size];
+  const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [widthMm, heightMm] });
+  drawInfoSheetPage(pdf, sheet, data, sidebar);
+  pdf.save(`${sheet.sheetNumber || sheet.name || 'info-sheet'}.pdf`);
+}
+
 export function exportCoverSheetToPdf(sheet: Sheet, data: CoverSheetExportData, sidebar: SidebarContent) {
   const { widthMm, heightMm } = SHEET_SIZES[sheet.size];
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [widthMm, heightMm] });
@@ -901,12 +997,14 @@ export function exportCoverSheetToPdf(sheet: Sheet, data: CoverSheetExportData, 
 
 export interface BatchSheetInput {
   sheet: Sheet;
-  /** Present for every viewport type except 'coverSheet' (which uses
-   * coverSheetData instead) — the already-captured drawing image, same
-   * shape exportSheetToPdf takes. */
+  /** Present for every viewport type except 'coverSheet'/'infoSheet'
+   * (which use coverSheetData/infoSheetData instead) — the
+   * already-captured drawing image, same shape exportSheetToPdf takes. */
   image?: SheetExportImage;
   /** Present only when sheet.viewportType === 'coverSheet'. */
   coverSheetData?: CoverSheetExportData;
+  /** Present only when sheet.viewportType === 'infoSheet'. */
+  infoSheetData?: InfoSheetExportData;
   /** This sheet's own sidebar content (sheetNumber/drawingTitle/
    * scaleLabel differ per sheet; companyName/client/location etc. are
    * typically the SAME object reused across every sheet in a batch —
@@ -975,7 +1073,7 @@ export function exportSheetsBatchToPdf(
     const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [firstSize.widthMm, firstSize.heightMm] });
 
     for (let i = 0; i < inputs.length; i++) {
-      const { sheet: rawSheet, image, coverSheetData, sidebar: rawSidebar } = inputs[i];
+      const { sheet: rawSheet, image, coverSheetData, infoSheetData, sidebar: rawSidebar } = inputs[i];
       const sheet = applyOverride(rawSheet, overrides);
       const sidebar = applySidebarOverride(rawSidebar, overrides);
       if (i > 0) {
@@ -985,6 +1083,8 @@ export function exportSheetsBatchToPdf(
       try {
         if (sheet.viewportType === 'coverSheet' && coverSheetData) {
           drawCoverSheetPage(pdf, sheet, coverSheetData, sidebar);
+        } else if (sheet.viewportType === 'infoSheet' && infoSheetData) {
+          drawInfoSheetPage(pdf, sheet, infoSheetData, sidebar);
         } else if (image) {
           await drawSheetPage(pdf, sheet, image, sidebar);
         }

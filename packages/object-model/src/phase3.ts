@@ -31,8 +31,35 @@ export interface Room {
   finishFloor?: string;
   finishWalls?: string;
   finishCeiling?: string;
+  /**
+   * Audit Gap Closure Phase 7 (item 26 — Paint Schedule) — paint-specific
+   * detail for the wall and ceiling finishes, kept separate from
+   * finishWalls/finishCeiling rather than folded into those strings.
+   * finishWalls/finishCeiling answer "what MATERIAL is this surface"
+   * (which could be paint, tile, wood paneling, exposed brick, …); a
+   * Paint Schedule needs a different, narrower question answered only
+   * for the rooms where that material happens to be paint — brand/color
+   * name, a paint code a supplier can quote against, and sheen — so this
+   * is its own optional field a person fills in only when finishWalls/
+   * finishCeiling is actually paint, rather than overloading the finish
+   * string itself with a mini paint spec every time.
+   */
+  paintWalls?: PaintSpec;
+  paintCeiling?: PaintSpec;
   createdAt: FirestoreTimestampLike;
   updatedAt: FirestoreTimestampLike;
+}
+
+/** One surface's paint specification — brand/color name, a supplier-
+ * quotable code, and sheen. All optional/free text (no controlled
+ * vocabulary of paint brands or colors is maintained here) since paint
+ * products and naming vary by manufacturer and market — same "all free
+ * text, missing renders as an em dash" philosophy TitleBlockInfo and
+ * InfoSheet's free-text kinds already use. */
+export interface PaintSpec {
+  colorName?: string; // e.g. "Cloud White", "Sage Green"
+  code?: string; // e.g. a manufacturer's product/color code
+  sheen?: 'matte' | 'eggshell' | 'satin' | 'semiGloss' | 'gloss';
 }
 
 // ─── Property System (extends Wall — see module note below) ─────────────

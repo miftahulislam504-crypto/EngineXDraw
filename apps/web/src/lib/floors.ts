@@ -23,9 +23,11 @@ import type {
   Floor,
   Footing,
   Foundation,
+  Gutter,
   GridLine,
   Note,
   Opening,
+  Parapet,
   PlacedObject,
   Railing,
   Ramp,
@@ -846,6 +848,9 @@ export const dimensionCrud = makeElementCrud<Dimension>('dimensions');
 export const noteCrud = makeElementCrud<Note>('notes');
 export const gridLineCrud = makeElementCrud<GridLine>('gridLines');
 export const sectionLineCrud = makeElementCrud<SectionLine>('sectionLines');
+// Audit Gap Closure Phase 5 (items 16-17)
+export const parapetCrud = makeElementCrud<Parapet>('parapets');
+export const gutterCrud = makeElementCrud<Gutter>('gutters');
 
 /** Live auto-tag for a Door/Window Tag annotation — "D1", "W2", etc.,
  * numbered by this opening's order among same-kind openings on the floor.
@@ -924,6 +929,9 @@ export interface FloorElements {
   dimensions: Dimension[];
   notes: Note[];
   gridLines: GridLine[];
+  // Audit Gap Closure Phase 5 (items 16-17)
+  parapets: Parapet[];
+  gutters: Gutter[];
 }
 
 export const EMPTY_FLOOR_ELEMENTS: FloorElements = {
@@ -948,6 +956,8 @@ export const EMPTY_FLOOR_ELEMENTS: FloorElements = {
   dimensions: [],
   notes: [],
   gridLines: [],
+  parapets: [],
+  gutters: [],
 };
 
 /** Subscribes to every element type on one floor at once, emitting a
@@ -1049,6 +1059,14 @@ export function subscribeToFloorElements(
     }),
     gridLineCrud.subscribe(projectId, buildingId, floorId, (v) => {
       current = { ...current, gridLines: v };
+      emit();
+    }),
+    parapetCrud.subscribe(projectId, buildingId, floorId, (v) => {
+      current = { ...current, parapets: v };
+      emit();
+    }),
+    gutterCrud.subscribe(projectId, buildingId, floorId, (v) => {
+      current = { ...current, gutters: v };
       emit();
     }),
   ];

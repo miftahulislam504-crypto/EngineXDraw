@@ -340,6 +340,79 @@ export interface CurtainWall {
   updatedAt: FirestoreTimestampLike;
 }
 
+/**
+ * Audit Gap Closure Phase 5 (item 16) — a low wall running along a roof
+ * edge. Deliberately shaped exactly like CurtainWall/Wall (start/end/
+ * height/thickness — a linear run, not a polygon boundary like Roof
+ * itself) rather than derived from the Roof's boundary, because a real
+ * parapet doesn't have to run the full perimeter — a person draws
+ * exactly the runs they want (e.g. skipping an edge with a roof access
+ * door, or wrapping only the street-facing edges for a partial-parapet
+ * look), the same way Wall segments are drawn individually rather than
+ * auto-generated from a room's boundary.
+ *
+ * `elevation` is the parapet's OWN base height above floor level
+ * (typically matching the Roof's own `elevation` so it sits right at
+ * the roof surface), not a reference back to a specific Roof document —
+ * a parapet still makes sense to model even before a Roof exists on
+ * this floor (a person might draw the parapet lines while laying out
+ * the roof plan first), so this doesn't take a roofId at all. Real
+ * bearing for Load Calculation (this affects Structural too — flagged
+ * to Miftahul per the audit's own cross-app note) comes from `height` +
+ * `thickness` + whatever `materialLabel` resolves to, same as Wall.
+ */
+export interface Parapet {
+  id: string;
+  floorId: string;
+  start: Point2D;
+  end: Point2D;
+  /** Meters above floor level — the parapet's own base, independent of
+   * any Roof document (see this interface's own doc comment for why). */
+  elevation: number;
+  height: number; // meters, typically 0.9–1.2m per BNBC guard-rail context
+  thickness: number; // meters
+  // Same optional Property-System pair as Wall/Roof — a parapet is
+  // frequently rendered/finished (coping, render, tiles) distinctly from
+  // the roof or the walls below it.
+  materialLabel?: string;
+  libraryItemId?: string;
+  createdAt: FirestoreTimestampLike;
+  updatedAt: FirestoreTimestampLike;
+}
+
+export const DEFAULT_PARAPET_HEIGHT = 1.0; // meters — BNBC-context guard-rail minimum territory
+export const DEFAULT_PARAPET_THICKNESS = 0.125; // meters — half-brick-ish, matches DEFAULT wall-thickness conventions elsewhere in this file
+
+/**
+ * Audit Gap Closure Phase 5 (item 17 — Roof Drainage) — a linear run
+ * along a roof edge collecting rainwater, feeding one or more Downspouts
+ * (see PlacedObjectCategory's own 'DOWNSPOUT' member below). Shaped
+ * exactly like Parapet (start/end/elevation, no polygon boundary) for
+ * the identical reason: a real gutter run doesn't have to trace a roof's
+ * whole perimeter, a person draws exactly the runs that exist.
+ *
+ * No `thickness`/`height` the way Parapet has — a gutter's cross-section
+ * (a shallow trough profile) isn't well-represented by a simple
+ * extruded-box height/thickness pair the way a parapet wall's solid mass
+ * is, so this only models what actually matters for a Roof Drainage
+ * Layout sheet: WHERE the gutter runs and how big a channel it is,
+ * not its exact profile geometry.
+ */
+export interface Gutter {
+  id: string;
+  floorId: string;
+  start: Point2D;
+  end: Point2D;
+  elevation: number; // meters above floor level — typically matches the adjacent Roof's own elevation
+  widthMm: number; // nominal channel width, e.g. 100/125/150mm — a real spec number, kept in mm since gutter sizes are conventionally specified that way rather than in meters
+  materialLabel?: string;
+  libraryItemId?: string;
+  createdAt: FirestoreTimestampLike;
+  updatedAt: FirestoreTimestampLike;
+}
+
+export const DEFAULT_GUTTER_WIDTH_MM = 125;
+
 /** An opening in a Roof, the horizontal-surface counterpart to a Window. */
 export interface Skylight {
   id: string;
@@ -367,13 +440,24 @@ export const DEFAULT_SKYLIGHT_DEPTH = 0.9;
 // resize, delete, see it in 2D/3D) even though there's no library of
 // actual furniture/fixture models yet. Phase 3 would replace the label
 // with a real catalog picker, not change this shape much.
+//
+// ROOF_DRAIN and DOWNSPOUT (Audit Gap Closure Phase 5, item 17) are
+// added to this same category list for a different reason than the
+// original 5: not because they need a future catalog, but because their
+// real-world footprint genuinely IS "a small box at a plan position" —
+// a roof drain inlet and a downspout's wall-hugging footprint are both
+// point-ish fixtures, not linear runs like Gutter/Parapet above. Reusing
+// this existing placeable-box mechanism means no new tool/rendering path
+// was needed for either.
 
 export type PlacedObjectCategory =
   | 'FURNITURE'
   | 'KITCHEN'
   | 'BATHROOM'
   | 'PARKING'
-  | 'LANDSCAPE';
+  | 'LANDSCAPE'
+  | 'ROOF_DRAIN'
+  | 'DOWNSPOUT';
 
 export interface PlacedObject {
   id: string;
@@ -413,6 +497,17 @@ export const PLACED_OBJECT_DEFAULTS: Record<
   BATHROOM: { label: 'Bathroom Fixture', width: 0.6, depth: 0.6, height: 0.8 },
   PARKING: { label: 'Parking Space', width: 2.5, depth: 5, height: 0.02 },
   LANDSCAPE: { label: 'Tree', width: 2, depth: 2, height: 3 },
+  // Real roof-drain inlet grates are typically 150-300mm across; kept
+  // small and roughly square, matching an actual inlet's footprint
+  // rather than the much larger furniture/parking defaults above.
+  ROOF_DRAIN: { label: 'Roof Drain', width: 0.25, depth: 0.25, height: 0.05 },
+  // A downspout's plan footprint is its pipe diameter — small and
+  // square-ish, hugging whichever wall it runs down; height here is a
+  // nominal marker height for the 2D/3D placed-box representation, not
+  // the pipe's real vertical run (which follows the building height, the
+  // same "this app has no true vertical-run modeling" honesty Ramp/Stair
+  // already apply to their own geometry).
+  DOWNSPOUT: { label: 'Downspout', width: 0.15, depth: 0.15, height: 0.3 },
 };
 
 export type ShaftType = 'ELEVATOR' | 'STAIR' | 'MECHANICAL' | 'OTHER';

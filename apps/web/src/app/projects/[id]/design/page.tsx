@@ -25,10 +25,12 @@ import type {
   Floor,
   Footing,
   Foundation,
+  Gutter,
   GridLine,
   Note,
   LibraryItem,
   Opening,
+  Parapet,
   PlacedObject,
   PlacedObjectCategory,
   Point2D,
@@ -79,6 +81,9 @@ import {
   DEFAULT_SKYLIGHT_WIDTH,
   DEFAULT_SKYLIGHT_DEPTH,
   PLACED_OBJECT_DEFAULTS,
+  DEFAULT_PARAPET_HEIGHT,
+  DEFAULT_PARAPET_THICKNESS,
+  DEFAULT_GUTTER_WIDTH_MM,
 } from '@archibim/object-model';
 import {
   joinCoincidentEndpoints,
@@ -146,6 +151,8 @@ import {
   noteCrud,
   gridLineCrud,
   sectionLineCrud,
+  parapetCrud,
+  gutterCrud,
   subscribeToFloorElements,
   type FloorElements,
 } from '@/lib/floors';
@@ -206,6 +213,8 @@ export default function DesignStudioPage() {
   const [stairs, setStairs] = useState<Stair[]>([]);
   const [balconies, setBalconies] = useState<Balcony[]>([]);
   const [curtainWalls, setCurtainWalls] = useState<CurtainWall[]>([]);
+  const [parapets, setParapets] = useState<Parapet[]>([]);
+  const [gutters, setGutters] = useState<Gutter[]>([]);
   const [skylights, setSkylights] = useState<Skylight[]>([]);
   const [placedObjects, setPlacedObjects] = useState<PlacedObject[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -488,6 +497,8 @@ export default function DesignStudioPage() {
       stairCrud.subscribe(projectId, buildingId, floorId, setStairs),
       balconyCrud.subscribe(projectId, buildingId, floorId, setBalconies),
       curtainWallCrud.subscribe(projectId, buildingId, floorId, setCurtainWalls),
+      parapetCrud.subscribe(projectId, buildingId, floorId, setParapets),
+      gutterCrud.subscribe(projectId, buildingId, floorId, setGutters),
       skylightCrud.subscribe(projectId, buildingId, floorId, setSkylights),
       placedObjectCrud.subscribe(projectId, buildingId, floorId, setPlacedObjects),
       subscribeToRooms(projectId, buildingId, floorId, setRooms),
@@ -870,6 +881,42 @@ export default function DesignStudioPage() {
     recordHistory({ action: 'create', kind: 'curtainWall', id, data });
   }
 
+  // Audit Gap Closure Phase 5 (item 16) — same chaining-line create shape
+  // as handleCreateCurtainWall above; elevation defaults to the current
+  // floor's roof elevation if one exists on this floor, so a parapet
+  // drawn right after laying out the roof sits at the roof surface
+  // without the person having to type the number themselves, but still
+  // falls back to 0 if no Roof exists yet on this floor (see Parapet's
+  // own doc comment for why it doesn't require one).
+  async function handleCreateParapet(start: { x: number; y: number }, end: { x: number; y: number }) {
+    if (!buildingId || !floorId) return;
+    if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
+    const data = {
+      start,
+      end,
+      elevation: roofs[0]?.elevation ?? 0,
+      height: DEFAULT_PARAPET_HEIGHT,
+      thickness: DEFAULT_PARAPET_THICKNESS,
+    };
+    const id = await parapetCrud.create(projectId, buildingId, floorId, data);
+    recordHistory({ action: 'create', kind: 'parapet', id, data });
+  }
+
+  // Audit Gap Closure Phase 5 (item 17) — same reasoning as
+  // handleCreateParapet above for the elevation default.
+  async function handleCreateGutter(start: { x: number; y: number }, end: { x: number; y: number }) {
+    if (!buildingId || !floorId) return;
+    if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
+    const data = {
+      start,
+      end,
+      elevation: roofs[0]?.elevation ?? 0,
+      widthMm: DEFAULT_GUTTER_WIDTH_MM,
+    };
+    const id = await gutterCrud.create(projectId, buildingId, floorId, data);
+    recordHistory({ action: 'create', kind: 'gutter', id, data });
+  }
+
   async function handleCreateSkylight(roofId: string, center: { x: number; y: number }) {
     if (!buildingId || !floorId) return;
     const data = { roofId, center, width: DEFAULT_SKYLIGHT_WIDTH, depth: DEFAULT_SKYLIGHT_DEPTH };
@@ -1082,6 +1129,8 @@ export default function DesignStudioPage() {
         case 'sectionLine': return strip(sectionLines.find((x) => x.id === id) as any);
         case 'shaft': return strip(shafts.find((x) => x.id === id) as any);
         case 'siteBoundary': return strip(siteBoundary && siteBoundary.id === id ? (siteBoundary as any) : undefined);
+        case 'parapet': return strip(parapets.find((x) => x.id === id) as any);
+        case 'gutter': return strip(gutters.find((x) => x.id === id) as any);
         default: return undefined;
       }
     })();
@@ -1108,6 +1157,8 @@ export default function DesignStudioPage() {
     if (kind === 'sectionLine') await sectionLineCrud.remove(projectId, buildingId, floorId, id);
     if (kind === 'shaft') await deleteShaft(projectId, buildingId, id);
     if (kind === 'siteBoundary') await deleteSiteBoundary(projectId, buildingId, id);
+    if (kind === 'parapet') await parapetCrud.remove(projectId, buildingId, floorId, id);
+    if (kind === 'gutter') await gutterCrud.remove(projectId, buildingId, floorId, id);
     if (deletedData) {
       recordHistory({ action: 'delete', kind, id, data: deletedData });
     }
@@ -1157,6 +1208,8 @@ export default function DesignStudioPage() {
         case 'sectionLine': return idsOf(sectionLines);
         case 'shaft': return idsOf(shafts);
         case 'siteBoundary': return siteBoundary ? [siteBoundary.id] : [];
+        case 'parapet': return idsOf(parapets);
+        case 'gutter': return idsOf(gutters);
         default: return [];
       }
     })();
@@ -1184,6 +1237,8 @@ export default function DesignStudioPage() {
         case 'balcony': return balconies.filter((b) => ids.includes(b.id)) as unknown as Record<string, unknown>[];
         case 'curtainWall': return curtainWalls.filter((c) => ids.includes(c.id)) as unknown as Record<string, unknown>[];
         case 'skylight': return skylights.filter((s) => ids.includes(s.id)) as unknown as Record<string, unknown>[];
+        case 'parapet': return parapets.filter((p) => ids.includes(p.id)) as unknown as Record<string, unknown>[];
+        case 'gutter': return gutters.filter((g) => ids.includes(g.id)) as unknown as Record<string, unknown>[];
         default: return [];
       }
     };
@@ -1228,6 +1283,12 @@ export default function DesignStudioPage() {
         break;
       case 'skylight':
         await skylightCrud.updateBatch(projectId, buildingId, floorId, ids, patch);
+        break;
+      case 'parapet':
+        await parapetCrud.updateBatch(projectId, buildingId, floorId, ids, patch);
+        break;
+      case 'gutter':
+        await gutterCrud.updateBatch(projectId, buildingId, floorId, ids, patch);
         break;
       default:
         return;
@@ -1276,6 +1337,8 @@ export default function DesignStudioPage() {
         case 'note': return notes.filter((n) => ids.includes(n.id)) as unknown as Record<string, unknown>[];
         case 'gridLine': return gridLines.filter((g) => ids.includes(g.id)) as unknown as Record<string, unknown>[];
         case 'sectionLine': return sectionLines.filter((s) => ids.includes(s.id)) as unknown as Record<string, unknown>[];
+        case 'parapet': return parapets.filter((p) => ids.includes(p.id)) as unknown as Record<string, unknown>[];
+        case 'gutter': return gutters.filter((g) => ids.includes(g.id)) as unknown as Record<string, unknown>[];
         default: return [];
       }
     };
@@ -1345,6 +1408,12 @@ export default function DesignStudioPage() {
         break;
       case 'sectionLine':
         await sectionLineCrud.removeBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'parapet':
+        await parapetCrud.removeBatch(projectId, buildingId, floorId, ids);
+        break;
+      case 'gutter':
+        await gutterCrud.removeBatch(projectId, buildingId, floorId, ids);
         break;
       default:
         return;
@@ -1648,6 +1717,8 @@ export default function DesignStudioPage() {
             sectionLines={sectionLines}
             shafts={shafts}
             siteBoundary={siteBoundary}
+            parapets={parapets}
+            gutters={gutters}
             currentFloorLevel={currentFloorLevel}
             belowFloorWalls={belowFloorWalls}
             belowFloorColumns={belowFloorColumns}
@@ -1660,6 +1731,8 @@ export default function DesignStudioPage() {
             onCreateStairU={handleCreateStairU}
             onCreateRailing={handleCreateRailing}
             onCreateCurtainWall={handleCreateCurtainWall}
+            onCreateParapet={handleCreateParapet}
+            onCreateGutter={handleCreateGutter}
             onCreateSkylight={handleCreateSkylight}
             onCreatePlacedObject={handleCreatePlacedObject}
             onCreateOpening={handleCreateOpening}
@@ -1998,6 +2071,8 @@ export default function DesignStudioPage() {
             sectionLines={sectionLines}
             shafts={shafts}
             siteBoundary={siteBoundary}
+            parapets={parapets}
+            gutters={gutters}
             onUpdateWall={(id, patch) =>
               buildingId && floorId && updateWall(projectId, buildingId, floorId, id, patch)
             }
@@ -2039,6 +2114,12 @@ export default function DesignStudioPage() {
             }
             onUpdateCurtainWall={(id, patch) =>
               buildingId && floorId && curtainWallCrud.update(projectId, buildingId, floorId, id, patch)
+            }
+            onUpdateParapet={(id, patch) =>
+              buildingId && floorId && parapetCrud.update(projectId, buildingId, floorId, id, patch)
+            }
+            onUpdateGutter={(id, patch) =>
+              buildingId && floorId && gutterCrud.update(projectId, buildingId, floorId, id, patch)
             }
             onUpdateSkylight={(id, patch) =>
               buildingId && floorId && skylightCrud.update(projectId, buildingId, floorId, id, patch)
@@ -2137,6 +2218,8 @@ export default function DesignStudioPage() {
             libraryItems={materialLibraryItems}
             floors={floors}
             floorElements={floorElements}
+            parapets={parapets}
+            gutters={gutters}
           />
         </div>
       </div>
@@ -2146,11 +2229,18 @@ export default function DesignStudioPage() {
 
 // Maps a PlacedObject category to the matching LibraryCategory, since the
 // two enums are named slightly differently in a couple of spots and this
-// keeps the "use library defaults" check in one place.
+// keeps the "use library defaults" check in one place. ROOF_DRAIN and
+// DOWNSPOUT map to a value no real LibraryCategory can ever equal (rather
+// than to some unrelated existing category like 'MATERIAL') because
+// there genuinely is no library category for either yet — this keeps the
+// useLibraryItem check honestly false for them instead of incorrectly
+// treating an unrelated library item as a valid drain/downspout preset.
 const LIBRARY_CATEGORY_FOR_PLACED: Record<PlacedObjectCategory, string> = {
   FURNITURE: 'FURNITURE',
   KITCHEN: 'KITCHEN',
   BATHROOM: 'BATHROOM',
   PARKING: 'VEHICLE',
   LANDSCAPE: 'LANDSCAPE',
+  ROOF_DRAIN: '__NO_LIBRARY_CATEGORY__',
+  DOWNSPOUT: '__NO_LIBRARY_CATEGORY__',
 };

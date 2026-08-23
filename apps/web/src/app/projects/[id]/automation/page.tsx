@@ -21,6 +21,7 @@ import {
   buildStairScheduleRows,
   buildRailingScheduleRows,
   buildFinishScheduleRows,
+  buildPaintScheduleRows,
   buildFoundationScheduleRows,
   buildFootingScheduleRows,
   buildGridLineScheduleRows,
@@ -355,6 +356,17 @@ export default function AutomationPage() {
       { header: t.automation.scheduleColFinishCeiling, widthMm: 45 },
     ];
   }
+  function paintColumns(): ScheduleColumn[] {
+    return [
+      { header: t.automation.scheduleColNumber, widthMm: 20 },
+      { header: t.automation.scheduleColName, widthMm: 35 },
+      { header: t.automation.scheduleColSurface, widthMm: 25 },
+      { header: t.automation.scheduleColPaintColor, widthMm: 35 },
+      { header: t.automation.scheduleColPaintCode, widthMm: 30 },
+      { header: t.automation.scheduleColPaintSheen, widthMm: 30 },
+      { header: t.automation.scheduleColArea, widthMm: 30 },
+    ];
+  }
   function foundationColumns(): ScheduleColumn[] {
     return [
       { header: t.automation.scheduleColTag, widthMm: 35 },
@@ -388,6 +400,7 @@ export default function AutomationPage() {
   const stairRows = useMemo(() => buildStairScheduleRows(allStairs), [allStairs]);
   const railingRows = useMemo(() => buildRailingScheduleRows(allRailings), [allRailings]);
   const finishRows = useMemo(() => buildFinishScheduleRows(allRooms), [allRooms]);
+  const paintRows = useMemo(() => buildPaintScheduleRows(allRooms), [allRooms]);
   const foundationRows = useMemo(() => buildFoundationScheduleRows(allFoundations), [allFoundations]);
   const footingRows = useMemo(() => buildFootingScheduleRows(allFootings), [allFootings]);
   const gridLineRows = useMemo(
@@ -489,6 +502,23 @@ export default function AutomationPage() {
       buildings.find((b) => b.id === buildingId)?.name ?? '',
       finishColumns(),
       finishRows.map((r) => [r.number, r.name, r.finishFloor, r.finishWalls, r.finishCeiling]),
+    );
+  }
+  function handleExportPaint() {
+    exportScheduleToPdf(
+      t.automation.paintSchedule,
+      project?.projectName ?? '',
+      buildings.find((b) => b.id === buildingId)?.name ?? '',
+      paintColumns(),
+      paintRows.map((r) => [
+        r.roomNumber,
+        r.roomName,
+        r.surface,
+        r.colorName,
+        r.code,
+        r.sheen,
+        r.areaSqm.toFixed(1),
+      ]),
     );
   }
   function handleExportFoundations() {
@@ -787,6 +817,14 @@ export default function AutomationPage() {
                       {t.automation.finishSchedule} ({finishRows.length})
                     </span>
                     <Button variant="secondary" size="sm" onClick={handleExportFinishes}>
+                      {t.automation.exportPdf}
+                    </Button>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-ink">
+                      {t.automation.paintSchedule} ({paintRows.length})
+                    </span>
+                    <Button variant="secondary" size="sm" onClick={handleExportPaint}>
                       {t.automation.exportPdf}
                     </Button>
                   </div>

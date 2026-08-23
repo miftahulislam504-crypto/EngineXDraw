@@ -10,9 +10,11 @@ import type {
   Dimension,
   Footing,
   Foundation,
+  Gutter,
   GridLine,
   Note,
   Opening,
+  Parapet,
   PlacedObject,
   Railing,
   Ramp,
@@ -56,6 +58,8 @@ import {
   noteCrud,
   gridLineCrud,
   sectionLineCrud,
+  parapetCrud,
+  gutterCrud,
 } from '@/lib/floors';
 import { createShaft, deleteShaft, updateShaft } from '@/lib/shafts';
 import { createSiteBoundary, deleteSiteBoundary, updateSiteBoundary } from '@/lib/siteBoundary';
@@ -118,6 +122,9 @@ const ADAPTERS: { [K in SelectionKind]: ElementAdapter<any> } = {
   sectionLine: sectionLineCrud as unknown as ElementAdapter<SectionLine>,
   shaft: buildingScoped<Shaft>(createShaft, deleteShaft, updateShaft),
   siteBoundary: buildingScoped<SiteBoundary>(createSiteBoundary, deleteSiteBoundary, updateSiteBoundary),
+  // Audit Gap Closure Phase 5 (items 16-17)
+  parapet: parapetCrud as unknown as ElementAdapter<Parapet>,
+  gutter: gutterCrud as unknown as ElementAdapter<Gutter>,
 };
 
 /** One reversible change. `data`/`before`/`after` are the exact payload

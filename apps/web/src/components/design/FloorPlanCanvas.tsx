@@ -14,8 +14,10 @@ import type {
   Dimension,
   Footing,
   Foundation,
+  Gutter,
   GridLine,
   Note,
+  Parapet,
   Point2D,
   PlacedObject,
   PlacedObjectCategory,
@@ -76,6 +78,9 @@ export interface FloorPlanCanvasProps {
   rooms: Room[];
   dimensions: Dimension[];
   notes: Note[];
+  // Audit Gap Closure Phase 5 (items 16-17)
+  parapets: Parapet[];
+  gutters: Gutter[];
   gridLines: GridLine[];
   sectionLines: SectionLine[];
   shafts: Shaft[];
@@ -106,6 +111,8 @@ export interface FloorPlanCanvasProps {
   onCreateStairU: (p1: Point2D, p2: Point2D, p3: Point2D) => void;
   onCreateRailing: (start: Point2D, end: Point2D) => void;
   onCreateCurtainWall: (start: Point2D, end: Point2D) => void;
+  onCreateParapet: (start: Point2D, end: Point2D) => void;
+  onCreateGutter: (start: Point2D, end: Point2D) => void;
   onCreateSkylight: (roofId: string, center: Point2D) => void;
   onCreatePlacedObject: (category: PlacedObjectCategory, center: Point2D) => void;
   onCreateOpening: (wallId: string, positionOnWall: number, kind: 'DOOR' | 'WINDOW') => void;
@@ -173,6 +180,49 @@ export interface FloorPlanCanvasProps {
    * existing Design Studio caller keeps its current look unchanged);
    * Sheet capture call sites (SheetCapture.tsx) explicitly pass false. */
   showBackgroundGrid?: boolean;
+  /**
+   * Audit Gap Closure Phase 2 (items 9-11: Parking Layout, Landscape
+   * Plan, Furniture Layout) — dims every PlacedObject whose category
+   * isn't in this list, so a Sheet dedicated to one category (e.g. a
+   * Parking Layout sheet) reads clearly without the walls/rooms/other
+   * placed objects around it visually competing for attention.
+   *
+   * Deliberately a dim, not a hide: the surrounding floor plan (walls,
+   * doors, rooms) stays at full opacity throughout — only OTHER
+   * PlacedObject categories dim — because a Parking Layout sheet still
+   * needs to show the building outline and driveway walls for context;
+   * hiding them would leave parking spaces floating with no reference
+   * geometry. Matches the existing belowFloorWalls faint-reference-layer
+   * approach: never hide structure a person needs for orientation, just
+   * de-emphasize what this particular sheet isn't about.
+   *
+   * Undefined (the Design Studio's own canvas, and any Sheet without an
+   * emphasis set) means "no emphasis" — every PlacedObject renders at
+   * full opacity, today's existing behavior, unchanged.
+   */
+  sheetEmphasis?: PlacedObjectCategory[];
+  /**
+   * Audit Gap Closure Phase 6 (item 24 — Roof Drainage Layout, and the
+   * Parapet Details emphasis case) — same dim-not-hide behavior as
+   * sheetEmphasis above, but for Parapet/Gutter, which live in their own
+   * arrays rather than as PlacedObject instances (see this field's own
+   * doc comment on Sheet in object-model/sheets.ts for why it's a
+   * separate field). Undefined means no emphasis, same as sheetEmphasis.
+   */
+  sheetEmphasisLinear?: ('parapet' | 'gutter')[];
+  /**
+   * Audit Gap Closure Phase 2 — the BNBC-required buildable-area inset
+   * line drawn inside the SiteBoundary (see computeSetbackBuildableArea
+   * in core-engine), for the Setback & Building Line sheet. Purely a
+   * label/overlay computed from data the caller already has (SiteInfo +
+   * SiteBoundary) — this component neither computes nor edits it, same
+   * "just render what's handed in" split every other read-only overlay
+   * here (belowFloorWalls, northAngleDeg) already follows. Undefined
+   * means don't draw it — every existing caller, and any Sheet that
+   * isn't specifically about setback, keeps today's siteBoundary-only
+   * look unchanged.
+   */
+  setbackBuildableArea?: { buildableBoundary: Point2D[]; frontM: number; rearM: number; sideM: number } | null;
 }
 
 const ORIGIN_RATIO = 0.5; // meters (0,0) renders at the canvas center
@@ -197,7 +247,7 @@ function nextDoorSwingDirection(current: DoorSwingDirection | undefined): DoorSw
   return DOOR_SWING_CYCLE[nextIndex];
 }
 
-const CHAINING_LINE_TOOLS: DesignTool[] = ['wall', 'beam', 'railing', 'curtainWall'];
+const CHAINING_LINE_TOOLS: DesignTool[] = ['wall', 'beam', 'railing', 'curtainWall', 'parapet', 'gutter'];
 const ONESHOT_LINE_TOOLS: DesignTool[] = ['ramp', 'dimension', 'section'];
 // 'stairU' shares stairDraft's point-array state and all of STAIR_TOOL's
 // snap/preview/Escape-clearing wiring with 'stair' — the only
@@ -210,13 +260,15 @@ const SNAP_AWARE_TOOLS: DesignTool[] = [
   ...RECTANGLE_TOOLS,
   ...STAIR_TOOL,
 ];
-const PLACED_OBJECT_TOOLS: DesignTool[] = ['furniture', 'kitchen', 'bathroom', 'parking', 'landscape'];
+const PLACED_OBJECT_TOOLS: DesignTool[] = ['furniture', 'kitchen', 'bathroom', 'parking', 'landscape', 'roofDrain', 'downspout'];
 const PLACED_OBJECT_CATEGORY_BY_TOOL: Partial<Record<DesignTool, PlacedObjectCategory>> = {
   furniture: 'FURNITURE',
   kitchen: 'KITCHEN',
   bathroom: 'BATHROOM',
   parking: 'PARKING',
   landscape: 'LANDSCAPE',
+  roofDrain: 'ROOF_DRAIN',
+  downspout: 'DOWNSPOUT',
 };
 
 const PLACED_OBJECT_COLORS: Record<PlacedObjectCategory, { fill: string; stroke: string }> = {
@@ -225,6 +277,8 @@ const PLACED_OBJECT_COLORS: Record<PlacedObjectCategory, { fill: string; stroke:
   BATHROOM: { fill: 'rgba(45,108,223,0.2)', stroke: '#2D6CDF' },
   PARKING: { fill: 'rgba(28,138,94,0.2)', stroke: '#1C8A5E' },
   LANDSCAPE: { fill: 'rgba(28,138,94,0.35)', stroke: '#1C8A5E' },
+  ROOF_DRAIN: { fill: 'rgba(45,108,223,0.35)', stroke: '#2D6CDF' },
+  DOWNSPOUT: { fill: 'rgba(90,90,90,0.4)', stroke: '#5A5A5A' },
 };
 
 export function FloorPlanCanvas({
@@ -251,6 +305,8 @@ export function FloorPlanCanvas({
   sectionLines,
   shafts,
   siteBoundary,
+  parapets,
+  gutters,
   currentFloorLevel,
   belowFloorWalls,
   belowFloorColumns,
@@ -263,6 +319,8 @@ export function FloorPlanCanvas({
   onCreateStairU,
   onCreateRailing,
   onCreateCurtainWall,
+  onCreateParapet,
+  onCreateGutter,
   onCreateSkylight,
   onCreatePlacedObject,
   onCreateOpening,
@@ -281,6 +339,9 @@ export function FloorPlanCanvas({
   onStageReady,
   northAngleDeg,
   showBackgroundGrid = true,
+  sheetEmphasis,
+  sheetEmphasisLinear,
+  setbackBuildableArea,
 }: FloorPlanCanvasProps) {
   const {
     activeTool,
@@ -673,6 +734,8 @@ export function FloorPlanCanvas({
         if (activeTool === 'beam') onCreateBeam(drawStart, point);
         if (activeTool === 'railing') onCreateRailing(drawStart, point);
         if (activeTool === 'curtainWall') onCreateCurtainWall(drawStart, point);
+        if (activeTool === 'parapet') onCreateParapet(drawStart, point);
+        if (activeTool === 'gutter') onCreateGutter(drawStart, point);
         setDrawStart(point); // chain into the next segment
       }
       return;
@@ -1224,6 +1287,43 @@ export function FloorPlanCanvas({
             </Fragment>
           )}
 
+          {setbackBuildableArea && setbackBuildableArea.buildableBoundary.length >= 4 && (
+            <Fragment key="setback-buildable-area">
+              <Line
+                points={boundaryToPixelPoints(setbackBuildableArea.buildableBoundary)}
+                closed
+                fill="transparent"
+                stroke="#C4692C"
+                strokeWidth={1.5}
+                dash={[4, 4]}
+                listening={false}
+              />
+              {(() => {
+                const xs = setbackBuildableArea.buildableBoundary.map((p) => p.x);
+                const ys = setbackBuildableArea.buildableBoundary.map((p) => p.y);
+                const centerPx = toPixels({
+                  x: (Math.min(...xs) + Math.max(...xs)) / 2,
+                  y: Math.min(...ys),
+                });
+                return (
+                  <Text
+                    x={centerPx.x}
+                    y={centerPx.y}
+                    text={`BUILDING LINE (F ${setbackBuildableArea.frontM}m / R ${setbackBuildableArea.rearM}m / S ${setbackBuildableArea.sideM}m)`}
+                    fontFamily="monospace"
+                    fontSize={9}
+                    fill="#C4692C"
+                    align="center"
+                    width={220}
+                    offsetX={110}
+                    offsetY={16}
+                    listening={false}
+                  />
+                );
+              })()}
+            </Fragment>
+          )}
+
           {ceilings.map((c) => (
             <Line
               key={c.id}
@@ -1492,6 +1592,76 @@ export function FloorPlanCanvas({
                   if (activeTool === 'select') {
                     e.cancelBubble = true;
                     handleSelectClick('curtainWall', cw.id);
+                  }
+                }}
+              />
+            );
+          })}
+
+          {/* Audit Gap Closure Phase 5 (item 16) — same solid-stroke line
+              rendering as CurtainWall above, in a distinct rust/brown
+              tone so a parapet reads differently from a curtain wall or
+              an ordinary wall at a glance on a floor/roof/site plan. */}
+          {parapets.map((p) => {
+            const a = toPixels(p.start);
+            const b = toPixels(p.end);
+            const isSelected = isElementSelected('parapet', p.id);
+            const isEmphasized = !sheetEmphasisLinear || sheetEmphasisLinear.includes('parapet');
+            return (
+              <Line
+                key={p.id}
+                points={[a.x, a.y, b.x, b.y]}
+                stroke={isSelected ? '#2D6CDF' : '#8B5E3C'}
+                strokeWidth={Math.max(2, p.thickness * pixelsPerMeter * 2)}
+                opacity={isEmphasized ? 1 : 0.25}
+                hitStrokeWidth={20}
+                onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    handleSelectClick('parapet', p.id);
+                  }
+                }}
+                onTap={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    handleSelectClick('parapet', p.id);
+                  }
+                }}
+              />
+            );
+          })}
+
+          {/* Audit Gap Closure Phase 5 (item 17) — a gutter has no solid
+              extruded thickness the way Wall/Parapet do (see Gutter's own
+              doc comment), so it's drawn as a thin dashed channel line
+              rather than a thick solid stroke, at a fixed screen-space
+              width rather than scaling with widthMm — a gutter's real
+              width (100-150mm) would be visually indistinguishable from
+              a hairline at typical floor-plan zoom levels anyway. */}
+          {gutters.map((g) => {
+            const a = toPixels(g.start);
+            const b = toPixels(g.end);
+            const isSelected = isElementSelected('gutter', g.id);
+            const isEmphasized = !sheetEmphasisLinear || sheetEmphasisLinear.includes('gutter');
+            return (
+              <Line
+                key={g.id}
+                points={[a.x, a.y, b.x, b.y]}
+                stroke={isSelected ? '#2D6CDF' : '#2D9C8A'}
+                strokeWidth={isSelected ? 3 : 2}
+                dash={[6, 3]}
+                opacity={isEmphasized ? 1 : 0.25}
+                hitStrokeWidth={20}
+                onClick={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    handleSelectClick('gutter', g.id);
+                  }
+                }}
+                onTap={(e) => {
+                  if (activeTool === 'select') {
+                    e.cancelBubble = true;
+                    handleSelectClick('gutter', g.id);
                   }
                 }}
               />
@@ -1845,6 +2015,10 @@ export function FloorPlanCanvas({
             const wPx = obj.width * pixelsPerMeter;
             const dPx = obj.depth * pixelsPerMeter;
             const categoryColor = PLACED_OBJECT_COLORS[obj.category];
+            // Audit Gap Closure Phase 2 — dim anything outside the
+            // active sheetEmphasis set (see that prop's own doc comment
+            // for why this dims rather than hides).
+            const isEmphasized = !sheetEmphasis || sheetEmphasis.includes(obj.category);
             return (
               <Rect
                 key={obj.id}
@@ -1858,6 +2032,7 @@ export function FloorPlanCanvas({
                 fill={isSelected ? 'rgba(45,108,223,0.5)' : categoryColor.fill}
                 stroke={isSelected ? '#2D6CDF' : categoryColor.stroke}
                 strokeWidth={1.5}
+                opacity={isEmphasized ? 1 : 0.25}
                 onClick={(e) => {
                   if (activeTool === 'select') {
                     e.cancelBubble = true;

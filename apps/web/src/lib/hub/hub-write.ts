@@ -29,6 +29,7 @@ import type {
   Ramp,
   Balcony,
   CurtainWall,
+  Parapet,
   Skylight,
   Shaft,
   SiteBoundary,
@@ -53,6 +54,7 @@ import {
   rampCrud,
   balconyCrud,
   curtainWallCrud,
+  parapetCrud,
   skylightCrud,
   sectionLineCrud,
   placedObjectCrud,
@@ -119,6 +121,7 @@ async function floorElements(
     ramps,
     balconies,
     curtainWalls,
+    parapets,
     skylights,
     sectionLines,
     placedObjects,
@@ -137,6 +140,7 @@ async function floorElements(
     rampCrud.getOnce(projectId, buildingId, floor.id),
     balconyCrud.getOnce(projectId, buildingId, floor.id),
     curtainWallCrud.getOnce(projectId, buildingId, floor.id),
+    parapetCrud.getOnce(projectId, buildingId, floor.id),
     skylightCrud.getOnce(projectId, buildingId, floor.id),
     sectionLineCrud.getOnce(projectId, buildingId, floor.id),
     placedObjectCrud.getOnce(projectId, buildingId, floor.id),
@@ -318,6 +322,33 @@ async function floorElements(
         height: cw.height,
         thickness: cw.thickness,
         mullionSpacing: cw.mullionSpacing,
+      },
+    });
+  }
+  // Parapet — Audit Gap Closure Phase 5 (item 16). Never exported before
+  // this (parapetCrud existed for Draw's own storage/rendering but was
+  // never read here) — a Parapet is structurally a low guard-rail wall
+  // sitting on the roof edge, not roof finish, so Structural needs its
+  // own line-load contribution the same way it needs Wall's. Shaped as
+  // a linear run (start/end/height/thickness) exactly like Wall/
+  // CurtainWall, so a consumer can reuse the same length × height ×
+  // thickness × unit-weight line-load math — elevation is included
+  // (unlike Wall, which has none) since a parapet's base sits above
+  // floor level at the roof, not at the floor itself.
+  for (const p of parapets as Parapet[]) {
+    refs.push({
+      id: p.id,
+      type: 'parapet',
+      levelId: floor.id,
+      geometry: {
+        start: p.start,
+        end: p.end,
+        elevation: p.elevation,
+        height: p.height,
+        thickness: p.thickness,
+        // Dead Load Source
+        materialLabel: p.materialLabel,
+        libraryItemId: p.libraryItemId,
       },
     });
   }

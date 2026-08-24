@@ -56,7 +56,6 @@ import {
   DEFAULT_WINDOW_SILL_HEIGHT,
   DEFAULT_COLUMN_WIDTH,
   DEFAULT_COLUMN_DEPTH,
-  DEFAULT_COLUMN_HEIGHT,
   DEFAULT_BEAM_WIDTH,
   DEFAULT_BEAM_DEPTH,
   DEFAULT_SLAB_THICKNESS,
@@ -673,12 +672,22 @@ export default function DesignStudioPage() {
       showBlockMessage(t.designStudio.structuralBlock.columnOverlapsColumn);
       return;
     }
+    // বাগফিক্স: আগে এখানে DEFAULT_COLUMN_HEIGHT (3.05m, hardcoded) বসতো,
+    // অথচ handleCreateWall/handleCreateBeam ঠিকই currentFloorToFloorHeight
+    // (এই floor-এর আসল floor-to-floor height) ব্যবহার করে। যেই প্রজেক্টে
+    // floor height 3.05m না, সেখানে column-এর top ভুল elevation-এ বসত —
+    // পরের floor-এর wall/beam base elevation এর সাথে কখনো মিলত না, ফলে
+    // Structural App-এর Model Checker প্রতিটা উপরের-floor column কে
+    // "fully floating" ধরত (StructuralElement.node coordinate মিলছে না
+    // বলে)। এখন column-ও wall/beam এর মতোই currentFloorToFloorHeight
+    // ব্যবহার করছে, যাতে তিনটা element type-ই একই floor-height ধরে সমান
+    // elevation-এ শেষ হয়।
     const data = {
       center: snapped,
       shape: 'RECTANGULAR' as const,
       width: DEFAULT_COLUMN_WIDTH,
       depth: DEFAULT_COLUMN_DEPTH,
-      height: DEFAULT_COLUMN_HEIGHT,
+      height: currentFloorToFloorHeight,
     };
     const id = await createColumn(projectId, buildingId, floorId, data);
     recordHistory({ action: 'create', kind: 'column', id, data });

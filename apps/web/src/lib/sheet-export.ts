@@ -254,7 +254,18 @@ const VIEWPORT_DRAWING_TYPE_LABEL: Record<SheetViewportType, string> = {
  * followed by one or more value lines inside its own box, matching how
  * the reference sheet separates "DRAWING TYPE :" from the value below
  * it in its own bordered rectangle rather than running label+value on
- * one line. Returns the Y position just below the drawn block. */
+ * one line. Returns the Y position just below the drawn block.
+ *
+ * `scale` (default 1) uniformly shrinks font sizes/line heights/pad —
+ * see drawSidebar's two-pass measure-then-draw approach below, which
+ * picks a scale < 1 when the sidebar's natural content height would
+ * otherwise exceed the page, so a sidebar with a long company address
+ * or several sign-off names still ends flush with the sheet's bottom
+ * edge instead of running past it.
+ *
+ * `dryRun` skips every actual pdf.rect/pdf.text call and just returns
+ * the Y the block WOULD end at — used for the same measure pass, so
+ * measuring never has a visible side effect on the page being drawn. */
 function drawSidebarBlock(
   pdf: jsPDF,
   x: number,
@@ -262,33 +273,36 @@ function drawSidebarBlock(
   width: number,
   label: string,
   values: string[],
-  options?: { valueFontSize?: number; bold?: boolean; minHeight?: number },
+  options?: { valueFontSize?: number; bold?: boolean; minHeight?: number; scale?: number; dryRun?: boolean },
 ): number {
-  const valueFontSize = options?.valueFontSize ?? 8.5;
-  const labelHeight = 4.5;
-  const lineHeight = valueFontSize * 0.42 + 1.6;
-  const pad = 1.8;
-  const contentHeight = values.length > 0 ? values.length * lineHeight + 1 : 0;
-  const blockHeight = Math.max(options?.minHeight ?? 0, labelHeight + contentHeight + pad * 2);
+  const scale = options?.scale ?? 1;
+  const valueFontSize = (options?.valueFontSize ?? 8.5) * scale;
+  const labelHeight = 4.5 * scale;
+  const lineHeight = valueFontSize * 0.42 + 1.6 * scale;
+  const pad = 1.8 * scale;
+  const contentHeight = values.length > 0 ? values.length * lineHeight + 1 * scale : 0;
+  const blockHeight = Math.max((options?.minHeight ?? 0) * scale, labelHeight + contentHeight + pad * 2);
 
-  pdf.setDrawColor(140, 140, 140);
-  pdf.setLineWidth(0.2);
-  pdf.rect(x, y, width, blockHeight);
+  if (!options?.dryRun) {
+    pdf.setDrawColor(140, 140, 140);
+    pdf.setLineWidth(0.2);
+    pdf.rect(x, y, width, blockHeight);
 
-  pdf.setFontSize(6);
-  pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(110, 110, 110);
-  pdf.text(label, x + pad, y + 3.2);
+    pdf.setFontSize(Math.max(4, 6 * scale));
+    pdf.setFont('helvetica', 'normal');
+    pdf.setTextColor(110, 110, 110);
+    pdf.text(label, x + pad, y + 3.2 * scale);
 
-  pdf.setTextColor(20, 20, 20);
-  pdf.setFont('helvetica', options?.bold ? 'bold' : 'normal');
-  pdf.setFontSize(valueFontSize);
-  let ty = y + labelHeight + 3;
-  for (const line of values) {
-    pdf.text(line || '—', x + pad, ty);
-    ty += lineHeight;
+    pdf.setTextColor(20, 20, 20);
+    pdf.setFont('helvetica', options?.bold ? 'bold' : 'normal');
+    pdf.setFontSize(Math.max(4, valueFontSize));
+    let ty = y + labelHeight + 3 * scale;
+    for (const line of values) {
+      pdf.text(line || '—', x + pad, ty);
+      ty += lineHeight;
+    }
+    pdf.setTextColor(0, 0, 0);
   }
-  pdf.setTextColor(0, 0, 0);
 
   return y + blockHeight;
 }
@@ -384,122 +398,174 @@ export function buildSidebarContent(input: {
  * correct than a generalized renderer for only ~15 call sites used
  * exactly once each.
  */
-function drawSidebar(pdf: jsPDF, x: number, y: number, width: number, height: number, content: SidebarContent) {
+/**
+ * Runs the full block sequence (logo block through sign-off rows,
+ * everything EXCEPT the copyright footer, which has its own
+ * fits-or-omit guard already) at a given `scale`, either drawing for
+ * real (dryRun false) or just measuring (dryRun true — no pdf.rect/
+ * pdf.text calls happen, see drawSidebarBlock). Returns the final cy
+ * (bottom Y the sequence reached), which is exactly the height needed
+ * to fit everything above the copyright footer at that scale.
+ *
+ * Factored out of drawSidebar so the same sequence can run twice: once
+ * as a dry-run measurement at scale 1, and — only if that measurement
+ * would overflow the sidebar's available height — a second real pass
+ * at a smaller scale computed from the overflow ratio (see
+ * drawSidebar). Running it for real at scale 1 unconditionally, THEN
+ * discovering it overflowed, would mean the overflow is already on the
+ * page with no way to undo it — measuring first avoids ever drawing
+ * something that has to be thrown away.
+ */
+function drawSidebarBlockSequence(
+  pdf: jsPDF,
+  x: number,
+  y: number,
+  width: number,
+  content: SidebarContent,
+  scale: number,
+  dryRun: boolean,
+): number {
   const tb = content.titleBlock;
   let cy = y;
+  const gap = (n: number) => n * scale;
 
   // ── Logo / company name block ─────────────────────────────────────
-  const logoBlockHeight = 22;
-  pdf.setDrawColor(140, 140, 140);
-  pdf.setLineWidth(0.2);
-  pdf.rect(x, cy, width, logoBlockHeight);
-  let logoTextX = x + 2;
-  if (tb.companyLogoUrl) {
-    try {
-      const logoSize = 14;
-      pdf.addImage(tb.companyLogoUrl, x + 2, cy + 2, logoSize, logoSize);
-      logoTextX = x + 2 + logoSize + 2;
-    } catch {
-      // Unusable image data (bad data URL, unsupported format) — fall
-      // back to text-only rather than let a bad logo abort the export.
-    }
+  const logoBlockHeight = 22 * scale;
+  if (!dryRun) {
+    pdf.setDrawColor(140, 140, 140);
+    pdf.setLineWidth(0.2);
+    pdf.rect(x, cy, width, logoBlockHeight);
   }
-  pdf.setFontSize(11);
-  pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(20, 20, 20);
-  pdf.text(tb.companyName || '—', logoTextX, cy + 7, { maxWidth: x + width - logoTextX - 1 });
-  pdf.setFontSize(6);
-  pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(90, 90, 90);
-  let addrY = cy + 11;
+  let logoTextX = x + 2;
+  const logoSize = 14 * scale;
+  if (tb.companyLogoUrl) {
+    if (!dryRun) {
+      try {
+        pdf.addImage(tb.companyLogoUrl, x + 2, cy + 2, logoSize, logoSize);
+      } catch {
+        // Unusable image data (bad data URL, unsupported format) — fall
+        // back to text-only rather than let a bad logo abort the export.
+      }
+    }
+    logoTextX = x + 2 + logoSize + 2;
+  }
+  if (!dryRun) {
+    pdf.setFontSize(Math.max(6, 11 * scale));
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(20, 20, 20);
+    pdf.text(tb.companyName || '—', logoTextX, cy + 7 * scale, { maxWidth: x + width - logoTextX - 1 });
+    pdf.setFontSize(Math.max(4, 6 * scale));
+    pdf.setFont('helvetica', 'normal');
+    pdf.setTextColor(90, 90, 90);
+  }
+  let addrY = cy + 11 * scale;
+  const addrLineStep = 3 * scale;
   for (const line of tb.companyAddressLines ?? []) {
-    pdf.text(line, logoTextX, addrY, { maxWidth: x + width - logoTextX - 1 });
-    addrY += 3;
+    if (!dryRun) pdf.text(line, logoTextX, addrY, { maxWidth: x + width - logoTextX - 1 });
+    addrY += addrLineStep;
   }
   const contactLine = [tb.companyPhone && `Cell: ${tb.companyPhone}`, tb.companyEmail && `Mail: ${tb.companyEmail}`]
     .filter(Boolean)
     .join('  ');
-  if (contactLine) {
+  if (contactLine && !dryRun) {
     pdf.text(contactLine, logoTextX, addrY, { maxWidth: x + width - logoTextX - 1 });
   }
-  pdf.setTextColor(0, 0, 0);
-  cy += logoBlockHeight + 2;
+  if (!dryRun) pdf.setTextColor(0, 0, 0);
+  cy += logoBlockHeight + gap(2);
 
-  cy = drawSidebarBlock(pdf, x, cy, width, 'DRAWING TYPE :', []);
-  cy += 1;
+  cy = drawSidebarBlock(pdf, x, cy, width, 'DRAWING TYPE :', [], { scale, dryRun });
+  cy += gap(1);
   cy = drawSidebarBlock(pdf, x, cy, width, '', [VIEWPORT_DRAWING_TYPE_LABEL[content.viewportType]], {
     valueFontSize: 13,
     bold: true,
     minHeight: 14,
+    scale,
+    dryRun,
   });
-  cy += 2;
+  cy += gap(2);
 
-  cy = drawSidebarBlock(pdf, x, cy, width, 'STATUS :', [content.statusLabel]);
-  cy += 2;
+  cy = drawSidebarBlock(pdf, x, cy, width, 'STATUS :', [content.statusLabel], { scale, dryRun });
+  cy += gap(2);
 
-  cy = drawSidebarBlock(pdf, x, cy, width, 'JOB NO :', [tb.jobNo || '—']);
-  cy += 2;
+  cy = drawSidebarBlock(pdf, x, cy, width, 'JOB NO :', [tb.jobNo || '—'], { scale, dryRun });
+  cy += gap(2);
 
-  cy = drawSidebarBlock(pdf, x, cy, width, 'PROJECT NAME :', [content.projectName]);
-  cy += 2;
+  cy = drawSidebarBlock(pdf, x, cy, width, 'PROJECT NAME :', [content.projectName], { scale, dryRun });
+  cy += gap(2);
 
-  cy = drawSidebarBlock(pdf, x, cy, width, 'BUILDING NAME :', [content.buildingName]);
-  cy += 2;
+  cy = drawSidebarBlock(pdf, x, cy, width, 'BUILDING NAME :', [content.buildingName], { scale, dryRun });
+  cy += gap(2);
 
-  cy = drawSidebarBlock(pdf, x, cy, width, 'BUILDING NO :', [content.buildingNo]);
-  cy += 2;
+  cy = drawSidebarBlock(pdf, x, cy, width, 'BUILDING NO :', [content.buildingNo], { scale, dryRun });
+  cy += gap(2);
 
-  cy = drawSidebarBlock(pdf, x, cy, width, 'CLIENT :', [tb.clientName || '—'], { valueFontSize: 11, bold: true });
-  cy += 2;
+  cy = drawSidebarBlock(pdf, x, cy, width, 'CLIENT :', [tb.clientName || '—'], { valueFontSize: 11, bold: true, scale, dryRun });
+  cy += gap(2);
 
-  cy = drawSidebarBlock(pdf, x, cy, width, 'LOCATION :', [tb.location || '—']);
-  cy += 2;
+  cy = drawSidebarBlock(pdf, x, cy, width, 'LOCATION :', [tb.location || '—'], { scale, dryRun });
+  cy += gap(2);
 
   // ── Revision mini-table (Revision | Signature | Date), blank rows —
   // real revision tracking isn't part of this pass; this is the same
   // honest "blank rows ready to be filled by hand or in a later phase"
   // placeholder the reference sheet's own table starts as. ────────────
   {
-    const tableHeight = 16;
-    pdf.setDrawColor(140, 140, 140);
-    pdf.setLineWidth(0.2);
-    pdf.rect(x, cy, width, tableHeight);
-    const col1 = width * 0.32;
-    const col2 = width * 0.4;
-    pdf.line(x + col1, cy, x + col1, cy + tableHeight);
-    pdf.line(x + col1 + col2, cy, x + col1 + col2, cy + tableHeight);
-    const headerH = 5;
-    pdf.line(x, cy + headerH, x + width, cy + headerH);
-    pdf.setFontSize(5.5);
-    pdf.setFont('helvetica', 'normal');
-    pdf.setTextColor(90, 90, 90);
-    pdf.text('REVISION', x + 1, cy + 3.5);
-    pdf.text('SIGNATURE', x + col1 + 1, cy + 3.5);
-    pdf.text('DATE', x + col1 + col2 + 1, cy + 3.5);
-    pdf.setTextColor(0, 0, 0);
-    cy += tableHeight + 2;
+    const tableHeight = 16 * scale;
+    if (!dryRun) {
+      pdf.setDrawColor(140, 140, 140);
+      pdf.setLineWidth(0.2);
+      pdf.rect(x, cy, width, tableHeight);
+      const col1 = width * 0.32;
+      const col2 = width * 0.4;
+      pdf.line(x + col1, cy, x + col1, cy + tableHeight);
+      pdf.line(x + col1 + col2, cy, x + col1 + col2, cy + tableHeight);
+      const headerH = 5 * scale;
+      pdf.line(x, cy + headerH, x + width, cy + headerH);
+      pdf.setFontSize(Math.max(4, 5.5 * scale));
+      pdf.setFont('helvetica', 'normal');
+      pdf.setTextColor(90, 90, 90);
+      pdf.text('REVISION', x + 1, cy + 3.5 * scale);
+      pdf.text('SIGNATURE', x + col1 + 1, cy + 3.5 * scale);
+      pdf.text('DATE', x + col1 + col2 + 1, cy + 3.5 * scale);
+      pdf.setTextColor(0, 0, 0);
+    }
+    cy += tableHeight + gap(2);
   }
 
   cy = drawSidebarBlock(pdf, x, cy, width, 'DRAWING TITLE :', [content.drawingTitle], {
     valueFontSize: 10,
     bold: true,
+    scale,
+    dryRun,
   });
-  cy += 2;
+  cy += gap(2);
 
-  cy = drawSidebarBlock(pdf, x, cy, width, 'OPTION :', [content.optionLabel || '']);
-  cy += 1;
-  cy = drawSidebarBlock(pdf, x, cy, width, 'DATE :', [content.date || '—']);
-  cy += 1;
+  cy = drawSidebarBlock(pdf, x, cy, width, 'OPTION :', [content.optionLabel || ''], { scale, dryRun });
+  cy += gap(1);
+  cy = drawSidebarBlock(pdf, x, cy, width, 'DATE :', [content.date || '—'], { scale, dryRun });
+  cy += gap(1);
   if (content.scaleLabel !== undefined) {
-    cy = drawSidebarBlock(pdf, x, cy, width, 'SCALE :', [
-      content.notScale ? `${content.scaleLabel || '—'}  (NOT TO SCALE)` : content.scaleLabel || '—',
-    ]);
-    cy += 1;
+    cy = drawSidebarBlock(
+      pdf,
+      x,
+      cy,
+      width,
+      'SCALE :',
+      [content.notScale ? `${content.scaleLabel || '—'}  (NOT TO SCALE)` : content.scaleLabel || '—'],
+      { scale, dryRun },
+    );
+    cy += gap(1);
   }
-  cy = drawSidebarBlock(pdf, x, cy, width, 'SHEET NO :', [
-    [content.jobNoPrefix, content.sheetNumber].filter(Boolean).join('-') || content.sheetNumber || '—',
-  ]);
-  cy += 2;
+  cy = drawSidebarBlock(
+    pdf,
+    x,
+    cy,
+    width,
+    'SHEET NO :',
+    [[content.jobNoPrefix, content.sheetNumber].filter(Boolean).join('-') || content.sheetNumber || '—'],
+    { scale, dryRun },
+  );
+  cy += gap(2);
 
   const signOff: Array<[string, string | undefined, string | undefined]> = [
     ['DETAIL BY :', tb.detailByName, tb.detailByCredential],
@@ -509,15 +575,48 @@ function drawSidebar(pdf: jsPDF, x: number, y: number, width: number, height: nu
   ];
   for (const [label, name, credential] of signOff) {
     const values = [name || '—', ...(credential ? [credential] : [])];
-    cy = drawSidebarBlock(pdf, x, cy, width, label, values, { valueFontSize: 8 });
-    cy += 1.5;
+    cy = drawSidebarBlock(pdf, x, cy, width, label, values, { valueFontSize: 8, scale, dryRun });
+    cy += gap(1.5);
   }
+
+  return cy;
+}
+
+/** Draws the full MICON-style sidebar (logo block through the copyright
+ * footer) at the given x position, top-aligned to y, constrained to
+ * `width`/`height`.
+ *
+ * Two-pass measure-then-draw: first measures the block sequence's
+ * natural height at scale 1 (dry run, no drawing). If that height fits
+ * within `height`, draws normally at scale 1 — the common case, and
+ * pixel-identical to the previous single-pass behavior. If it would
+ * overflow, computes a scale factor from how much extra room is needed
+ * and re-measures/re-draws at that smaller scale — shrinking font
+ * sizes and spacing together rather than clipping content, so a long
+ * company address or several sign-off names with credentials still
+ * ends flush with the sidebar's own bottom edge instead of running
+ * past the sheet border (the exact "কেটে যাওয়া" / cut-off case this
+ * guards against). A floor at 55% keeps even a worst-case sidebar
+ * legible rather than shrinking to unreadable size.
+ */
+function drawSidebar(pdf: jsPDF, x: number, y: number, width: number, height: number, content: SidebarContent) {
+  const MIN_SCALE = 0.55;
+  const naturalBottom = drawSidebarBlockSequence(pdf, x, y, width, content, 1, true);
+  const naturalHeight = naturalBottom - y;
+  const available = height; // full sidebar height; copyright footer (below) claims its own space only if it still fits after this
+
+  let scale = 1;
+  if (naturalHeight > available && naturalHeight > 0) {
+    scale = Math.max(MIN_SCALE, available / naturalHeight);
+  }
+
+  const cy = drawSidebarBlockSequence(pdf, x, y, width, content, scale, false);
 
   // ── Copyright footer — only drawn if it fits in the remaining space,
   // rather than overflowing past the sidebar's own bottom edge (a long
   // custom notice on a small sheet size could otherwise run off the
   // page). ─────────────────────────────────────────────────────────
-  const notice = tb.copyrightNotice;
+  const notice = tb_copyrightNotice(content);
   if (notice) {
     const maxFooterHeight = y + height - cy;
     if (maxFooterHeight > 8) {
@@ -534,6 +633,12 @@ function drawSidebar(pdf: jsPDF, x: number, y: number, width: number, height: nu
       pdf.setTextColor(0, 0, 0);
     }
   }
+}
+
+/** Small helper so drawSidebar doesn't need `content.titleBlock` spelled
+ * out twice just to reach copyrightNotice. */
+function tb_copyrightNotice(content: SidebarContent): string | undefined {
+  return content.titleBlock.copyrightNotice;
 }
 
 /**
@@ -717,6 +822,45 @@ interface SimpleTableColumn {
  * onto a continuation page is edge-case content, not the primary sheet
  * layout) rather than clipping, so a very long Drawing Index or
  * Revision History is never silently cut off. */
+/**
+ * When a table (Drawing Index / Revision History on the Cover Sheet)
+ * has more rows than fit in the sheet's own frame, this draws a
+ * PROPER continuation sheet — same page size as the sheet being
+ * exported, same outer frame + sidebar title block (so the company
+ * name/client/sheet no. etc. are never missing on a continuation page)
+ * — instead of a bare, undersized, title-block-less jsPDF default
+ * page. `sheet`/`sidebar` are passed through so this can redraw both;
+ * `pageLabel` becomes the sidebar's drawing title on continuation
+ * pages, marked "(cont'd)" so it's clear it's not a duplicate first
+ * page. Returns the new bottomY/y/x0 the caller's table-drawing loop
+ * should continue from.
+ */
+function startContinuationSheetPage(
+  pdf: jsPDF,
+  sheet: Sheet,
+  sidebar: SidebarContent,
+  pageLabel: string,
+): { x0: number; y: number; bottom: number } {
+  const { widthMm, heightMm } = SHEET_SIZES[sheet.size];
+  pdf.addPage([widthMm, heightMm], 'landscape');
+
+  const margin = 8;
+  const layout = computeSidebarLayout(widthMm, heightMm, margin);
+  const { bodyX, bodyY, bodyWidth: frameWidth, bodyHeight: frameHeight } = layout;
+
+  pdf.setLineWidth(0.5);
+  pdf.setDrawColor(0, 0, 0);
+  pdf.rect(bodyX, bodyY, frameWidth, frameHeight);
+
+  drawSidebar(pdf, layout.sidebarX, margin, layout.sidebarWidth, heightMm - margin * 2, {
+    ...sidebar,
+    drawingTitle: `${pageLabel} (cont'd)`,
+  });
+
+  const bodyPad = 6;
+  return { x0: bodyX + bodyPad, y: bodyY + bodyPad + 6, bottom: bodyY + frameHeight - bodyPad };
+}
+
 function drawSimpleTable(
   pdf: jsPDF,
   startY: number,
@@ -724,6 +868,7 @@ function drawSimpleTable(
   bottomY: number,
   columns: SimpleTableColumn[],
   rows: string[][],
+  continuation?: { sheet: Sheet; sidebar: SidebarContent; pageLabel: string },
 ): number {
   const tableWidth = columns.reduce((sum, c) => sum + c.widthMm, 0);
   const rowHeight = 6;
@@ -750,10 +895,25 @@ function drawSimpleTable(
   drawHeader();
   for (const row of rows) {
     if (y + rowHeight > bottom) {
-      pdf.addPage();
-      x0 = 15;
-      y = 15;
-      bottom = pdf.internal.pageSize.getHeight() - 15;
+      if (continuation) {
+        // Full-fidelity continuation: same sheet size, outer frame, and
+        // sidebar title block as the original sheet — see
+        // startContinuationSheetPage's own doc comment for why this
+        // replaced a bare pdf.addPage().
+        const next = startContinuationSheetPage(pdf, continuation.sheet, continuation.sidebar, continuation.pageLabel);
+        x0 = next.x0;
+        y = next.y;
+        bottom = next.bottom;
+      } else {
+        // No continuation context available (caller didn't pass one) —
+        // fall back to a plain page rather than throw, but this path
+        // should be rare now that both Cover Sheet callers below pass
+        // continuation context.
+        pdf.addPage();
+        x0 = 15;
+        y = 15;
+        bottom = pdf.internal.pageSize.getHeight() - 15;
+      }
       drawHeader();
     }
     let x = x0;
@@ -802,10 +962,21 @@ function drawCoverSheetPage(pdf: jsPDF, sheet: Sheet, data: CoverSheetExportData
   const contentX = bodyX + bodyPad;
   const contentRight = bodyX + frameWidth - bodyPad;
 
+  // Project name: wrapped (splitTextToSize) rather than a single
+  // pdf.text() call, so a long project name wraps onto extra lines
+  // inside the frame instead of running past the sidebar or off the
+  // page edge. y advances by however many lines it actually took, so
+  // everything below (info pairs, Drawing Index) shifts down to match
+  // instead of overlapping a wrapped second line.
   pdf.setFontSize(18);
   pdf.setFont('helvetica', 'bold');
-  pdf.text(data.projectName || data.notProvidedLabel, contentX, y);
-  y += 10;
+  const projectNameLines = pdf.splitTextToSize(data.projectName || data.notProvidedLabel, contentRight - contentX) as string[];
+  const projectNameLineHeight = 7.5;
+  for (const line of projectNameLines) {
+    pdf.text(line, contentX, y);
+    y += projectNameLineHeight;
+  }
+  y += 10 - projectNameLineHeight; // preserve the original single-line spacing below the title
 
   const infoPairs: Array<[string, string]> = [
     [data.clientName, data.location],
@@ -845,6 +1016,7 @@ function drawCoverSheetPage(pdf: jsPDF, sheet: Sheet, data: CoverSheetExportData
         { header: data.indexColViewportType, widthMm: 45 },
       ],
       data.indexRows.map((r) => [r.sheetNumber || '—', r.name, r.viewportTypeLabel]),
+      { sheet, sidebar, pageLabel: data.drawingIndexTitle },
     );
     y += 6;
   }
@@ -867,6 +1039,7 @@ function drawCoverSheetPage(pdf: jsPDF, sheet: Sheet, data: CoverSheetExportData
         { header: data.revisionColDescription, widthMm: Math.max(40, frameWidth - bodyPad * 2 - 50) },
       ],
       [['—', '—', data.revisionPlaceholder]],
+      { sheet, sidebar, pageLabel: data.revisionTitle },
     );
   }
 

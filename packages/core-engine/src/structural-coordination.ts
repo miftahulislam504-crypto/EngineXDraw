@@ -36,8 +36,8 @@
  *    only tells the person what currently lacks support so they can add
  *    it.
  */
-import type { Beam, Column, Footing, Roof, Slab, Point2D, Wall } from '@archibim/object-model';
-import { distance, pointToSegmentDistance } from './geometry-utils';
+import type { Beam, Column, Footing, Roof, Slab, Stair, Point2D, Wall } from '@archibim/object-model';
+import { distance, pointToSegmentDistance, polygonOverlapArea, polygonArea } from './geometry-utils';
 
 // A column/footing pair counts as "aligned" if their centers are within
 // this radius — loose enough to survive the column snapping to the
@@ -318,6 +318,163 @@ export function isColumnOverlappingColumn(
     if (c.id === excludeColumnId) continue;
     const otherHalfDiag = Math.max(c.width, c.depth) / 2;
     if (distance(center, c.center) < halfDiag + otherHalfDiag) return true;
+  }
+  return false;
+}
+
+/** One structural grid line's absolute position and direction, the
+ * shape both a floor's real GridLine documents and a building's derived
+ * GridSystem (see deriveGridLinesFromSystem in apps/web's floors.ts)
+ * already share — kept minimal here (no id/floorId/label) so this
+ * module doesn't need to know which of the two produced it. */
+export interface GridLinePosition {
+  orientation: 'vertical' | 'horizontal';
+  position: number;
+}
+
+/** How close a click has to land to a grid intersection before it snaps
+ * onto it — deliberately more generous than the footing/column-center
+ * snaps above, since the whole point of drawing a grid is to make
+ * "click near the intersection" work without pixel-perfect placement;
+ * a tight tolerance here would defeat that. */
+const GRID_INTERSECTION_SNAP_TOLERANCE_M = 0.4;
+
+/** Snaps a to-be-placed column onto the nearest grid line intersection
+ * (one vertical line's x, one horizontal line's y), if one is within
+ * tolerance — this is what keeps column lines straight the way a real
+ * structural grid does: every column that snaps to the same vertical
+ * line ends up at exactly that line's x, not at wherever was clicked.
+ * Needs at least one line of each orientation to have an intersection
+ * at all; returns the original point unchanged otherwise (or if nothing
+ * is close enough), same "no-op when nothing to snap to" contract as
+ * snapToNearestFooting. */
+export function nearestGridIntersection(
+  point: Point2D,
+  gridLines: GridLinePosition[],
+  tolerance = GRID_INTERSECTION_SNAP_TOLERANCE_M,
+): Point2D {
+  const verticals = gridLines.filter((l) => l.orientation === 'vertical');
+  const horizontals = gridLines.filter((l) => l.orientation === 'horizontal');
+  if (verticals.length === 0 || horizontals.length === 0) return point;
+
+  let nearestX: number | null = null;
+  let nearestXDist = Infinity;
+  for (const v of verticals) {
+    const d = Math.abs(point.x - v.position);
+    if (d < nearestXDist) {
+      nearestXDist = d;
+      nearestX = v.position;
+    }
+  }
+  let nearestY: number | null = null;
+  let nearestYDist = Infinity;
+  for (const h of horizontals) {
+    const d = Math.abs(point.y - h.position);
+    if (d < nearestYDist) {
+      nearestYDist = d;
+      nearestY = h.position;
+    }
+  }
+  if (nearestX === null || nearestY === null) return point;
+  if (nearestXDist > tolerance || nearestYDist > tolerance) return point;
+  return { x: nearestX, y: nearestY };
+}
+
+/** True if a new footing's footprint would overlap an existing
+ * footing's footprint — same circular-radius approach as
+ * isColumnOverlappingColumn above (centers closer together than the
+ * sum of their half-diagonals), for the same "same member drawn twice"
+ * reasoning: a footing placed right next to (not on top of) another
+ * stays allowed, only a genuine duplicate at the same spot is blocked. */
+export function isFootingOverlappingFooting(
+  center: Point2D,
+  width: number,
+  depth: number,
+  footings: Footing[],
+  excludeFootingId?: string,
+): boolean {
+  const halfDiag = Math.max(width, depth) / 2;
+  for (const f of footings) {
+    if (f.id === excludeFootingId) continue;
+    const otherHalfDiag = Math.max(f.width, f.depth) / 2;
+    if (distance(center, f.center) < halfDiag + otherHalfDiag) return true;
+  }
+  return false;
+}
+
+// How much of a new boundary-based element's own area has to sit on
+// top of an existing one before it counts as "the same slab/ceiling/
+// roof drawn twice" rather than two shapes that merely share an edge —
+// a normal, legitimate way to draw two adjacent rooms/bays. A shared
+// edge contributes ~0 area to polygonOverlapArea (it's a 1D line, not a
+// 2D region) so even a generous fraction here still allows edge-sharing
+// through; this only fires once most of the new shape's footprint is
+// sitting on an existing one.
+const BOUNDARY_DUPLICATE_OVERLAP_FRACTION = 0.9;
+
+/** True if a new boundary (Slab/Ceiling/Foundation/Roof/Balcony) would
+ * mostly duplicate an existing one on the same floor — measured as
+ * overlap area relative to the SMALLER of the two shapes' own areas
+ * (so a small duplicate placed inside a much larger existing slab still
+ * counts as a duplicate of the small one, not diluted by the big one's
+ * total area). Generic over any boundary-holding element via a getter,
+ * so the same check serves Slab now and Ceiling/Foundation/Roof/Balcony
+ * later without duplicating this function per element kind (see
+ * isSlabOverlappingSlab below for the concrete Slab wrapper actually
+ * wired into Design Studio create-time). */
+export function isBoundaryOverlappingBoundary<T extends { id: string; boundary: Point2D[] }>(
+  boundary: Point2D[],
+  existing: T[],
+  excludeId?: string,
+): boolean {
+  const newArea = polygonArea(boundary);
+  if (newArea < 1e-6) return false;
+  for (const item of existing) {
+    if (item.id === excludeId) continue;
+    const otherArea = polygonArea(item.boundary);
+    if (otherArea < 1e-6) continue;
+    const overlap = polygonOverlapArea(boundary, item.boundary);
+    const smallerArea = Math.min(newArea, otherArea);
+    if (overlap / smallerArea >= BOUNDARY_DUPLICATE_OVERLAP_FRACTION) return true;
+  }
+  return false;
+}
+
+/** Slab-specific wrapper around isBoundaryOverlappingBoundary — the
+ * concrete check Design Studio's handleCreatePolygon calls for the
+ * 'slab' tool. */
+export function isSlabOverlappingSlab(
+  boundary: Point2D[],
+  slabs: Slab[],
+  excludeSlabId?: string,
+): boolean {
+  return isBoundaryOverlappingBoundary(boundary, slabs, excludeSlabId);
+}
+
+/** True if a new stair flight would run along the same line as an
+ * existing flight (on the same or a different Stair) for a meaningful
+ * stretch — same collinear-overlap approach as isWallOverlappingWall/
+ * isBeamOverlappingBeam above, since a Stair flight's own geometry
+ * (start/end centerline) is the same shape as a Wall/Beam's, just with
+ * the stair's shared `width` standing in for wall thickness/beam
+ * depth. Checked per NEW flight against every flight of every EXISTING
+ * stair on the floor — a multi-flight L/U-shaped stair still gets
+ * caught if any one of its flights duplicates an existing flight, not
+ * just a whole-stair exact match. */
+export function isStairFlightOverlappingStair(
+  start: Point2D,
+  end: Point2D,
+  stairs: Stair[],
+  excludeStairId?: string,
+): boolean {
+  for (const s of stairs) {
+    if (s.id === excludeStairId) continue;
+    for (const flight of s.flights) {
+      if (!areCollinear(start, end, flight.start, flight.end)) continue;
+      if (collinearOverlapLength(start, end, flight.start, flight.end) >= MIN_OVERLAP_LENGTH_M) {
+        return true;
+      }
+    }
   }
   return false;
 }

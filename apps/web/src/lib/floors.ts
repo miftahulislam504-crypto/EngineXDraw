@@ -24,7 +24,9 @@ import type {
   Footing,
   Foundation,
   Gutter,
+  GridAxis,
   GridLine,
+  GridSystem,
   Note,
   Opening,
   Parapet,
@@ -891,6 +893,139 @@ export function getGridLineAutoLabel(line: GridLine, allLines: GridLine[]): stri
   const n = index < 0 ? sameOrientation.length : index;
   if (line.orientation === 'vertical') return String(n + 1);
   return numberToLetters(n);
+}
+
+/** Turns one GridSystem axis array's own bay spacings into absolute
+ * meter positions via a running cumulative sum — the single place this
+ * conversion happens (see Building.gridSystem's doc comment) so every
+ * consumer (per-floor GridLine sync below, column-to-intersection snap,
+ * grid bubble labels) agrees on the same absolute coordinates from the
+ * same bay spans. First axis always sits at 0 regardless of whatever
+ * its own spacingFromPrevious says (there is no "previous" axis for it
+ * to be offset from). */
+export function deriveGridAxisPositions(axes: GridAxis[]): number[] {
+  const positions: number[] = [];
+  let running = 0;
+  for (let i = 0; i < axes.length; i++) {
+    if (i > 0) running += axes[i].spacingFromPrevious;
+    positions.push(running);
+  }
+  return positions;
+}
+
+/** Auto-label for one GridSystem axis, honoring a manual label override
+ * the same way GridLine.label already does — falls back to "1,2,3…" for
+ * vertical / "A,B,C…" for horizontal by the axis's own order in its
+ * array, via the same numberToLetters sequence GridLine auto-labels
+ * use, so a grid bubble reads identically whether it came from a
+ * GridSystem-derived line or a hand-drawn one. */
+export function getGridAxisLabel(
+  axis: GridAxis,
+  index: number,
+  orientation: 'vertical' | 'horizontal',
+): string {
+  if (axis.label) return axis.label;
+  return orientation === 'vertical' ? String(index + 1) : numberToLetters(index);
+}
+
+/** Expands a building's GridSystem into the full set of per-floor
+ * GridLine-shaped records (position + label, no id/floorId/timestamps —
+ * callers attach those) that every floor of that building should show.
+ * This is the ONE place a GridSystem becomes concrete geometry;
+ * useGridSystemSync below calls this per floor to keep each floor's
+ * real GridLine documents in sync with it, and the column-to-
+ * intersection snap (structural-coordination.ts's
+ * nearestGridIntersection, wired in FloorPlanCanvas) calls it directly
+ * off the building's live gridSystem rather than waiting for Firestore
+ * sync to land, so a column snaps correctly even on the very first
+ * render after a spacing edit. */
+export function deriveGridLinesFromSystem(
+  gridSystem: GridSystem,
+): { orientation: 'vertical' | 'horizontal'; position: number; label: string }[] {
+  const vPositions = deriveGridAxisPositions(gridSystem.vertical);
+  const hPositions = deriveGridAxisPositions(gridSystem.horizontal);
+  return [
+    ...gridSystem.vertical.map((axis, i) => ({
+      orientation: 'vertical' as const,
+      position: vPositions[i],
+      label: getGridAxisLabel(axis, i, 'vertical'),
+    })),
+    ...gridSystem.horizontal.map((axis, i) => ({
+      orientation: 'horizontal' as const,
+      position: hPositions[i],
+      label: getGridAxisLabel(axis, i, 'horizontal'),
+    })),
+  ];
+}
+
+/**
+ * Reconciles one floor's real GridLine documents to match a building's
+ * GridSystem — called whenever Design Studio opens a floor on a
+ * building that has a GridSystem, and again whenever the GridSystem is
+ * edited (Overview page's grid setup panel), so every floor of the
+ * building always shows the same grid without the person having to
+ * redraw it floor by floor.
+ *
+ * Matches existing lines to the derived set by (orientation, position)
+ * — position is meaningful for the match instead of array order,
+ * because inserting a new axis at the start of one direction shouldn't
+ * touch every other line's document, only add the new one and, if
+ * spacing anywhere changed, update positions that actually moved.
+ * Lines present on the floor but no longer derivable from the
+ * GridSystem (an axis was removed) are deleted; a person's own
+ * hand-drawn GridLine from before this building had a GridSystem would
+ * also be swept up here, since once a building has a GridSystem it is
+ * the single source of truth for that building's grid — mixing
+ * GridSystem-derived and hand-drawn lines on the same floor would mean
+ * two different things could both claim to be "grid line 3".
+ */
+export async function syncFloorGridLinesFromSystem(
+  projectId: string,
+  buildingId: string,
+  floorId: string,
+  gridSystem: GridSystem,
+  existingLines: GridLine[],
+): Promise<void> {
+  const derived = deriveGridLinesFromSystem(gridSystem);
+  const POSITION_MATCH_TOLERANCE_M = 0.001;
+  const col = subCol(projectId, buildingId, floorId, 'gridLines');
+  const batch = writeBatch(db);
+  let writes = 0;
+
+  const stillPresent = new Set<string>();
+  for (const d of derived) {
+    const match = existingLines.find(
+      (l) =>
+        l.orientation === d.orientation &&
+        Math.abs(l.position - d.position) <= POSITION_MATCH_TOLERANCE_M,
+    );
+    if (match) {
+      stillPresent.add(match.id);
+      if (match.label !== d.label) {
+        batch.update(doc(col, match.id), { label: d.label, updatedAt: serverTimestamp() });
+        writes++;
+      }
+    } else {
+      const ref = doc(col);
+      batch.set(ref, {
+        floorId,
+        orientation: d.orientation,
+        position: d.position,
+        label: d.label,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      writes++;
+    }
+  }
+  for (const l of existingLines) {
+    if (!stillPresent.has(l.id)) {
+      batch.delete(doc(col, l.id));
+      writes++;
+    }
+  }
+
+  if (writes > 0) await batch.commit();
 }
 
 /** Live auto-label for a SectionLine — "A-A", "B-B", … (real section-mark

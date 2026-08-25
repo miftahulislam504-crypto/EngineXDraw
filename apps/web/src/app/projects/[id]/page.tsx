@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button, Input, PageHeader, RoleBadge, StatusBadge } from '@archibim/shared-ui';
-import type { Building, Project, ProjectMember, ProjectStatus } from '@archibim/object-model';
+import type { Building, GridSystem, Project, ProjectMember, ProjectStatus } from '@archibim/object-model';
 import {
   subscribeToProject,
   subscribeToBuildings,
@@ -13,8 +13,10 @@ import {
   getHubBuildingSeed,
   seedBuildingFromHub,
   resyncBuildingFromHub,
+  updateGridSystem,
 } from '@/lib/projects';
 import { useI18nStore, formatTemplate, type Translations } from '@/lib/i18n';
+import { GridSystemPanel } from '@/components/design/GridSystemPanel';
 
 function statusLabel(status: ProjectStatus, t: Translations['projectStatus']): string {
   if (status === 'active') return t.active;
@@ -46,6 +48,27 @@ export default function ProjectDetailPage() {
   const [isSyncingFromHub, setIsSyncingFromHub] = useState(false);
   const [hubSyncError, setHubSyncError] = useState<string | null>(null);
   const [showResyncConfirm, setShowResyncConfirm] = useState(false);
+
+  // Grid System panel: which building's grid is currently being edited
+  // (null = none open) — only one at a time, same reasoning as
+  // isAddingBuilding being a single flag rather than per-row state.
+  const [gridPanelBuildingId, setGridPanelBuildingId] = useState<string | null>(null);
+  const [isSavingGrid, setIsSavingGrid] = useState(false);
+  const [gridSaveError, setGridSaveError] = useState<string | null>(null);
+
+  async function handleSaveGridSystem(buildingId: string, gridSystem: GridSystem) {
+    setIsSavingGrid(true);
+    setGridSaveError(null);
+    try {
+      await updateGridSystem(projectId, buildingId, gridSystem);
+      setGridPanelBuildingId(null);
+    } catch (err) {
+      console.error('updateGridSystem failed:', err);
+      setGridSaveError(t.projectDetail.gridSystemSaveError);
+    } finally {
+      setIsSavingGrid(false);
+    }
+  }
 
   useEffect(() => {
     const unsub1 = subscribeToProject(projectId, setProject);
@@ -304,23 +327,43 @@ export default function ProjectDetailPage() {
 
           <div className="flex flex-col gap-2">
             {buildingList.map((b) => (
-              <div
-                key={b.id}
-                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-sheet border border-line bg-surface px-4 py-3 text-sm"
-              >
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="min-w-0 truncate font-medium text-ink">{b.name}</span>
-                  {b.source === 'hub' && (
-                    <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-accent">
-                      {t.projectDetail.syncedFromHub}
+              <div key={b.id} className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-sheet border border-line bg-surface px-4 py-3 text-sm">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="min-w-0 truncate font-medium text-ink">{b.name}</span>
+                    {b.source === 'hub' && (
+                      <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-accent">
+                        {t.projectDetail.syncedFromHub}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <span className="font-mono text-xs text-ink-muted">
+                      {b.numberOfFloors} {t.projectDetail.floorLabel}
+                      {locale === 'en' && b.numberOfFloors !== 1 ? 's' : ''}
+                      {b.buildingType ? ` · ${b.buildingType}` : ''}
                     </span>
-                  )}
+                    <button
+                      onClick={() => {
+                        setGridSaveError(null);
+                        setGridPanelBuildingId(gridPanelBuildingId === b.id ? null : b.id);
+                      }}
+                      className="font-mono text-[11px] uppercase tracking-wide text-ink-faint hover:text-accent"
+                    >
+                      {b.gridSystem ? t.projectDetail.gridSystemEdit : t.projectDetail.gridSystemSetUp}
+                    </button>
+                  </div>
                 </div>
-                <span className="shrink-0 font-mono text-xs text-ink-muted">
-                  {b.numberOfFloors} {t.projectDetail.floorLabel}
-                  {locale === 'en' && b.numberOfFloors !== 1 ? 's' : ''}
-                  {b.buildingType ? ` · ${b.buildingType}` : ''}
-                </span>
+                {gridPanelBuildingId === b.id && (
+                  <GridSystemPanel
+                    t={t}
+                    initial={b.gridSystem}
+                    isSaving={isSavingGrid}
+                    saveError={gridSaveError}
+                    onSave={(gridSystem) => handleSaveGridSystem(b.id, gridSystem)}
+                    onCancel={() => setGridPanelBuildingId(null)}
+                  />
+                )}
               </div>
             ))}
             {!stillDeciding && !isSyncingFromHub && buildingList.length === 0 && (

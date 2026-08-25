@@ -13,9 +13,9 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 import { db } from './firebase-client';
-import type { Building, Project, ProjectMember } from '@archibim/object-model';
+import type { Building, GridSystem, Project, ProjectMember } from '@archibim/object-model';
 import { buildExportPayload } from './hub/hub-read';
-import { floorLevelName } from './floors';
+import { floorLevelName, getFloorsOnce, gridLineCrud, syncFloorGridLinesFromSystem } from './floors';
 
 /**
  * Dashboard / Team Workspace: subscribe to every project the current user
@@ -279,4 +279,34 @@ export async function updateBuilding(
 ) {
   const buildingRef = doc(db, 'projects', projectId, 'buildings', buildingId);
   await updateDoc(buildingRef, patch);
+}
+
+/**
+ * Sets (or replaces) a building's structural GridSystem and immediately
+ * reconciles every floor's real GridLine documents to match — called by
+ * the Overview page's Grid System setup panel on save. Every floor gets
+ * the same grid this way, which is the entire point of a GridSystem
+ * living on Building rather than being drawn per floor (see Building.
+ * gridSystem's doc comment); doing the fan-out to every floor here,
+ * once, is simpler and less error-prone than expecting every future
+ * caller of updateBuilding to remember to also re-sync floors.
+ *
+ * A building can have zero floors yet (mid-creation) — nothing to sync
+ * in that case, each floor will pick up the current gridSystem itself
+ * next time Design Studio opens it (see the design page's grid-sync
+ * effect), so this only loops over floors that already exist.
+ */
+export async function updateGridSystem(
+  projectId: string,
+  buildingId: string,
+  gridSystem: GridSystem,
+): Promise<void> {
+  const buildingRef = doc(db, 'projects', projectId, 'buildings', buildingId);
+  await updateDoc(buildingRef, { gridSystem });
+
+  const floors = await getFloorsOnce(projectId, buildingId);
+  for (const floor of floors) {
+    const existingLines = await gridLineCrud.getOnce(projectId, buildingId, floor.id);
+    await syncFloorGridLinesFromSystem(projectId, buildingId, floor.id, gridSystem, existingLines);
+  }
 }

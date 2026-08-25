@@ -97,6 +97,9 @@ import {
   isWallOverlappingWall,
   isBeamOverlappingBeam,
   isColumnOverlappingColumn,
+  isFootingOverlappingFooting,
+  isSlabOverlappingSlab,
+  isStairFlightOverlappingStair,
 } from '@archibim/core-engine';
 import { subscribeToBuildings, updateBuilding } from '@/lib/projects';
 import { useDesignHistoryStore } from '@/lib/design-history';
@@ -156,6 +159,7 @@ import {
   parapetCrud,
   gutterCrud,
   subscribeToFloorElements,
+  syncFloorGridLinesFromSystem,
   type FloorElements,
 } from '@/lib/floors';
 import { subscribeToShafts, createShaft, updateShaft, deleteShaft } from '@/lib/shafts';
@@ -512,6 +516,37 @@ export default function DesignStudioPage() {
     return () => unsubs.forEach((unsub) => unsub());
   }, [projectId, buildingId, floorId]);
 
+  // Keep this floor's real GridLine documents in sync with the
+  // building's GridSystem (Overview page's grid setup) whenever this
+  // floor is opened or the building's grid changes — this is what makes
+  // every floor of a building show the same grid without the person
+  // redrawing it per floor. Reads the current lines directly rather
+  // than depending on the `gridLines` subscription state above: that
+  // state updates on every incoming snapshot (including the writes this
+  // effect itself makes), which would make it a dependency that
+  // retriggers itself — reading fresh here instead keeps this effect's
+  // dependencies limited to "which floor" and "what the grid should be".
+  // syncFloorGridLinesFromSystem is itself a no-op write once the floor
+  // already matches, so this is safe to run on every floor/gridSystem
+  // change without extra guarding.
+  useEffect(() => {
+    if (!buildingId || !floorId) return;
+    const gridSystem = currentBuilding?.gridSystem;
+    if (!gridSystem) return;
+    let cancelled = false;
+    gridLineCrud.getOnce(projectId, buildingId, floorId).then((existingLines) => {
+      if (cancelled) return;
+      syncFloorGridLinesFromSystem(projectId, buildingId, floorId, gridSystem, existingLines).catch(
+        (err) => {
+          console.error('syncFloorGridLinesFromSystem failed:', err);
+        },
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, buildingId, floorId, currentBuilding?.gridSystem]);
+
   // Phase 7 — floor-below reference overlay. The floor immediately
   // below the one being edited, by `level` within the same building
   // (not necessarily adjacent in `floors` array order, so this finds
@@ -700,6 +735,12 @@ export default function DesignStudioPage() {
     // past the first, since columns are gated on having a footing) lines
     // up exactly rather than needing pixel-perfect placement.
     const snapped = snapToNearestColumn(center, columns);
+    if (
+      isFootingOverlappingFooting(snapped, DEFAULT_FOOTING_WIDTH, DEFAULT_FOOTING_DEPTH, footings)
+    ) {
+      showBlockMessage(t.designStudio.structuralBlock.footingOverlapsFooting);
+      return;
+    }
     const data = {
       center: snapped,
       width: DEFAULT_FOOTING_WIDTH,
@@ -732,6 +773,14 @@ export default function DesignStudioPage() {
     // is roughly a 0.0025 sq m minimum, so this uses the same order of
     // magnitude as a floor.
     if (boundary.length < 3 || polygonArea(boundary) < 0.0025) return;
+    // Only Slab gets a duplicate-boundary check for now — see
+    // isBoundaryOverlappingBoundary's doc for why it's written generic
+    // over Ceiling/Foundation/Roof/Balcony too, left for a follow-up
+    // pass rather than wired here yet.
+    if (tool === 'slab' && isSlabOverlappingSlab(boundary, slabs)) {
+      showBlockMessage(t.designStudio.structuralBlock.slabOverlapsSlab);
+      return;
+    }
     // Slab and Roof are real structural spans — every corner needs a
     // column or wall underneath for support. Balcony is a cantilever —
     // it doesn't need columns underneath (that's the point of a
@@ -863,6 +912,10 @@ export default function DesignStudioPage() {
       const start = points[i];
       const end = points[i + 1];
       if (Math.hypot(end.x - start.x, end.y - start.y) < 0.3) continue; // skip a degenerate flight
+      if (isStairFlightOverlappingStair(start, end, stairs)) {
+        showBlockMessage(t.designStudio.structuralBlock.stairOverlapsStair);
+        return;
+      }
       flights.push({
         start,
         end,
@@ -887,6 +940,13 @@ export default function DesignStudioPage() {
   async function handleCreateStairU(p1: Point2D, p2: Point2D, p3: Point2D) {
     if (!buildingId || !floorId) return;
     const data = deriveUShapeStairFromRectangle(p1, p2, p3);
+    const overlapsExisting = data.flights.some((f) =>
+      isStairFlightOverlappingStair(f.start, f.end, stairs),
+    );
+    if (overlapsExisting) {
+      showBlockMessage(t.designStudio.structuralBlock.stairOverlapsStair);
+      return;
+    }
     const id = await stairCrud.create(projectId, buildingId, floorId, data);
     recordHistory({ action: 'create', kind: 'stair', id, data });
   }

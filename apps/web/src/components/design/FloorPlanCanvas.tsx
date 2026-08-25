@@ -50,6 +50,7 @@ import {
   formatFeetInches,
   findNearestColumnBelowCenter,
   findNearestColumnCenter,
+  nearestGridIntersection,
 } from '@archibim/core-engine';
 import {
   useDesignStudioStore,
@@ -881,7 +882,16 @@ export function FloorPlanCanvas({
               belowFloorColumns.map((c) => c.center),
             )
           : null;
-      onCreateColumn(belowColumn ?? point);
+      // Below-column snap wins when both are in range — keeping load
+      // path continuity with the column directly below matters more
+      // than grid alignment, and in a correctly-gridded building the
+      // column below is normally already sitting on the same
+      // intersection anyway, so this is rarely a real tradeoff. Grid
+      // snap is the fallback: it's what keeps a fresh line of columns
+      // straight on a floor that has nothing below it yet (ground
+      // floor) or where this is the first column at a given
+      // intersection.
+      onCreateColumn(belowColumn ?? nearestGridIntersection(point, gridLines));
       return;
     }
 

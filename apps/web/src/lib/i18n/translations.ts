@@ -235,6 +235,9 @@ export interface Translations {
       wallOverlapsWall: string;
       beamOverlapsBeam: string;
       columnOverlapsColumn: string;
+      footingOverlapsFooting: string;
+      slabOverlapsSlab: string;
+      stairOverlapsStair: string;
     };
     polygonDraft: {
       vertexCount: string; // use {n} as placeholder
@@ -433,6 +436,25 @@ export interface Translations {
     resyncConfirmAction: string;
     hubSyncFailed: string;
     addBuildingManually: string;
+    gridSystem: string;
+    gridSystemSetUp: string;
+    gridSystemEdit: string;
+    gridSystemTitle: string;
+    gridSystemIntro: string;
+    gridSystemVerticalAxes: string;
+    gridSystemHorizontalAxes: string;
+    gridSystemSpacingFromPrevious: string;
+    gridSystemAddAxis: string;
+    gridSystemRemoveAxis: string;
+    gridSystemLabelPlaceholder: string;
+    gridSystemRunningTotal: string; // use {n} as placeholder
+    gridSystemSave: string;
+    gridSystemSaving: string;
+    gridSystemCancel: string;
+    gridSystemEmpty: string;
+    gridSystemZeroSpacingError: string;
+    gridSystemSaveError: string;
+    gridSystemFirstAxisNote: string;
   };
   elevations: {
     pageTitle: string;

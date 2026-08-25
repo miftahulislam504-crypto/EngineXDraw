@@ -139,7 +139,53 @@ export interface Building {
    * Building's own identity fields (name, numberOfFloors, …) rather than
    * the reusable-across-buildings company/firm info block. */
   buildingNo?: string;
+  /** ETABS-style structural column grid, set once per building and
+   * applied to every floor — the alternative to hand-drawing GridLine
+   * documents floor by floor (see annotations.ts's GridLine doc for why
+   * that per-floor path still exists and stays supported for buildings
+   * with no GridSystem). Unequal/custom bay spacing, not a uniform
+   * pitch: each axis stores its own distance from the PREVIOUS axis
+   * (bay span), not an absolute coordinate, because that's how a
+   * structural engineer actually thinks about and edits a grid — "bay
+   * 2-3 is 3.8m" reads and edits far more naturally than two absolute
+   * positions that both have to change together. Absolute positions
+   * (what FloorPlanCanvas and column-snap actually need) are derived by
+   * a running cumulative sum starting at 0 for each axis's first entry
+   * — see deriveGridSystemPositions in floors.ts, the single place that
+   * conversion happens so every consumer (grid-line sync, column snap,
+   * grid bubble labels) agrees on the same absolute coordinates. */
+  gridSystem?: GridSystem;
   createdAt: FirestoreTimestampLike;
+}
+
+/** One axis of a GridSystem — one vertical line (constant x, numbered
+ * "1, 2, 3…") or one horizontal line (constant y, lettered "A, B, C…").
+ * `spacingFromPrevious` is the bay span from the previous axis in the
+ * same direction; the array's order IS the axis order (1 before 2
+ * before 3, A before B before C), there is no separate index/position
+ * field to keep in sync with array order. */
+export interface GridAxis {
+  /** Auto-numbered/-lettered from array order if absent — same
+   * optional-override shape as GridLine.label, for the same reason: a
+   * person can rename "3" to "3A" for an inserted intermediate column
+   * line without renumbering every axis after it. */
+  label?: string;
+  /** Meters — distance from the previous axis in this array (0 or
+   * absent for the first axis, which always sits at the building's
+   * origin edge). Always >= 0; a zero-spacing axis is rejected by the
+   * setup UI (two column lines on top of each other is never a real
+   * design, same reasoning as isColumnOverlappingColumn in
+   * structural-coordination.ts). */
+  spacingFromPrevious: number;
+}
+
+export interface GridSystem {
+  /** Vertical grid lines (constant x), ordered left to right — "1, 2,
+   * 3…" by convention. */
+  vertical: GridAxis[];
+  /** Horizontal grid lines (constant y), ordered bottom to top — "A,
+   * B, C…" by convention. */
+  horizontal: GridAxis[];
 }
 
 /**

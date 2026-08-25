@@ -65,6 +65,7 @@ import { subscribeToSiteBoundary } from '@/lib/siteBoundary';
 import { getSheetsOnce } from '@/lib/sheets';
 import { getLibraryOnce } from '@/lib/library';
 import { computeFloorBaseElevations } from '@archibim/core-engine';
+import { deriveStairLandings } from '@archibim/core-engine';
 import type { ProjectLevel, ProjectGrid, BuildingElementRef } from './contract.types';
 // wrapContract/uploadModuleData আগে এখানে import হতো (Storage-based
 // publishArchitecturalModel()-এর জন্য) — এখন বাতিল, নিচের file comment
@@ -203,6 +204,27 @@ async function floorElements(
       type: 'stair',
       levelId: floor.id,
       geometry: { width: s.width, flights: s.flights },
+    });
+    // Landing export — gap-closing pass (২০২৬-০৮): deriveStairLandings()
+    // ইতিমধ্যে core-engine এ ছিল (2D plan + 3D rendering-এর জন্য),
+    // কিন্তু hub-write.ts কখনো এটা কল করেনি — শুধু raw flights[] export
+    // হতো (hub-module-shapes.ts এর DrawStairGeometry কমেন্টে এই gap
+    // documented ছিল)। শুধু 'turn' kind landing export করা হচ্ছে —
+    // 'bottom'/'top' landing স্টোরির নিজস্ব floor level-এই বসে
+    // (elevation: 0 বা stairTotalRise, যা যথাক্রমে নিচের ও উপরের তলার
+    // floor slab-এর সমান), তাই সেগুলো ইতিমধ্যে সেই floor-এর নিজস্ব Slab
+    // element দিয়ে কাঠামোগতভাবে কভার্ড — নতুন কোনো element হিসেবে আবার
+    // পাঠানো ডুপ্লিকেট self-weight/design হয়ে যেত। শুধু 'turn' landing
+    // (দুই flight-এর মাঝের mid-run প্ল্যাটফর্ম, নিজের কোনো floor slab
+    // দিয়ে কভার্ড না) সত্যিকারের নতুন structural element।
+    const turnLandings = deriveStairLandings(s).filter((l) => l.kind === 'turn');
+    turnLandings.forEach((landing, i) => {
+      refs.push({
+        id: `${s.id}-L${i + 1}`,
+        type: 'stair-landing',
+        levelId: floor.id,
+        geometry: { boundary: landing.boundary, elevation: landing.elevation },
+      });
     });
   }
   for (const rf of roofs as Roof[]) {

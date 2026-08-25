@@ -193,6 +193,7 @@ export async function updateWall(
       | 'fireRatingMinutes'
       | 'acousticRatingSTC'
       | 'structuralNote'
+      | 'isShearWall'
       | 'tags'
       | 'customParameters'
     >
@@ -248,6 +249,7 @@ export async function updateWallsPatchBatch(
       | 'colorHex'
       | 'fireRatingMinutes'
       | 'acousticRatingSTC'
+      | 'isShearWall'
     >
   >,
 ) {

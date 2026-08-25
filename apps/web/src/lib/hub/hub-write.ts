@@ -149,10 +149,26 @@ async function floorElements(
 
   const refs: BuildingElementRef[] = [];
 
+  // Wall → 'wall' | 'shear-wall' export split (Miftahul, 2026-08-25).
+  // Every wall in Draw is still just a Wall for every Draw-side purpose
+  // (drawing, join/miter, room boundary, rendering) — `isShearWall` (see
+  // geometry.ts's field comment) only changes the Hub `type` tag, which
+  // Structural uses to decide how the wall participates there:
+  //   - type: 'shear-wall'  → Structural models it as a full lateral-load-
+  //     resisting ShearWallElement (design/capacity checks apply).
+  //   - type: 'wall'        → Structural still models it (self-weight/dead-
+  //     load contribution, same AreaElement treatment as before) but it
+  //     never enters lateral design/capacity checks — Structural's own
+  //     design engine already only branches on shear-wall/core-wall for
+  //     that (weightOptimization.ts), so an ordinary wall was never more
+  //     than a self-weight source there even when this export always said
+  //     'wall'. This split just makes the intent explicit at the Hub
+  //     boundary instead of leaving it as an unstated downstream fact.
+  // Geometry shape is identical either way — only `type` differs.
   for (const w of walls as Wall[]) {
     refs.push({
       id: w.id,
-      type: 'wall',
+      type: w.isShearWall ? 'shear-wall' : 'wall',
       levelId: floor.id,
       geometry: {
         start: w.start,

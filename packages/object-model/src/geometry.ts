@@ -45,6 +45,22 @@ export interface Wall {
   fireRatingMinutes?: number;
   acousticRatingSTC?: number;
   structuralNote?: string;
+  /**
+   * Marks this wall as a lateral-load-resisting shear wall, set explicitly
+   * by the engineer (never inferred from thickness — see the long-standing
+   * note in Structural's hub-geometry-parser.ts on why a thickness
+   * threshold isn't a reliable indicator: real shear wall thickness
+   * (150-400mm) and ordinary Bangladesh brick/block wall thickness
+   * (125-250mm) overlap too much). Absent/false means an ordinary
+   * (architectural/partition) wall.
+   *
+   * This does not change how the wall draws, joins, or miters here in
+   * Draw — a shear wall is still just a Wall for every Draw-side purpose
+   * (room boundary, snapping, join/miter, rendering). The flag only
+   * changes what gets exported to Hub as a full structural element vs.
+   * a self-weight-only contribution — see hub-write.ts.
+   */
+  isShearWall?: boolean;
   tags?: string[];
   customParameters?: Record<string, string>;
   createdAt: FirestoreTimestampLike;

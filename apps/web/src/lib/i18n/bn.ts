@@ -417,6 +417,7 @@ export const bn: Translations = {
     acousticRating: 'অ্যাকোস্টিক রেটিং (STC)',
     structuralNote: 'স্ট্রাকচারাল নোট',
     structuralNotePlaceholder: 'যেমন লোড-বেয়ারিং',
+    shearWall: 'শিয়ার ওয়াল',
     tags: 'ট্যাগ (কমা দিয়ে আলাদা করুন)',
     tagsPlaceholder: 'যেমন shear-wall, exterior',
     customParameters: 'কাস্টম প্যারামিটার',

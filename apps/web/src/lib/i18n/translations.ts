@@ -306,6 +306,7 @@ export interface Translations {
     acousticRating: string;
     structuralNote: string;
     structuralNotePlaceholder: string;
+    shearWall: string;
     tags: string;
     tagsPlaceholder: string;
     customParameters: string;

@@ -85,6 +85,7 @@ export interface PropertiesPanelProps {
         | 'fireRatingMinutes'
         | 'acousticRatingSTC'
         | 'structuralNote'
+        | 'isShearWall'
         | 'tags'
         | 'customParameters'
       >
@@ -359,6 +360,19 @@ export function PropertiesPanel({
               <option value="INTERIOR">{t.wallTypes.INTERIOR}</option>
               <option value="PARTITION">{t.wallTypes.PARTITION}</option>
             </select>
+          </label>
+
+          <label className="flex items-center justify-between gap-2 rounded-sheet border border-line-strong px-3 py-2">
+            <span className="font-mono text-[11px] uppercase tracking-wide text-ink-muted">
+              {t.properties.shearWall}
+            </span>
+            <input
+              type="checkbox"
+              checked={wall.isShearWall ?? false}
+              onChange={(e) => onUpdateWall(wall.id, { isShearWall: e.target.checked })}
+              className="h-4 w-4 cursor-pointer"
+              aria-label={t.properties.shearWall}
+            />
           </label>
 
           <div className="mt-1 border-t border-line pt-3">

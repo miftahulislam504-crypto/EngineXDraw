@@ -61,7 +61,7 @@ export interface GeometryData {
 
 export interface BuildingElementRef {
   id: string;
-  type: string; // 'wall' | 'door' | 'column' | 'beam' | ...
+  type: string; // 'wall' | 'shear-wall' | 'door' | 'column' | 'beam' | ...
   levelId: string; // refers to ProjectLevel.id
   geometry?: GeometryData;
   materialId?: string;

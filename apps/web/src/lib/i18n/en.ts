@@ -417,6 +417,7 @@ export const en: Translations = {
     acousticRating: 'Acoustic rating (STC)',
     structuralNote: 'Structural note',
     structuralNotePlaceholder: 'e.g. Load-bearing',
+    shearWall: 'Shear wall',
     tags: 'Tags (comma-separated)',
     tagsPlaceholder: 'e.g. shear-wall, exterior',
     customParameters: 'Custom parameters',

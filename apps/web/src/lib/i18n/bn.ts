@@ -224,6 +224,9 @@ export const bn: Translations = {
       finishRectangle: 'আয়তক্ষেত্র হিসেবে শেষ করুন',
       finishShape: 'আকৃতি শেষ করুন',
       cancel: 'বাতিল',
+      autoFitFloor: 'পুরো ফ্লোরে বসান',
+      autoFitFloorNoWalls: 'পুরো ফ্লোরে বসাতে হলে আগে এই ফ্লোরে বাইরের দেয়াল আঁকতে হবে।',
+      autoFitFloorFailed: 'ফ্লোরের বাইরের আউটলাইন খুঁজে পাওয়া যায়নি — দেয়ালগুলো একটা বদ্ধ লুপ তৈরি করছে কিনা দেখুন।',
     },
     stairDraft: {
       pointCount: '{n}টা পয়েন্ট বসানো হয়েছে — আরেকটা flight বা turn যোগ করতে ক্লিক করুন',

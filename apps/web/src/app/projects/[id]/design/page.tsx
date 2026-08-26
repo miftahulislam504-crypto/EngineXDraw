@@ -100,6 +100,7 @@ import {
   isFootingOverlappingFooting,
   isSlabOverlappingSlab,
   isStairFlightOverlappingStair,
+  detectBuildingFootprint,
 } from '@archibim/core-engine';
 import { subscribeToBuildings, updateBuilding } from '@/lib/projects';
 import { useDesignHistoryStore } from '@/lib/design-history';
@@ -880,6 +881,28 @@ export default function DesignStudioPage() {
       const id = await createSiteBoundary(projectId, buildingId, data);
       recordHistory({ action: 'create', kind: 'siteBoundary', id, data });
     }
+  }
+
+  // Auto-fit the in-progress Slab/Roof polygon to this floor's detected
+  // outer wall outline (detectBuildingFootprint walks the same wall set
+  // Compliance/Analytics already use for FAR/footprint area) instead of
+  // requiring every corner to be clicked by hand. Reuses
+  // handleCreatePolygon for the actual creation so the usual support/
+  // overlap gates and history recording stay exactly the same as a
+  // manually-drawn boundary — this only replaces how the boundary's
+  // points are produced, not what happens with them afterward.
+  async function handleAutoFitPolygonToFloor(tool: 'slab' | 'roof') {
+    if (walls.length === 0) {
+      showBlockMessage(t.designStudio.polygonDraft.autoFitFloorNoWalls);
+      return;
+    }
+    const footprint = detectBuildingFootprint(walls);
+    if (!footprint) {
+      showBlockMessage(t.designStudio.polygonDraft.autoFitFloorFailed);
+      return;
+    }
+    await handleCreatePolygon(tool, footprint.boundary);
+    setPolygonDraft(null);
   }
 
   async function handleCreateRamp(start: { x: number; y: number }, end: { x: number; y: number }) {
@@ -1943,6 +1966,31 @@ export default function DesignStudioPage() {
                 }}
               />
               <span>°</span>
+            </div>
+          )}
+          {/* Auto-fit-to-floor for Slab/Roof — the two polygon tools that
+              are real structural spans over the whole floor plate, and
+              so are the ones actually meant to cover wall-to-wall/
+              column-to-column rather than an arbitrary sub-area (unlike
+              Ceiling/Foundation/Balcony/Shaft/SiteBoundary, which are
+              routinely smaller than the full floor on purpose). Shown as
+              soon as the tool is selected — before any vertex is placed
+              — since the whole point is to skip manual clicking; once a
+              draft is in progress the person has already committed to
+              drawing by hand, so this is hidden in favor of the
+              Finish-shape bar below. detectBuildingFootprint (same
+              wall-outline detection Compliance/Analytics already use for
+              FAR/footprint area) does the actual boundary computation —
+              see handleAutoFitPolygonToFloor. */}
+          {(activeTool === 'slab' || activeTool === 'roof') && (!polygonDraft || polygonDraft.length === 0) && (
+            <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-sheet border border-line bg-white/95 px-3 py-2 text-sm shadow-sm">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => handleAutoFitPolygonToFloor(activeTool as 'slab' | 'roof')}
+              >
+                {t.designStudio.polygonDraft.autoFitFloor}
+              </Button>
             </div>
           )}
           {/* Floating Finish/Cancel bar for the polygon boundary tools

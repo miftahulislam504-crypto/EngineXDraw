@@ -648,6 +648,13 @@ export function FloorPlanCanvas({
           walls,
           gridSize,
           lastPoint,
+          // Slab/Roof/Ceiling/Balcony/Shaft/SiteBoundary and Stair all
+          // share this snap path (SNAP_AWARE_TOOLS) — passing columns
+          // here means a polygon vertex placed near a column now lands
+          // exactly on its center instead of drifting into the gap
+          // between the column and the nearest wall. See resolveSnap's
+          // priority comment in snapping.ts.
+          columns,
         }).point;
       }
       return cursorMeters;
@@ -742,6 +749,9 @@ export function FloorPlanCanvas({
         walls,
         gridSize,
         lastPoint,
+        // Mirrors the columns passed in snapFromPointer above, so the
+        // hover preview matches exactly where the click will land.
+        columns,
       });
       setSnappedCursor(snap.point);
       setGuide(snap.guide ?? null);

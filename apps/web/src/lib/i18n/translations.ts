@@ -244,6 +244,11 @@ export interface Translations {
       finishRectangle: string;
       finishShape: string;
       cancel: string;
+      // Slab/Roof "auto-fit" action — fits the polygon directly to this
+      // floor's detected outer wall outline instead of manual clicking.
+      autoFitFloor: string;
+      autoFitFloorNoWalls: string;
+      autoFitFloorFailed: string;
     };
     stairDraft: {
       pointCount: string; // use {n} as placeholder

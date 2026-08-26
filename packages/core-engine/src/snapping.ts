@@ -1,6 +1,13 @@
 import type { Column, Point2D, Wall } from '@archibim/object-model';
 import { distance } from './geometry-utils';
 
+// Same tolerance structural-coordination.ts's CORNER_SUPPORT_TOLERANCE_M
+// uses to *accept* a slab/roof corner as supported by a column — reusing
+// it here for the *snap* tier means a vertex placed close enough to pass
+// that gate also gets pulled exactly onto the column center, instead of
+// passing the gate while sitting a few centimeters off it.
+const DEFAULT_COLUMN_CENTER_TOLERANCE_M = 0.2;
+
 export interface SnapContext {
   walls: Wall[];
   gridSize: number; // meters, e.g. 0.5
@@ -8,6 +15,15 @@ export interface SnapContext {
   endpointTolerance?: number; // meters
   wallSpanTolerance?: number; // meters — for T-junction snapping onto another wall's span
   angleSnapDeg?: number; // degrees, e.g. 45 for 0/45/90/135...
+  /** Columns on the current floor — optional so existing callers
+   * (Wall/Beam-second-point/etc.) that never pass this keep working
+   * exactly as before. When present, a column center within
+   * columnCenterTolerance outranks every other snap tier: a Slab/Roof/
+   * Ceiling/etc. polygon vertex needs to land exactly on a column
+   * center the same way it needs to land exactly on a wall endpoint —
+   * see resolveSnap's priority comment. */
+  columns?: Column[];
+  columnCenterTolerance?: number; // meters
 }
 
 export type SnapKind = 'endpoint' | 'wall-span' | 'orthogonal' | 'grid';
@@ -190,16 +206,29 @@ export function pointAtLockedLength(
 }
 
 /**
- * Priority: existing wall endpoint > a point along another wall's span
- * (T-junction) > orthogonal angle from the in-progress wall's start point >
- * plain grid. Endpoint snaps win because missing a connection is a worse
- * error than an imprecise angle; wall-span comes next so a T-junction is
- * reachable at all (it would never win against grid/orthogonal otherwise).
+ * Priority: column center > existing wall endpoint > a point along another
+ * wall's span (T-junction) > orthogonal angle from the in-progress wall's
+ * start point > plain grid. Column center is checked first because it's
+ * the smallest, most exact target of all of them (a single point, not a
+ * line) — anything close enough to be "aiming for that column" should
+ * land precisely on its center rather than a wall endpoint that happens
+ * to sit nearby. Endpoint snaps win next because missing a wall
+ * connection is a worse error than an imprecise angle; wall-span comes
+ * after so a T-junction is reachable at all (it would never win against
+ * grid/orthogonal otherwise).
  */
 export function resolveSnap(cursor: Point2D, ctx: SnapContext): SnapResult {
   const endpointTolerance = ctx.endpointTolerance ?? 0.3;
   const wallSpanTolerance = ctx.wallSpanTolerance ?? 0.25;
   const angleSnapDeg = ctx.angleSnapDeg ?? 45;
+  const columnCenterTolerance = ctx.columnCenterTolerance ?? DEFAULT_COLUMN_CENTER_TOLERANCE_M;
+
+  if (ctx.columns && ctx.columns.length > 0) {
+    const nearestColumn = findNearestColumnCenter(cursor, ctx.columns, columnCenterTolerance);
+    if (nearestColumn) {
+      return { point: nearestColumn, snappedTo: 'endpoint' };
+    }
+  }
 
   const nearestEndpoint = findNearestEndpoint(
     cursor,

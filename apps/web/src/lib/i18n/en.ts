@@ -224,6 +224,9 @@ export const en: Translations = {
       finishRectangle: 'Finish as rectangle',
       finishShape: 'Finish shape',
       cancel: 'Cancel',
+      autoFitFloor: 'Fit to whole floor',
+      autoFitFloorNoWalls: "Can't fit to the floor yet — draw this floor's outer walls first.",
+      autoFitFloorFailed: "Couldn't find the floor's outer outline — check that the walls form a closed loop.",
     },
     stairDraft: {
       pointCount: '{n} point(s) placed — click to add a flight or a turn',

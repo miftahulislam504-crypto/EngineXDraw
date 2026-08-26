@@ -91,11 +91,30 @@ function clipPolygonToHalfPlane(subject: Point2D[], a: Point2D, b: Point2D): Poi
   const intersect = (p1: Point2D, p2: Point2D): Point2D => {
     const d1x = p2.x - p1.x;
     const d1y = p2.y - p1.y;
-    const denom = edgeX * d1y - edgeY * d1x;
+    // t solves f(p1 + t*d) = 0, where f(P) = (P.x-a.x)*edgeY - (P.y-a.y)*edgeX
+    // is the same half-plane function isInside uses. Expanding gives
+    // f(p1) + t*(d1x*edgeY - d1y*edgeX) = 0, so t = -f(p1) / denom with
+    // denom = d1x*edgeY - d1y*edgeX. The previous version used
+    // denom = edgeX*d1y - edgeY*d1x (the negation of this) and then
+    // divided by -denom instead of denom, which looks like it cancels
+    // out but doesn't: it silently flips the sign of t. That's
+    // invisible whenever the true intersection sits at t=0 (previous
+    // endpoint), which is why simple test cases kept passing, but for
+    // any other t it lands the intersection point outside the actual
+    // segment entirely — e.g. clipping (8,4)->(4,4) against the line
+    // x=4 has the true crossing at t=1 (point (4,4)) but the flipped
+    // sign put t=-1, producing (12,4). That bogus vertex is exactly
+    // what made isBoundaryOverlappingBoundary (structural-coordination.ts)
+    // compute a full-area "overlap" for two Slabs that only share an
+    // edge — the normal way to place one slab beside another — so
+    // every adjacent slab was misread as a near-total duplicate of its
+    // neighbor and blocked at create time.
+    const denom = d1x * edgeY - d1y * edgeX;
     // Parallel (denom ~ 0) shouldn't be reached given isInside already
     // differed between p1/p2, but guard rather than divide by ~0.
     if (Math.abs(denom) < 1e-12) return p1;
-    const t = ((p1.x - a.x) * edgeY - (p1.y - a.y) * edgeX) / -denom;
+    const f_p1 = (p1.x - a.x) * edgeY - (p1.y - a.y) * edgeX;
+    const t = -f_p1 / denom;
     return { x: p1.x + t * d1x, y: p1.y + t * d1y };
   };
 

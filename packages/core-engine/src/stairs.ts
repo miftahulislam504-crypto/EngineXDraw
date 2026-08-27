@@ -523,3 +523,61 @@ export function stairReferencePoint(stair: Stair): Point2D {
     y: mids.reduce((s, p) => s + p.y, 0) / mids.length,
   };
 }
+
+/** How far past the stair's own footprint (meters, each side) an
+ * auto-derived stair section line extends — long enough to read as a
+ * real section cut through the surrounding walls rather than a line
+ * that stops exactly at the stair's edge, without a magic per-project
+ * number to configure. Matches the same order of magnitude as
+ * MIN_END_LANDING_DEPTH above (a stair's own scale), not a fixed
+ * building-wide constant, so it still looks proportional on a very
+ * small or very large stair. */
+const STAIR_SECTION_OVERSHOOT = 1.0; // meters
+
+/**
+ * Derives a whole-building-style SectionLine cut through a stair's
+ * longest flight, for auto-generating a Staircase Section sheet without
+ * requiring the person to draw the cut by hand first (see
+ * generateStandardSheetSet's stair pass in sheets.ts). Cuts ACROSS the
+ * flight's direction of travel (perpendicular to it, through the
+ * flight's own midpoint) — the same orientation a real staircase
+ * section is always drawn at, since cutting parallel to the run would
+ * show a stair's edge-on profile instead of the risers/treads climbing
+ * across the cut.
+ *
+ * Picks the LONGEST flight (by run length) rather than the first one,
+ * so a dog-leg or U-shape stair's section is cut through its main climb
+ * rather than an incidental short return flight — matching how a person
+ * would choose the cut by hand.
+ *
+ * Returned as start/end/viewDirection only (no id/floorId/
+ * createdAt/updatedAt/detailTarget) — the caller (generateStandardSheetSet)
+ * owns turning this into a real persisted SectionLine with
+ * detailTarget: { kind: 'stair', elementId: stair.id } set, the same
+ * division of responsibility deriveUShapeStairFromRectangle already has
+ * with its caller (handleCreateStairU owns persistence, this only
+ * computes geometry).
+ */
+export function deriveStairSectionLine(
+  stair: Stair,
+): { start: Point2D; end: Point2D; viewDirection: 'left' | 'right' } | null {
+  const flights = stair.flights ?? [];
+  if (flights.length === 0) return null;
+
+  const longest = flights.reduce((best, f) => (flightLength(f) > flightLength(best) ? f : best), flights[0]);
+  const { ux, uy, nx, ny } = flightAxes(longest);
+  const midX = (longest.start.x + longest.end.x) / 2;
+  const midY = (longest.start.y + longest.end.y) / 2;
+
+  const half = stair.width / 2 + STAIR_SECTION_OVERSHOOT;
+  return {
+    start: { x: midX - nx * half, y: midY - ny * half },
+    end: { x: midX + nx * half, y: midY + ny * half },
+    // Arbitrary but consistent: looking in the +travel-direction sense
+    // (ux,uy) from the cut keeps every auto-generated stair section
+    // framed the same way rather than flipping unpredictably stair to
+    // stair — a person can still flip it by hand afterward like any
+    // other SectionLine.
+    viewDirection: ux + uy >= 0 ? 'right' : 'left',
+  };
+}

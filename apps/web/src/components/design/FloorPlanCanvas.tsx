@@ -96,6 +96,30 @@ export interface FloorPlanCanvasProps {
    * there is no floor below, or when the person has the toggle off. */
   belowFloorWalls?: Wall[];
   belowFloorColumns?: Column[];
+  /** Sheet-only display filter (NOT a Design Studio editing feature) —
+   * when true, Beam and Footing elements are skipped entirely from
+   * render: no line/rectangle drawn, no click/tap target, no
+   * contribution to the auto-fit bounds calculation. Everything else
+   * (walls, columns, stairs, openings, dimensions, the floor plan
+   * itself) renders exactly as normal.
+   *
+   * Requested for the "Architectural Floor Plan" sheet variant — a
+   * floor plan sheet meant to be read alongside a separate Structural
+   * (beam/footing) sheet shouldn't show beam/footing lines cluttering
+   * the room layout, matching how architectural vs structural
+   * drawing sets are conventionally split on paper. Scoped to this one
+   * prop rather than a general per-category visibility system since
+   * beam+footing is the one specific pairing asked for; the existing
+   * sheetEmphasis/sheetEmphasisLinear mechanism already covers
+   * dimming/highlighting PlacedObject categories and parapet/gutter —
+   * this is a full hide, not a dim, and for two element kinds neither
+   * of those fields can name.
+   *
+   * Defaults to false/undefined so every existing caller (the live
+   * Design Studio canvas, which must never lose the ability to see or
+   * edit beams/footings) is completely unaffected — only a Sheet
+   * explicitly opting into this variant sets it. */
+  hideStructuralElements?: boolean;
   onCreateWall: (start: Point2D, end: Point2D) => void;
   onCreateBeam: (start: Point2D, end: Point2D) => void;
   onCreateColumn: (center: Point2D) => void;
@@ -249,6 +273,16 @@ function nextDoorSwingDirection(current: DoorSwingDirection | undefined): DoorSw
   return DOOR_SWING_CYCLE[nextIndex];
 }
 
+// Stable (module-level) empty arrays for hideStructuralElements — a
+// fresh `[]` literal on every render would give beams/footings a new
+// array identity each time even while hidden, which is exactly the
+// kind of unstable reference this codebase has already hit real bugs
+// over elsewhere (see SheetCapture's comment on object-identity churn
+// from Firestore snapshots). Typed via the same Beam/Footing imports
+// already in scope above.
+const EMPTY_ARRAY_BEAMS: Beam[] = [];
+const EMPTY_ARRAY_FOOTINGS: Footing[] = [];
+
 const CHAINING_LINE_TOOLS: DesignTool[] = ['wall', 'beam', 'railing', 'curtainWall', 'parapet', 'gutter'];
 // Tools whose second point is "type a length, then aim the direction
 // with the cursor" (see pendingWallLength/pointAtLockedLength), rather
@@ -301,11 +335,11 @@ export function FloorPlanCanvas({
   walls,
   openings,
   columns,
-  beams,
+  beams: beamsProp,
   slabs,
   ceilings,
   foundations,
-  footings,
+  footings: footingsProp,
   roofs,
   ramps,
   railings,
@@ -326,6 +360,7 @@ export function FloorPlanCanvas({
   currentFloorLevel,
   belowFloorWalls,
   belowFloorColumns,
+  hideStructuralElements,
   onCreateWall,
   onCreateBeam,
   onCreateColumn,
@@ -359,6 +394,16 @@ export function FloorPlanCanvas({
   sheetEmphasisLinear,
   setbackBuildableArea,
 }: FloorPlanCanvasProps) {
+  // hideStructuralElements is a sheet-only display filter (see its doc
+  // comment on FloorPlanCanvasProps) — every read of beams/footings
+  // below this point goes through these, NOT the raw props, so a
+  // hidden element contributes nothing to render, hit-testing, or the
+  // auto-fit bounds calculation. Empty arrays rather than conditionally
+  // skipping each render site individually, so this can't drift out of
+  // sync if a future render site is added and forgets to check the flag.
+  const beams = hideStructuralElements ? EMPTY_ARRAY_BEAMS : beamsProp;
+  const footings = hideStructuralElements ? EMPTY_ARRAY_FOOTINGS : footingsProp;
+
   const {
     activeTool,
     setActiveTool,

@@ -133,6 +133,24 @@ export interface Sheet {
    */
   sheetEmphasisLinear?: ('parapet' | 'gutter')[];
   /**
+   * "Architectural Floor Plan" variant — only meaningful when
+   * viewportType === 'floorPlan' | 'roofPlan' | 'sitePlan' (the same
+   * three FloorPlanCanvas-based types sheetEmphasis applies to). When
+   * true, Beam and Footing elements are omitted from this sheet's
+   * drawing entirely — not dimmed, not de-emphasized, simply not drawn
+   * — matching the conventional split between an Architectural drawing
+   * set (room layout, walls, doors/windows, stairs) and a Structural
+   * set (beam/footing/column layout) on paper, where the architectural
+   * sheet doesn't carry structural framing lines. A separate
+   * viewportType === 'floorPlan' sheet with this left false/undefined
+   * still shows beams/footings exactly as today, so both variants can
+   * coexist in the same Sheet Set (e.g. "Ground Floor Plan" showing
+   * everything, plus "Ground Floor Plan (Architectural)" with this set
+   * true) — see FloorPlanCanvas's hideStructuralElements prop for the
+   * actual render-time behavior this drives.
+   */
+  hideStructuralElements?: boolean;
+  /**
    * A label shown on the title block (e.g. "1:100", "1:50", or free text
    * like "As indicated"/"NTS"). When it parses as a simple ratio (see
    * parseScaleRatio in lib/sheet-export.ts) AND the exported viewport

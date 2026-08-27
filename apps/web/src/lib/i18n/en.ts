@@ -707,6 +707,7 @@ export const en: Translations = {
     sheetEmphasisDownspout: 'Downspout',
     sheetEmphasisParapet: 'Parapet',
     sheetEmphasisGutter: 'Gutter',
+    hideStructuralElementsLabel: 'Architectural Floor Plan (hide beams & footings)',
 
     batchExportTitle: 'Combined PDF Export',
     batchExportDescription:

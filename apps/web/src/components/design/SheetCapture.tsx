@@ -398,6 +398,7 @@ export function SheetCapture({
           sheetEmphasis={sheet.sheetEmphasis}
           sheetEmphasisLinear={sheet.sheetEmphasisLinear}
           setbackBuildableArea={setbackBuildableArea}
+          hideStructuralElements={sheet.hideStructuralElements}
         />
       )}
     </div>

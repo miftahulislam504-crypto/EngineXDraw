@@ -11,7 +11,9 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from './firebase-client';
-import type { Floor, InfoSheetKind, SectionLine, Sheet, SheetSize } from '@archibim/object-model';
+import type { Floor, InfoSheetKind, SectionLine, Sheet, SheetSize, Stair } from '@archibim/object-model';
+import { deriveStairSectionLine } from '@archibim/core-engine';
+import { sectionLineCrud } from './floors';
 
 function sheetsCol(projectId: string, buildingId: string) {
   return collection(db, 'projects', projectId, 'buildings', buildingId, 'sheets');
@@ -94,11 +96,94 @@ export async function deleteSheet(projectId: string, buildingId: string, sheetId
 const ELEVATION_ORDER_LENGTH = 4;
 
 /**
+ * Unlike Floor Plan/Elevation/Roof Plan/Site Plan, a Section sheet can
+ * only be generated for a cut that already exists as a drawn
+ * SectionLine — see generateStandardSheetSet's own doc comment on why
+ * there's no "obviously correct default" for where to cut a section.
+ * A Staircase Section is the one exception: a real stair's own
+ * flight-direction geometry (see deriveStairSectionLine in core-engine)
+ * gives an unambiguous default cut — straight across the longest
+ * flight — the same way a person would draw it by hand, so this closes
+ * that gap for stairs specifically without inventing a default for
+ * arbitrary whole-building cuts, which still have no such thing.
+ *
+ * Idempotent the same way the rest of Sheet Set generation is: skips
+ * any stair that already has a detail SectionLine pointed at it
+ * (matched by detailTarget.kind === 'stair' && elementId === stair.id),
+ * so re-running this after adding a new stair only creates lines for
+ * the stairs that are newly missing one, and never duplicates a section
+ * a person has since edited (moved, relabeled, flipped viewDirection)
+ * by hand.
+ *
+ * Persists directly via sectionLineCrud (same collection/CRUD every
+ * other SectionLine goes through — e.g. FloorPlanCanvas's section-line
+ * tool) rather than returning unsaved lines for the caller to store,
+ * since the newly created SectionLine needs a real Firestore id before
+ * generateStandardSheetSet's own hasSectionSheet/toCreate pass (which
+ * matches sheets by sectionLineId) can treat it like any other section
+ * line on the floor.
+ *
+ * Returns the floor/line pairs actually created, in the same shape
+ * generateStandardSheetSet's `sectionLines` param expects, so a caller
+ * can pass [...allSectionLines, ...created] straight into it without
+ * a re-subscribe round trip.
+ */
+export async function ensureStairSectionLines(
+  projectId: string,
+  buildingId: string,
+  floors: Floor[],
+  stairsByFloor: Record<string, Stair[]>,
+  existingSectionLines: Array<{ floor: Floor; line: SectionLine }>,
+): Promise<Array<{ floor: Floor; line: SectionLine }>> {
+  const hasStairSection = (stairId: string) =>
+    existingSectionLines.some(
+      ({ line }) => line.detailTarget?.kind === 'stair' && line.detailTarget.elementId === stairId,
+    );
+
+  const created: Array<{ floor: Floor; line: SectionLine }> = [];
+  for (const floor of floors) {
+    const stairs = stairsByFloor[floor.id] ?? [];
+    for (const stair of stairs) {
+      if (hasStairSection(stair.id)) continue;
+      const cut = deriveStairSectionLine(stair);
+      if (!cut) continue; // stair has no flights yet — nothing to cut through
+      const id = await sectionLineCrud.create(projectId, buildingId, floor.id, {
+        start: cut.start,
+        end: cut.end,
+        viewDirection: cut.viewDirection,
+        detailTarget: { kind: 'stair', elementId: stair.id },
+      });
+      created.push({
+        floor,
+        line: {
+          id,
+          floorId: floor.id,
+          start: cut.start,
+          end: cut.end,
+          viewDirection: cut.viewDirection,
+          detailTarget: { kind: 'stair', elementId: stair.id },
+          createdAt: null as unknown as SectionLine['createdAt'],
+          updatedAt: null as unknown as SectionLine['updatedAt'],
+        },
+      });
+    }
+  }
+  return created;
+}
+
+/**
  * Phase D — Sheet Set workflow. Batch-creates the standard set of sheets
  * for a building in one call, instead of the person clicking through the
  * New Sheet form once per floor/elevation/section:
  *   - One Floor Plan sheet per floor (A101, A102, … — one per level,
- *     ground floor first, matching Floor.level ascending)
+ *     ground floor first, matching Floor.level ascending). Generated as
+ *     the Architectural variant (hideStructuralElements: true) — beams
+ *     and footings are omitted from this drawing, matching the real
+ *     split between an Architectural Floor Plan and a Structural
+ *     (beam/footing/column) layout on paper. Room layout, walls,
+ *     doors/windows, and stairs are unaffected either way — see
+ *     hideStructuralElements on the Sheet type for what this does and
+ *     doesn't touch.
  *   - Four Elevation sheets, N/E/S/W (A201–A204) — the same fixed order
  *     and numbering the reference elevation set (A201–A204) uses
  *   - One Section sheet per EXISTING SectionLine (A301, A302, …) — a
@@ -190,6 +275,19 @@ export async function generateStandardSheetSet(
       scaleLabel,
       drawnBy,
       date,
+      // Per-floor Floor Plan sheets in the standard set are the
+      // Architectural variant by default — beams/footings omitted (see
+      // hideStructuralElements's doc on the Sheet type) — matching how
+      // a real drawing set separates the Architectural Floor Plan from
+      // the Structural (beam/footing/column) layout, which lives on
+      // its own sheet in EngineX-Structural rather than being overlaid
+      // on every architectural plan. The room layout/walls/doors/
+      // windows/stairs this sheet exists to show are completely
+      // unaffected — only beam/footing rendering is skipped. A person
+      // who wants beams/footings back on a specific Floor Plan sheet
+      // can still create one by hand via the New Sheet form with this
+      // checkbox left unticked.
+      hideStructuralElements: true,
     });
   });
 

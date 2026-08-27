@@ -33,7 +33,7 @@ import {
 import { subscribeToShafts } from '@/lib/shafts';
 import { subscribeToSiteBoundary } from '@/lib/siteBoundary';
 import { subscribeToLibrary, ensureLibrarySeeded } from '@/lib/library';
-import { subscribeToSheets, createSheet, deleteSheet, generateStandardSheetSet } from '@/lib/sheets';
+import { subscribeToSheets, createSheet, deleteSheet, generateStandardSheetSet, ensureStairSectionLines } from '@/lib/sheets';
 import { useI18nStore } from '@/lib/i18n';
 import { suggestScale, formatScaleLabel, computeWallsFootprintSpan } from '@/lib/scale-suggestion';
 import { BatchExportRunner } from '@/components/design/BatchExportRunner';
@@ -226,6 +226,7 @@ export default function SheetsPage() {
   const [infoSheetBody, setInfoSheetBody] = useState('');
   const [sheetEmphasis, setSheetEmphasis] = useState<PlacedObjectCategory[]>([]);
   const [sheetEmphasisLinear, setSheetEmphasisLinear] = useState<Array<'parapet' | 'gutter'>>([]);
+  const [hideStructuralElements, setHideStructuralElements] = useState(false);
   const [scaleLabel, setScaleLabel] = useState('1:100');
   const [drawnBy, setDrawnBy] = useState('');
   const [date, setDate] = useState('');
@@ -398,6 +399,7 @@ export default function SheetsPage() {
         (viewportType === 'sitePlan' || viewportType === 'floorPlan') && sheetEmphasisLinear.length > 0
           ? sheetEmphasisLinear
           : undefined,
+      hideStructuralElements: FLOOR_BASED_VIEWPORTS.includes(viewportType) && hideStructuralElements ? true : undefined,
       // A Cover Sheet or Info Sheet has no drawing viewport at all, so no
       // scale applies — kept blank rather than whatever's typed into the
       // scale field (that field is hidden for these viewport types
@@ -412,6 +414,7 @@ export default function SheetsPage() {
     setInfoSheetBody('');
     setSheetEmphasis([]);
     setSheetEmphasisLinear([]);
+    setHideStructuralElements(false);
   }
 
   async function handleDelete(sheetId: string) {
@@ -424,11 +427,31 @@ export default function SheetsPage() {
     setIsGeneratingSet(true);
     setGenerateResult(null);
     try {
+      // Auto-derive a Staircase Section cut for any stair that doesn't
+      // already have one, BEFORE building the sheet set — see
+      // ensureStairSectionLines's own doc comment for why a stair is
+      // the one viewportType === 'section' case with an unambiguous
+      // default cut. Merged into allSectionLines locally (rather than
+      // waiting on the sectionLines-by-floor subscription to catch up)
+      // so this same call to generateStandardSheetSet immediately sees
+      // the newly created lines and generates their Section sheets too,
+      // instead of requiring a second click after the subscription
+      // fires.
+      const stairsByFloor = Object.fromEntries(
+        floors.map((floor) => [floor.id, floorElements[floor.id]?.stairs ?? []]),
+      );
+      const newStairSections = await ensureStairSectionLines(
+        projectId,
+        buildingId,
+        floors,
+        stairsByFloor,
+        allSectionLines,
+      );
       const result = await generateStandardSheetSet(
         projectId,
         buildingId,
         floors,
-        allSectionLines,
+        [...allSectionLines, ...newStairSections],
         roofFloors,
         sheets,
         {
@@ -1051,6 +1074,17 @@ export default function SheetsPage() {
                 </div>
                 <p className="text-xs text-ink-faint">{t.sheetsPage.sheetEmphasisHint}</p>
               </div>
+            )}
+
+            {FLOOR_BASED_VIEWPORTS.includes(viewportType) && (
+              <label className="flex items-center gap-1.5 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  checked={hideStructuralElements}
+                  onChange={(e) => setHideStructuralElements(e.target.checked)}
+                />
+                {t.sheetsPage.hideStructuralElementsLabel}
+              </label>
             )}
 
             {viewportType !== 'coverSheet' && viewportType !== 'infoSheet' && (

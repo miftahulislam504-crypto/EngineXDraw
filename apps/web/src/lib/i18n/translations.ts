@@ -584,6 +584,7 @@ export interface Translations {
     sheetEmphasisDownspout: string;
     sheetEmphasisParapet: string;
     sheetEmphasisGutter: string;
+    hideStructuralElementsLabel: string;
 
     // Batch/Combined PDF export (Phase 4)
     batchExportTitle: string;

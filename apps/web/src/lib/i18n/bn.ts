@@ -707,6 +707,7 @@ export const bn: Translations = {
     sheetEmphasisDownspout: 'ডাউনস্পাউট',
     sheetEmphasisParapet: 'প্যারাপেট',
     sheetEmphasisGutter: 'গাটার',
+    hideStructuralElementsLabel: 'আর্কিটেকচারাল ফ্লোর প্ল্যান (বিম ও ফুটিং লুকান)',
 
     batchExportTitle: 'কম্বাইন্ড PDF এক্সপোর্ট',
     batchExportDescription:

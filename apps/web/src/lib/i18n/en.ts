@@ -175,6 +175,7 @@ export const en: Translations = {
     copyFloorConfirm: 'Copy to {count} floor(s)',
     copyFloorCancel: 'Cancel',
     copyFloorSuccess: 'Copied to {count} floor(s).',
+    copyFloorSkippedNotice: '{count} element(s) were already on the target floor(s) at the same position and were skipped.',
     hubSyncSyncing: 'Syncing to Hub…',
     hubSyncSynced: 'Synced to Hub — architectural model v{version}.',
     hubSyncFailed: "Couldn't sync to Hub: {error}",

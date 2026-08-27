@@ -330,6 +330,37 @@ export default function DesignStudioPage() {
   const [copyFloorTargetIds, setCopyFloorTargetIds] = useState<string[]>([]);
   const [isCopyingFloor, setIsCopyingFloor] = useState(false);
 
+  // Guards every handleCreateX (wall/column/beam/stair/etc.) against the
+  // "double-tap → two elements at the same spot" race: each handler's
+  // duplicate-geometry check (isColumnOverlappingColumn etc.) reads from
+  // this render's `columns`/`walls`/... arrays, which only refresh once
+  // Firestore's real-time listener round-trips back — a Firestore write,
+  // not something that lands within the same tick. A second tap (an
+  // accidental double-tap, or a person tapping again on a slow
+  // connection because nothing visibly happened yet) fires a second
+  // handleCreateX before that round-trip completes, so its overlap
+  // check reads the exact same stale array the first call saw, sees no
+  // overlap either, and a second element gets written on top of the
+  // first — this is almost certainly why, per the person, duplicates
+  // kept appearing even on a floor built by freehand drawing rather
+  // than Copy Floor (Copy Floor's own duplicate-guard, in
+  // copyFloorElements/floors.ts, does not run this code path at all).
+  // useRef rather than useState: this only needs to gate a synchronous
+  // check-then-write, not trigger a re-render, and a state setter's
+  // update wouldn't be visible until after the very race window this
+  // exists to close.
+  const isCreatingElementRef = useRef(false);
+  async function withCreateGuard(fn: () => Promise<void>) {
+    if (isCreatingElementRef.current) return;
+    isCreatingElementRef.current = true;
+    try {
+      await fn();
+    } finally {
+      isCreatingElementRef.current = false;
+    }
+  }
+
+
   function toggleCopyFloorTarget(id: string) {
     setCopyFloorTargetIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
@@ -338,8 +369,9 @@ export default function DesignStudioPage() {
     if (!buildingId || !floorId || isCopyingFloor || copyFloorTargetIds.length === 0) return;
     setIsCopyingFloor(true);
     try {
+      let totalSkipped = 0;
       for (const targetId of copyFloorTargetIds) {
-        await copyFloorElements(projectId, buildingId, floorId, targetId, {
+        const result = await copyFloorElements(projectId, buildingId, floorId, targetId, {
           walls,
           columns,
           beams,
@@ -348,9 +380,24 @@ export default function DesignStudioPage() {
           openings,
           stairs,
         });
+        totalSkipped +=
+          result.walls.skipped +
+          result.columns.skipped +
+          result.beams.skipped +
+          result.slabs.skipped +
+          result.footings.skipped +
+          result.openings.skipped +
+          result.stairs.skipped;
       }
+      const successMessage = formatTemplate(t.designStudio.copyFloorSuccess, {
+        count: copyFloorTargetIds.length,
+      });
+      // Skip-notice only when something was actually skipped — a clean
+      // copy onto an empty target shouldn't imply anything was wrong.
       showNoticeMessage(
-        formatTemplate(t.designStudio.copyFloorSuccess, { count: copyFloorTargetIds.length }),
+        totalSkipped > 0
+          ? `${successMessage} ${formatTemplate(t.designStudio.copyFloorSkippedNotice, { count: totalSkipped })}`
+          : successMessage,
       );
       setIsCopyFloorPanelOpen(false);
       setCopyFloorTargetIds([]);
@@ -656,101 +703,109 @@ export default function DesignStudioPage() {
   }, [buildingId, floorId, clearHistory]);
 
   async function handleCreateWall(start: { x: number; y: number }, end: { x: number; y: number }) {
-    if (!buildingId || !floorId) return;
-    if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
-    if (isWallOverlappingWall(start, end, walls)) {
-      showBlockMessage(t.designStudio.structuralBlock.wallOverlapsWall);
-      return;
-    }
-    const data = {
-      start,
-      end,
-      thickness: DEFAULT_WALL_THICKNESS,
-      height: currentFloorToFloorHeight,
-      type: 'INTERIOR' as const,
-    };
-    const id = await createWall(projectId, buildingId, floorId, data);
-    recordHistory({ action: 'create', kind: 'wall', id, data });
-    await rejoinAfter({ id: '__pending__', start, end });
+    await withCreateGuard(async () => {
+      if (!buildingId || !floorId) return;
+      if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
+      if (isWallOverlappingWall(start, end, walls)) {
+        showBlockMessage(t.designStudio.structuralBlock.wallOverlapsWall);
+        return;
+      }
+      const data = {
+        start,
+        end,
+        thickness: DEFAULT_WALL_THICKNESS,
+        height: currentFloorToFloorHeight,
+        type: 'INTERIOR' as const,
+      };
+      const id = await createWall(projectId, buildingId, floorId, data);
+      recordHistory({ action: 'create', kind: 'wall', id, data });
+      await rejoinAfter({ id: '__pending__', start, end });
+    });
   }
 
   async function handleCreateBeam(start: { x: number; y: number }, end: { x: number; y: number }) {
-    if (!buildingId || !floorId) return;
-    if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
-    if (!isBeamSupported(start, end, columns, walls)) {
-      showBlockMessage(t.designStudio.structuralBlock.floatingBeamEnd);
-      return;
-    }
-    if (isBeamOverlappingBeam(start, end, beams)) {
-      showBlockMessage(t.designStudio.structuralBlock.beamOverlapsBeam);
-      return;
-    }
-    const data = {
-      start,
-      end,
-      width: DEFAULT_BEAM_WIDTH,
-      depth: DEFAULT_BEAM_DEPTH,
-      elevation: currentFloorToFloorHeight - DEFAULT_BEAM_DEPTH,
-    };
-    const id = await createBeam(projectId, buildingId, floorId, data);
-    recordHistory({ action: 'create', kind: 'beam', id, data });
+    await withCreateGuard(async () => {
+      if (!buildingId || !floorId) return;
+      if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
+      if (!isBeamSupported(start, end, columns, walls)) {
+        showBlockMessage(t.designStudio.structuralBlock.floatingBeamEnd);
+        return;
+      }
+      if (isBeamOverlappingBeam(start, end, beams)) {
+        showBlockMessage(t.designStudio.structuralBlock.beamOverlapsBeam);
+        return;
+      }
+      const data = {
+        start,
+        end,
+        width: DEFAULT_BEAM_WIDTH,
+        depth: DEFAULT_BEAM_DEPTH,
+        elevation: currentFloorToFloorHeight - DEFAULT_BEAM_DEPTH,
+      };
+      const id = await createBeam(projectId, buildingId, floorId, data);
+      recordHistory({ action: 'create', kind: 'beam', id, data });
+    });
   }
 
   async function handleCreateColumn(center: { x: number; y: number }) {
-    if (!buildingId || !floorId) return;
-    // Snap onto the nearest footing's exact center if one is nearby (a
-    // convenience so the two line up without pixel-perfect placement).
-    // A footing is NOT required — a column can be placed with no footing
-    // underneath it at all; snapping only applies when a footing already
-    // happens to be close by.
-    const snapped = snapToNearestFooting(center, footings);
-    if (isColumnOverlappingColumn(snapped, DEFAULT_COLUMN_WIDTH, DEFAULT_COLUMN_DEPTH, columns)) {
-      showBlockMessage(t.designStudio.structuralBlock.columnOverlapsColumn);
-      return;
-    }
-    // বাগফিক্স: আগে এখানে DEFAULT_COLUMN_HEIGHT (3.05m, hardcoded) বসতো,
-    // অথচ handleCreateWall/handleCreateBeam ঠিকই currentFloorToFloorHeight
-    // (এই floor-এর আসল floor-to-floor height) ব্যবহার করে। যেই প্রজেক্টে
-    // floor height 3.05m না, সেখানে column-এর top ভুল elevation-এ বসত —
-    // পরের floor-এর wall/beam base elevation এর সাথে কখনো মিলত না, ফলে
-    // Structural App-এর Model Checker প্রতিটা উপরের-floor column কে
-    // "fully floating" ধরত (StructuralElement.node coordinate মিলছে না
-    // বলে)। এখন column-ও wall/beam এর মতোই currentFloorToFloorHeight
-    // ব্যবহার করছে, যাতে তিনটা element type-ই একই floor-height ধরে সমান
-    // elevation-এ শেষ হয়।
-    const data = {
-      center: snapped,
-      shape: 'RECTANGULAR' as const,
-      width: DEFAULT_COLUMN_WIDTH,
-      depth: DEFAULT_COLUMN_DEPTH,
-      height: currentFloorToFloorHeight,
-    };
-    const id = await createColumn(projectId, buildingId, floorId, data);
-    recordHistory({ action: 'create', kind: 'column', id, data });
+    await withCreateGuard(async () => {
+      if (!buildingId || !floorId) return;
+      // Snap onto the nearest footing's exact center if one is nearby (a
+      // convenience so the two line up without pixel-perfect placement).
+      // A footing is NOT required — a column can be placed with no footing
+      // underneath it at all; snapping only applies when a footing already
+      // happens to be close by.
+      const snapped = snapToNearestFooting(center, footings);
+      if (isColumnOverlappingColumn(snapped, DEFAULT_COLUMN_WIDTH, DEFAULT_COLUMN_DEPTH, columns)) {
+        showBlockMessage(t.designStudio.structuralBlock.columnOverlapsColumn);
+        return;
+      }
+      // বাগফিক্স: আগে এখানে DEFAULT_COLUMN_HEIGHT (3.05m, hardcoded) বসতো,
+      // অথচ handleCreateWall/handleCreateBeam ঠিকই currentFloorToFloorHeight
+      // (এই floor-এর আসল floor-to-floor height) ব্যবহার করে। যেই প্রজেক্টে
+      // floor height 3.05m না, সেখানে column-এর top ভুল elevation-এ বসত —
+      // পরের floor-এর wall/beam base elevation এর সাথে কখনো মিলত না, ফলে
+      // Structural App-এর Model Checker প্রতিটা উপরের-floor column কে
+      // "fully floating" ধরত (StructuralElement.node coordinate মিলছে না
+      // বলে)। এখন column-ও wall/beam এর মতোই currentFloorToFloorHeight
+      // ব্যবহার করছে, যাতে তিনটা element type-ই একই floor-height ধরে সমান
+      // elevation-এ শেষ হয়।
+      const data = {
+        center: snapped,
+        shape: 'RECTANGULAR' as const,
+        width: DEFAULT_COLUMN_WIDTH,
+        depth: DEFAULT_COLUMN_DEPTH,
+        height: currentFloorToFloorHeight,
+      };
+      const id = await createColumn(projectId, buildingId, floorId, data);
+      recordHistory({ action: 'create', kind: 'column', id, data });
+    });
   }
 
   async function handleCreateFooting(center: { x: number; y: number }) {
-    if (!buildingId || !floorId) return;
-    // Snap onto an existing column's center if one is nearby, so a
-    // footing drawn after its column (the normal order for every column
-    // past the first, since columns are gated on having a footing) lines
-    // up exactly rather than needing pixel-perfect placement.
-    const snapped = snapToNearestColumn(center, columns);
-    if (
-      isFootingOverlappingFooting(snapped, DEFAULT_FOOTING_WIDTH, DEFAULT_FOOTING_DEPTH, footings)
-    ) {
-      showBlockMessage(t.designStudio.structuralBlock.footingOverlapsFooting);
-      return;
-    }
-    const data = {
-      center: snapped,
-      width: DEFAULT_FOOTING_WIDTH,
-      depth: DEFAULT_FOOTING_DEPTH,
-      thickness: DEFAULT_FOOTING_THICKNESS,
-      elevation: -1.2 - DEFAULT_FOOTING_THICKNESS,
-    };
-    const id = await footingCrud.create(projectId, buildingId, floorId, data);
-    recordHistory({ action: 'create', kind: 'footing', id, data });
+    await withCreateGuard(async () => {
+      if (!buildingId || !floorId) return;
+      // Snap onto an existing column's center if one is nearby, so a
+      // footing drawn after its column (the normal order for every column
+      // past the first, since columns are gated on having a footing) lines
+      // up exactly rather than needing pixel-perfect placement.
+      const snapped = snapToNearestColumn(center, columns);
+      if (
+        isFootingOverlappingFooting(snapped, DEFAULT_FOOTING_WIDTH, DEFAULT_FOOTING_DEPTH, footings)
+      ) {
+        showBlockMessage(t.designStudio.structuralBlock.footingOverlapsFooting);
+        return;
+      }
+      const data = {
+        center: snapped,
+        width: DEFAULT_FOOTING_WIDTH,
+        depth: DEFAULT_FOOTING_DEPTH,
+        thickness: DEFAULT_FOOTING_THICKNESS,
+        elevation: -1.2 - DEFAULT_FOOTING_THICKNESS,
+      };
+      const id = await footingCrud.create(projectId, buildingId, floorId, data);
+      recordHistory({ action: 'create', kind: 'footing', id, data });
+    });
   }
 
   function rectBoundary(corner1: { x: number; y: number }, corner2: { x: number; y: number }) {
@@ -766,121 +821,123 @@ export default function DesignStudioPage() {
     tool: 'slab' | 'ceiling' | 'foundation' | 'roof' | 'balcony' | 'shaft' | 'siteBoundary',
     boundary: { x: number; y: number }[],
   ) {
-    if (!buildingId || !floorId) return;
-    // Same degenerate-shape guard the old two-corner check did (reject
-    // a sliver too thin to be a real room/roof/etc.), generalized to an
-    // arbitrary polygon via its shoelace area instead of an axis-aligned
-    // width/height comparison — 0.05m in either dimension of a rectangle
-    // is roughly a 0.0025 sq m minimum, so this uses the same order of
-    // magnitude as a floor.
-    if (boundary.length < 3 || polygonArea(boundary) < 0.0025) return;
-    // Only Slab gets a duplicate-boundary check for now — see
-    // isBoundaryOverlappingBoundary's doc for why it's written generic
-    // over Ceiling/Foundation/Roof/Balcony too, left for a follow-up
-    // pass rather than wired here yet.
-    if (tool === 'slab' && isSlabOverlappingSlab(boundary, slabs)) {
-      showBlockMessage(t.designStudio.structuralBlock.slabOverlapsSlab);
-      return;
-    }
-    // Slab and Roof are real structural spans — every corner needs a
-    // column or wall underneath for support. Balcony is a cantilever —
-    // it doesn't need columns underneath (that's the point of a
-    // cantilever), but it does need at least one boundary edge actually
-    // anchored along a wall, or there's nothing holding it up at all.
-    // Ceiling/Foundation/Shaft/SiteBoundary stay ungated: a ceiling is a
-    // non-structural finish layer, a foundation sits below any
-    // column/wall reference point, and shaft/site-boundary aren't
-    // spanning structural elements in the same sense.
-    if (tool === 'slab' || tool === 'roof') {
-      const support = checkBoundarySupport(boundary, columns, walls);
-      const failed = support.filter((c) => !c.supported);
-      if (failed.length > 0) {
-        const base =
-          tool === 'slab'
-            ? t.designStudio.structuralBlock.unsupportedSlabCorner
-            : t.designStudio.structuralBlock.unsupportedRoofCorner;
-        showBlockMessage(
-          `${base} ${formatTemplate(t.designStudio.structuralBlock.unsupportedCornerDetail, {
-            corners: describeUnsupportedCorners(failed),
-          })}`,
-        );
+    await withCreateGuard(async () => {
+      if (!buildingId || !floorId) return;
+      // Same degenerate-shape guard the old two-corner check did (reject
+      // a sliver too thin to be a real room/roof/etc.), generalized to an
+      // arbitrary polygon via its shoelace area instead of an axis-aligned
+      // width/height comparison — 0.05m in either dimension of a rectangle
+      // is roughly a 0.0025 sq m minimum, so this uses the same order of
+      // magnitude as a floor.
+      if (boundary.length < 3 || polygonArea(boundary) < 0.0025) return;
+      // Only Slab gets a duplicate-boundary check for now — see
+      // isBoundaryOverlappingBoundary's doc for why it's written generic
+      // over Ceiling/Foundation/Roof/Balcony too, left for a follow-up
+      // pass rather than wired here yet.
+      if (tool === 'slab' && isSlabOverlappingSlab(boundary, slabs)) {
+        showBlockMessage(t.designStudio.structuralBlock.slabOverlapsSlab);
         return;
       }
-    }
-
-    if (tool === 'balcony' && !isBalconySupported(boundary, walls)) {
-      showBlockMessage(t.designStudio.structuralBlock.unsupportedBalcony);
-      return;
-    }
-
-    if (tool === 'slab') {
-      // A Slab is the structural floor/roof plate spanning the TOP of
-      // this floor's walls/columns (it's what the floor above stands
-      // on, or the roof deck if nothing is above) — not a plate sitting
-      // at this floor's own base. elevation: 0 previously placed every
-      // new slab flush with the floor instead of at wall-top height.
-      // Uses this floor's own floorToFloorHeight (not the fixed
-      // DEFAULT_WALL_HEIGHT) so the slab lands exactly where this
-      // floor's walls actually stop, same reasoning as handleCreateWall.
-      const data = { boundary, thickness: DEFAULT_SLAB_THICKNESS, elevation: currentFloorToFloorHeight };
-      const id = await createSlab(projectId, buildingId, floorId, data);
-      recordHistory({ action: 'create', kind: 'slab', id, data });
-    } else if (tool === 'ceiling') {
-      const data = {
-        boundary,
-        thickness: DEFAULT_CEILING_THICKNESS,
-        elevation: currentFloorToFloorHeight - DEFAULT_CEILING_THICKNESS,
-      };
-      const id = await ceilingCrud.create(projectId, buildingId, floorId, data);
-      recordHistory({ action: 'create', kind: 'ceiling', id, data });
-    } else if (tool === 'foundation') {
-      const data = {
-        boundary,
-        thickness: DEFAULT_FOUNDATION_THICKNESS,
-        elevation: -DEFAULT_FOUNDATION_THICKNESS - 0.3,
-      };
-      const id = await foundationCrud.create(projectId, buildingId, floorId, data);
-      recordHistory({ action: 'create', kind: 'foundation', id, data });
-    } else if (tool === 'roof') {
-      const data = { boundary, thickness: DEFAULT_ROOF_THICKNESS, elevation: currentFloorToFloorHeight };
-      const id = await roofCrud.create(projectId, buildingId, floorId, data);
-      recordHistory({ action: 'create', kind: 'roof', id, data });
-      if (currentFloorLevel !== topFloorLevel) {
-        showNoticeMessage(t.designStudio.structuralBlock.roofNotOnTopFloor);
+      // Slab and Roof are real structural spans — every corner needs a
+      // column or wall underneath for support. Balcony is a cantilever —
+      // it doesn't need columns underneath (that's the point of a
+      // cantilever), but it does need at least one boundary edge actually
+      // anchored along a wall, or there's nothing holding it up at all.
+      // Ceiling/Foundation/Shaft/SiteBoundary stay ungated: a ceiling is a
+      // non-structural finish layer, a foundation sits below any
+      // column/wall reference point, and shaft/site-boundary aren't
+      // spanning structural elements in the same sense.
+      if (tool === 'slab' || tool === 'roof') {
+        const support = checkBoundarySupport(boundary, columns, walls);
+        const failed = support.filter((c) => !c.supported);
+        if (failed.length > 0) {
+          const base =
+            tool === 'slab'
+              ? t.designStudio.structuralBlock.unsupportedSlabCorner
+              : t.designStudio.structuralBlock.unsupportedRoofCorner;
+          showBlockMessage(
+            `${base} ${formatTemplate(t.designStudio.structuralBlock.unsupportedCornerDetail, {
+              corners: describeUnsupportedCorners(failed),
+            })}`,
+          );
+          return;
+        }
       }
-    } else if (tool === 'balcony') {
-      const data = { boundary, thickness: DEFAULT_BALCONY_THICKNESS, elevation: 0 };
-      const id = await balconyCrud.create(projectId, buildingId, floorId, data);
-      recordHistory({ action: 'create', kind: 'balcony', id, data });
-    } else if (tool === 'shaft') {
-      // Shaft is building-level (spans multiple floors), unlike every
-      // other rectangle tool here — defaults to just the current floor's
-      // level; the person expands startLevel/endLevel afterward in
-      // PropertiesPanel once they know how many floors it should span.
-      const data = {
-        boundary,
-        shaftType: 'ELEVATOR' as const,
-        startLevel: currentFloorLevel,
-        endLevel: currentFloorLevel,
-      };
-      const id = await createShaft(projectId, buildingId, data);
-      recordHistory({ action: 'create', kind: 'shaft', id, data });
-    } else if (tool === 'siteBoundary') {
-      // A building has at most one plot boundary — drawing a new one
-      // replaces whichever one was there before, rather than piling up
-      // rectangles the person has to manually clean up. The old one's
-      // removal isn't separately undoable here (undoing the new
-      // boundary's creation just removes it, leaving no boundary at
-      // all, not the previous one back) — reconstructing the previous
-      // boundary would need its own history entry, which this
-      // replace-in-place flow doesn't currently record.
-      if (siteBoundary) {
-        await deleteSiteBoundary(projectId, buildingId, siteBoundary.id);
+
+      if (tool === 'balcony' && !isBalconySupported(boundary, walls)) {
+        showBlockMessage(t.designStudio.structuralBlock.unsupportedBalcony);
+        return;
       }
-      const data = { boundary, frontEdge: 'top' as const };
-      const id = await createSiteBoundary(projectId, buildingId, data);
-      recordHistory({ action: 'create', kind: 'siteBoundary', id, data });
-    }
+
+      if (tool === 'slab') {
+        // A Slab is the structural floor/roof plate spanning the TOP of
+        // this floor's walls/columns (it's what the floor above stands
+        // on, or the roof deck if nothing is above) — not a plate sitting
+        // at this floor's own base. elevation: 0 previously placed every
+        // new slab flush with the floor instead of at wall-top height.
+        // Uses this floor's own floorToFloorHeight (not the fixed
+        // DEFAULT_WALL_HEIGHT) so the slab lands exactly where this
+        // floor's walls actually stop, same reasoning as handleCreateWall.
+        const data = { boundary, thickness: DEFAULT_SLAB_THICKNESS, elevation: currentFloorToFloorHeight };
+        const id = await createSlab(projectId, buildingId, floorId, data);
+        recordHistory({ action: 'create', kind: 'slab', id, data });
+      } else if (tool === 'ceiling') {
+        const data = {
+          boundary,
+          thickness: DEFAULT_CEILING_THICKNESS,
+          elevation: currentFloorToFloorHeight - DEFAULT_CEILING_THICKNESS,
+        };
+        const id = await ceilingCrud.create(projectId, buildingId, floorId, data);
+        recordHistory({ action: 'create', kind: 'ceiling', id, data });
+      } else if (tool === 'foundation') {
+        const data = {
+          boundary,
+          thickness: DEFAULT_FOUNDATION_THICKNESS,
+          elevation: -DEFAULT_FOUNDATION_THICKNESS - 0.3,
+        };
+        const id = await foundationCrud.create(projectId, buildingId, floorId, data);
+        recordHistory({ action: 'create', kind: 'foundation', id, data });
+      } else if (tool === 'roof') {
+        const data = { boundary, thickness: DEFAULT_ROOF_THICKNESS, elevation: currentFloorToFloorHeight };
+        const id = await roofCrud.create(projectId, buildingId, floorId, data);
+        recordHistory({ action: 'create', kind: 'roof', id, data });
+        if (currentFloorLevel !== topFloorLevel) {
+          showNoticeMessage(t.designStudio.structuralBlock.roofNotOnTopFloor);
+        }
+      } else if (tool === 'balcony') {
+        const data = { boundary, thickness: DEFAULT_BALCONY_THICKNESS, elevation: 0 };
+        const id = await balconyCrud.create(projectId, buildingId, floorId, data);
+        recordHistory({ action: 'create', kind: 'balcony', id, data });
+      } else if (tool === 'shaft') {
+        // Shaft is building-level (spans multiple floors), unlike every
+        // other rectangle tool here — defaults to just the current floor's
+        // level; the person expands startLevel/endLevel afterward in
+        // PropertiesPanel once they know how many floors it should span.
+        const data = {
+          boundary,
+          shaftType: 'ELEVATOR' as const,
+          startLevel: currentFloorLevel,
+          endLevel: currentFloorLevel,
+        };
+        const id = await createShaft(projectId, buildingId, data);
+        recordHistory({ action: 'create', kind: 'shaft', id, data });
+      } else if (tool === 'siteBoundary') {
+        // A building has at most one plot boundary — drawing a new one
+        // replaces whichever one was there before, rather than piling up
+        // rectangles the person has to manually clean up. The old one's
+        // removal isn't separately undoable here (undoing the new
+        // boundary's creation just removes it, leaving no boundary at
+        // all, not the previous one back) — reconstructing the previous
+        // boundary would need its own history entry, which this
+        // replace-in-place flow doesn't currently record.
+        if (siteBoundary) {
+          await deleteSiteBoundary(projectId, buildingId, siteBoundary.id);
+        }
+        const data = { boundary, frontEdge: 'top' as const };
+        const id = await createSiteBoundary(projectId, buildingId, data);
+        recordHistory({ action: 'create', kind: 'siteBoundary', id, data });
+      }
+    });
   }
 
   // Auto-fit the in-progress Slab/Roof polygon to this floor's detected
@@ -906,50 +963,56 @@ export default function DesignStudioPage() {
   }
 
   async function handleCreateRamp(start: { x: number; y: number }, end: { x: number; y: number }) {
-    if (!buildingId || !floorId) return;
-    if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
-    const data = {
-      start,
-      end,
-      startElevation: 0,
-      endElevation: DEFAULT_RAMP_RISE,
-      width: DEFAULT_RAMP_WIDTH,
-      thickness: DEFAULT_RAMP_THICKNESS,
-    };
-    const id = await rampCrud.create(projectId, buildingId, floorId, data);
-    recordHistory({ action: 'create', kind: 'ramp', id, data });
+    await withCreateGuard(async () => {
+      if (!buildingId || !floorId) return;
+      if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
+      const data = {
+        start,
+        end,
+        startElevation: 0,
+        endElevation: DEFAULT_RAMP_RISE,
+        width: DEFAULT_RAMP_WIDTH,
+        thickness: DEFAULT_RAMP_THICKNESS,
+      };
+      const id = await rampCrud.create(projectId, buildingId, floorId, data);
+      recordHistory({ action: 'create', kind: 'ramp', id, data });
+    });
   }
 
   async function handleCreateRailing(start: { x: number; y: number }, end: { x: number; y: number }) {
-    if (!buildingId || !floorId) return;
-    if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
-    const data = { start, end, height: DEFAULT_RAILING_HEIGHT, postSpacing: DEFAULT_RAILING_POST_SPACING };
-    const id = await railingCrud.create(projectId, buildingId, floorId, data);
-    recordHistory({ action: 'create', kind: 'railing', id, data });
+    await withCreateGuard(async () => {
+      if (!buildingId || !floorId) return;
+      if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
+      const data = { start, end, height: DEFAULT_RAILING_HEIGHT, postSpacing: DEFAULT_RAILING_POST_SPACING };
+      const id = await railingCrud.create(projectId, buildingId, floorId, data);
+      recordHistory({ action: 'create', kind: 'railing', id, data });
+    });
   }
 
   async function handleCreateStair(points: { x: number; y: number }[]) {
-    if (!buildingId || !floorId || points.length < 2) return;
-    const flights = [];
-    for (let i = 0; i < points.length - 1; i++) {
-      const start = points[i];
-      const end = points[i + 1];
-      if (Math.hypot(end.x - start.x, end.y - start.y) < 0.3) continue; // skip a degenerate flight
-      if (isStairFlightOverlappingStair(start, end, stairs)) {
-        showBlockMessage(t.designStudio.structuralBlock.stairOverlapsStair);
-        return;
+    await withCreateGuard(async () => {
+      if (!buildingId || !floorId || points.length < 2) return;
+      const flights = [];
+      for (let i = 0; i < points.length - 1; i++) {
+        const start = points[i];
+        const end = points[i + 1];
+        if (Math.hypot(end.x - start.x, end.y - start.y) < 0.3) continue; // skip a degenerate flight
+        if (isStairFlightOverlappingStair(start, end, stairs)) {
+          showBlockMessage(t.designStudio.structuralBlock.stairOverlapsStair);
+          return;
+        }
+        flights.push({
+          start,
+          end,
+          numberOfSteps: DEFAULT_STAIR_STEPS,
+          riserHeight: DEFAULT_STAIR_RISER_HEIGHT,
+        });
       }
-      flights.push({
-        start,
-        end,
-        numberOfSteps: DEFAULT_STAIR_STEPS,
-        riserHeight: DEFAULT_STAIR_RISER_HEIGHT,
-      });
-    }
-    if (flights.length === 0) return;
-    const data = { width: DEFAULT_STAIR_WIDTH, flights };
-    const id = await stairCrud.create(projectId, buildingId, floorId, data);
-    recordHistory({ action: 'create', kind: 'stair', id, data });
+      if (flights.length === 0) return;
+      const data = { width: DEFAULT_STAIR_WIDTH, flights };
+      const id = await stairCrud.create(projectId, buildingId, floorId, data);
+      recordHistory({ action: 'create', kind: 'stair', id, data });
+    });
   }
 
   /** The 'stairU' tool's 3-click gesture, forwarded here from
@@ -961,31 +1024,35 @@ export default function DesignStudioPage() {
    * sized from the person's own drawn dimensions instead of a guessed
    * tread depth (see that function's doc for the distinction). */
   async function handleCreateStairU(p1: Point2D, p2: Point2D, p3: Point2D) {
-    if (!buildingId || !floorId) return;
-    const data = deriveUShapeStairFromRectangle(p1, p2, p3);
-    const overlapsExisting = data.flights.some((f) =>
-      isStairFlightOverlappingStair(f.start, f.end, stairs),
-    );
-    if (overlapsExisting) {
-      showBlockMessage(t.designStudio.structuralBlock.stairOverlapsStair);
-      return;
-    }
-    const id = await stairCrud.create(projectId, buildingId, floorId, data);
-    recordHistory({ action: 'create', kind: 'stair', id, data });
+    await withCreateGuard(async () => {
+      if (!buildingId || !floorId) return;
+      const data = deriveUShapeStairFromRectangle(p1, p2, p3);
+      const overlapsExisting = data.flights.some((f) =>
+        isStairFlightOverlappingStair(f.start, f.end, stairs),
+      );
+      if (overlapsExisting) {
+        showBlockMessage(t.designStudio.structuralBlock.stairOverlapsStair);
+        return;
+      }
+      const id = await stairCrud.create(projectId, buildingId, floorId, data);
+      recordHistory({ action: 'create', kind: 'stair', id, data });
+    });
   }
 
   async function handleCreateCurtainWall(start: { x: number; y: number }, end: { x: number; y: number }) {
-    if (!buildingId || !floorId) return;
-    if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
-    const data = {
-      start,
-      end,
-      height: DEFAULT_CURTAIN_WALL_HEIGHT,
-      thickness: DEFAULT_CURTAIN_WALL_THICKNESS,
-      mullionSpacing: DEFAULT_MULLION_SPACING,
-    };
-    const id = await curtainWallCrud.create(projectId, buildingId, floorId, data);
-    recordHistory({ action: 'create', kind: 'curtainWall', id, data });
+    await withCreateGuard(async () => {
+      if (!buildingId || !floorId) return;
+      if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
+      const data = {
+        start,
+        end,
+        height: DEFAULT_CURTAIN_WALL_HEIGHT,
+        thickness: DEFAULT_CURTAIN_WALL_THICKNESS,
+        mullionSpacing: DEFAULT_MULLION_SPACING,
+      };
+      const id = await curtainWallCrud.create(projectId, buildingId, floorId, data);
+      recordHistory({ action: 'create', kind: 'curtainWall', id, data });
+    });
   }
 
   // Audit Gap Closure Phase 5 (item 16) — same chaining-line create shape
@@ -996,56 +1063,64 @@ export default function DesignStudioPage() {
   // falls back to 0 if no Roof exists yet on this floor (see Parapet's
   // own doc comment for why it doesn't require one).
   async function handleCreateParapet(start: { x: number; y: number }, end: { x: number; y: number }) {
-    if (!buildingId || !floorId) return;
-    if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
-    const data = {
-      start,
-      end,
-      elevation: roofs[0]?.elevation ?? 0,
-      height: DEFAULT_PARAPET_HEIGHT,
-      thickness: DEFAULT_PARAPET_THICKNESS,
-    };
-    const id = await parapetCrud.create(projectId, buildingId, floorId, data);
-    recordHistory({ action: 'create', kind: 'parapet', id, data });
+    await withCreateGuard(async () => {
+      if (!buildingId || !floorId) return;
+      if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
+      const data = {
+        start,
+        end,
+        elevation: roofs[0]?.elevation ?? 0,
+        height: DEFAULT_PARAPET_HEIGHT,
+        thickness: DEFAULT_PARAPET_THICKNESS,
+      };
+      const id = await parapetCrud.create(projectId, buildingId, floorId, data);
+      recordHistory({ action: 'create', kind: 'parapet', id, data });
+    });
   }
 
   // Audit Gap Closure Phase 5 (item 17) — same reasoning as
   // handleCreateParapet above for the elevation default.
   async function handleCreateGutter(start: { x: number; y: number }, end: { x: number; y: number }) {
-    if (!buildingId || !floorId) return;
-    if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
-    const data = {
-      start,
-      end,
-      elevation: roofs[0]?.elevation ?? 0,
-      widthMm: DEFAULT_GUTTER_WIDTH_MM,
-    };
-    const id = await gutterCrud.create(projectId, buildingId, floorId, data);
-    recordHistory({ action: 'create', kind: 'gutter', id, data });
+    await withCreateGuard(async () => {
+      if (!buildingId || !floorId) return;
+      if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
+      const data = {
+        start,
+        end,
+        elevation: roofs[0]?.elevation ?? 0,
+        widthMm: DEFAULT_GUTTER_WIDTH_MM,
+      };
+      const id = await gutterCrud.create(projectId, buildingId, floorId, data);
+      recordHistory({ action: 'create', kind: 'gutter', id, data });
+    });
   }
 
   async function handleCreateSkylight(roofId: string, center: { x: number; y: number }) {
-    if (!buildingId || !floorId) return;
-    const data = { roofId, center, width: DEFAULT_SKYLIGHT_WIDTH, depth: DEFAULT_SKYLIGHT_DEPTH };
-    const id = await skylightCrud.create(projectId, buildingId, floorId, data);
-    recordHistory({ action: 'create', kind: 'skylight', id, data });
+    await withCreateGuard(async () => {
+      if (!buildingId || !floorId) return;
+      const data = { roofId, center, width: DEFAULT_SKYLIGHT_WIDTH, depth: DEFAULT_SKYLIGHT_DEPTH };
+      const id = await skylightCrud.create(projectId, buildingId, floorId, data);
+      recordHistory({ action: 'create', kind: 'skylight', id, data });
+    });
   }
 
   async function handleCreatePlacedObject(category: PlacedObjectCategory, center: { x: number; y: number }) {
-    if (!buildingId || !floorId) return;
-    const useLibraryItem = pendingLibraryItem && LIBRARY_CATEGORY_FOR_PLACED[category] === pendingLibraryItem.category;
-    const defaults = PLACED_OBJECT_DEFAULTS[category];
-    const data = {
-      category,
-      center,
-      label: useLibraryItem ? pendingLibraryItem!.name : defaults.label,
-      rotationDeg: 0,
-      width: useLibraryItem ? pendingLibraryItem!.defaultWidth : defaults.width,
-      depth: useLibraryItem ? (pendingLibraryItem!.defaultDepth ?? defaults.depth) : defaults.depth,
-      height: useLibraryItem ? pendingLibraryItem!.defaultHeight : defaults.height,
+    await withCreateGuard(async () => {
+      if (!buildingId || !floorId) return;
+      const useLibraryItem = pendingLibraryItem && LIBRARY_CATEGORY_FOR_PLACED[category] === pendingLibraryItem.category;
+      const defaults = PLACED_OBJECT_DEFAULTS[category];
+      const data = {
+        category,
+        center,
+        label: useLibraryItem ? pendingLibraryItem!.name : defaults.label,
+        rotationDeg: 0,
+        width: useLibraryItem ? pendingLibraryItem!.defaultWidth : defaults.width,
+        depth: useLibraryItem ? (pendingLibraryItem!.defaultDepth ?? defaults.depth) : defaults.depth,
+        height: useLibraryItem ? pendingLibraryItem!.defaultHeight : defaults.height,
     };
-    const id = await placedObjectCrud.create(projectId, buildingId, floorId, data);
-    recordHistory({ action: 'create', kind: 'placedObject', id, data });
+      const id = await placedObjectCrud.create(projectId, buildingId, floorId, data);
+      recordHistory({ action: 'create', kind: 'placedObject', id, data });
+    });
   }
 
   async function handleCreateDimension(start: { x: number; y: number }, end: { x: number; y: number }) {

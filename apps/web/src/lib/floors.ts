@@ -13,6 +13,14 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase-client';
 import { subscribeToRooms } from './rooms';
+import {
+  isColumnOverlappingColumn,
+  isWallOverlappingWall,
+  isBeamOverlappingBeam,
+  isFootingOverlappingFooting,
+  isSlabOverlappingSlab,
+  isStairFlightOverlappingStair,
+} from '@archibim/core-engine';
 import type {
   Balcony,
   Beam,
@@ -772,6 +780,29 @@ export const roofCrud = makeElementCrud<Roof>('roofs');
  * elements of one kind is not a case this handles — chunking can be
  * added later if it's ever actually hit.
  */
+/** Result of a copyFloorElements() call — how many elements of each
+ * kind were actually written vs. skipped because the target floor
+ * already had a matching element at the same geometry. Surfaced so the
+ * UI can tell the person "copy ran, but 6 elements were already there
+ * and were skipped" instead of silently duplicating (previous re-runs
+ * of Copy Floor onto a target that already received an earlier copy
+ * had no such guard — every re-run blindly wrote a fresh set of
+ * Firestore docs on top of the existing ones, which is how a floor can
+ * end up with two elements sharing the exact same geometry; that
+ * duplication is exactly what Structural's Model Checker duplicate-
+ * geometry check now catches on import, but it's better caught here,
+ * at the source, than downstream in a different app).
+ */
+export interface CopyFloorElementsResult {
+  walls: { copied: number; skipped: number };
+  columns: { copied: number; skipped: number };
+  beams: { copied: number; skipped: number };
+  slabs: { copied: number; skipped: number };
+  footings: { copied: number; skipped: number };
+  openings: { copied: number; skipped: number };
+  stairs: { copied: number; skipped: number };
+}
+
 export async function copyFloorElements(
   projectId: string,
   buildingId: string,
@@ -786,14 +817,47 @@ export async function copyFloorElements(
     openings: Opening[];
     stairs: Stair[];
   },
-): Promise<void> {
+): Promise<CopyFloorElementsResult> {
   const { walls, columns, beams, slabs, footings, openings, stairs } = elements;
 
+  // Read what's already on the target floor BEFORE writing anything, so
+  // every duplicate check below (including wall-vs-wall further down)
+  // runs against the target's true starting state, not against a set
+  // that's growing mid-copy from this same call.
+  // Footings/Stairs use the generic makeElementCrud factory (see
+  // footingCrud/stairCrud further down this file) rather than a
+  // dedicated getXOnce() — read directly via subCol+getDocs here instead
+  // of calling through footingCrud/stairCrud, since those consts are
+  // declared later in this file and this function is defined (though
+  // not invoked) before that point in module-evaluation order.
+  const [
+    existingWalls,
+    existingColumns,
+    existingBeams,
+    existingSlabs,
+    existingFootingsSnap,
+    existingStairsSnap,
+  ] = await Promise.all([
+    getWallsOnce(projectId, buildingId, targetFloorId),
+    getColumnsOnce(projectId, buildingId, targetFloorId),
+    getBeamsOnce(projectId, buildingId, targetFloorId),
+    getSlabsOnce(projectId, buildingId, targetFloorId),
+    getDocs(subCol(projectId, buildingId, targetFloorId, 'footings')),
+    getDocs(subCol(projectId, buildingId, targetFloorId, 'stairs')),
+  ]);
+  const existingFootings = existingFootingsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as Footing);
+  const existingStairs = existingStairsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as Stair);
+
+  // `items` here is expected to already be duplicate-filtered by the
+  // caller (nonDuplicateColumns etc. below) — this only writes, it
+  // doesn't itself decide what's a duplicate, so its returned `copied`
+  // count is simply items.length. Skip-counts are computed by the
+  // caller from (original array length − filtered array length).
   async function copyOne<T extends { id: string; floorId: string; createdAt: unknown; updatedAt?: unknown }>(
     items: T[],
     col: ReturnType<typeof subCol>,
-  ) {
-    if (items.length === 0) return;
+  ): Promise<{ copied: number }> {
+    if (items.length === 0) return { copied: 0 };
     const batch = writeBatch(db);
     for (const item of items) {
       const { id: _id, floorId: _floorId, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = item as T & { updatedAt?: unknown };
@@ -806,15 +870,44 @@ export async function copyFloorElements(
       });
     }
     await batch.commit();
+    return { copied: items.length };
   }
 
+  // Duplicate-geometry guard, one per element kind — same overlap-check
+  // functions Design Studio's own create-time handlers use
+  // (handleCreateColumn etc., structural-coordination.ts), just run here
+  // against "everything already on the target floor" instead of against
+  // a single click point. A source element that would overlap something
+  // already on the target is skipped rather than written a second time.
+  const nonDuplicateColumns = columns.filter(
+    (c) => !isColumnOverlappingColumn(c.center, c.width, c.depth, existingColumns),
+  );
+  const nonDuplicateBeams = beams.filter(
+    (b) => !isBeamOverlappingBeam(b.start, b.end, existingBeams),
+  );
+  const nonDuplicateSlabs = slabs.filter(
+    (s) => !isSlabOverlappingSlab(s.boundary, existingSlabs),
+  );
+  const nonDuplicateFootings = footings.filter(
+    (f) => !isFootingOverlappingFooting(f.center, f.width, f.depth, existingFootings),
+  );
+  const nonDuplicateStairs = stairs.filter(
+    (s) => !s.flights.some((flight) => isStairFlightOverlappingStair(flight.start, flight.end, existingStairs)),
+  );
+
   // Walls first, in isolation, so we can build the old-id -> new-id map
-  // the opening remap below depends on.
+  // the opening remap below depends on. Also duplicate-guarded, same as
+  // every other kind above — a wall skipped here means any opening that
+  // referenced it is skipped too (see remappedOpenings below), since an
+  // opening can't be remapped onto a wall that was never copied.
   const wallIdMap = new Map<string, string>();
-  if (walls.length > 0) {
+  const nonDuplicateWalls = walls.filter(
+    (w) => !isWallOverlappingWall(w.start, w.end, existingWalls),
+  );
+  if (nonDuplicateWalls.length > 0) {
     const batch = writeBatch(db);
     const targetWallsCol = wallsCol(projectId, buildingId, targetFloorId);
-    for (const wall of walls) {
+    for (const wall of nonDuplicateWalls) {
       const { id: oldId, floorId: _floorId, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = wall;
       const ref = doc(targetWallsCol);
       wallIdMap.set(oldId, ref.id);
@@ -832,14 +925,30 @@ export async function copyFloorElements(
     .filter((o) => wallIdMap.has(o.wallId))
     .map((o) => ({ ...o, wallId: wallIdMap.get(o.wallId)! }));
 
-  await Promise.all([
-    copyOne(columns, columnsCol(projectId, buildingId, targetFloorId)),
-    copyOne(beams, beamsCol(projectId, buildingId, targetFloorId)),
-    copyOne(slabs, slabsCol(projectId, buildingId, targetFloorId)),
-    copyOne(footings, subCol(projectId, buildingId, targetFloorId, 'footings')),
-    copyOne(remappedOpenings, openingsCol(projectId, buildingId, targetFloorId)),
-    copyOne(stairs, subCol(projectId, buildingId, targetFloorId, 'stairs')),
-  ]);
+  const [columnsResult, beamsResult, slabsResult, footingsResult, openingsResult, stairsResult] =
+    await Promise.all([
+      copyOne(nonDuplicateColumns, columnsCol(projectId, buildingId, targetFloorId)),
+      copyOne(nonDuplicateBeams, beamsCol(projectId, buildingId, targetFloorId)),
+      copyOne(nonDuplicateSlabs, slabsCol(projectId, buildingId, targetFloorId)),
+      copyOne(nonDuplicateFootings, subCol(projectId, buildingId, targetFloorId, 'footings')),
+      copyOne(remappedOpenings, openingsCol(projectId, buildingId, targetFloorId)),
+      copyOne(nonDuplicateStairs, subCol(projectId, buildingId, targetFloorId, 'stairs')),
+    ]);
+
+  return {
+    walls: { copied: wallIdMap.size, skipped: walls.length - wallIdMap.size },
+    columns: { copied: columnsResult.copied, skipped: columns.length - nonDuplicateColumns.length },
+    beams: { copied: beamsResult.copied, skipped: beams.length - nonDuplicateBeams.length },
+    slabs: { copied: slabsResult.copied, skipped: slabs.length - nonDuplicateSlabs.length },
+    footings: { copied: footingsResult.copied, skipped: footings.length - nonDuplicateFootings.length },
+    // openings' skip count reflects only openings whose host wall never
+    // made it across (openings.length - remappedOpenings.length are
+    // dropped before copyOne even runs) — an opening's identity is its
+    // host wall + position, not independent geometry, so it has no
+    // duplicate-geometry guard of its own beyond that.
+    openings: { copied: openingsResult.copied, skipped: openings.length - remappedOpenings.length },
+    stairs: { copied: stairsResult.copied, skipped: stairs.length - nonDuplicateStairs.length },
+  };
 }
 export const rampCrud = makeElementCrud<Ramp>('ramps');
 export const railingCrud = makeElementCrud<Railing>('railings');

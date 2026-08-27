@@ -191,6 +191,7 @@ export interface Translations {
     copyFloorConfirm: string; // use {count} placeholder — confirm button, e.g. "Copy to 2 floors"
     copyFloorCancel: string;
     copyFloorSuccess: string; // use {count} placeholder — notice shown after a successful copy
+    copyFloorSkippedNotice: string; // use {count} placeholder — appended note when some elements were skipped as exact duplicates already on the target floor(s)
     // Push button সরিয়ে auto-sync করা হয়েছে (ব্যবহারকারীর নির্দেশে —
     // ডেটা পাঠানোর জন্য কোনো ম্যানুয়াল বাটন থাকবে না)। এই তিনটা key
     // এখন একটা ছোট, non-intrusive status indicator-এর জন্য (দেখুন

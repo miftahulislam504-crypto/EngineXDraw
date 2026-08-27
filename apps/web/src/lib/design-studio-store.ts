@@ -215,10 +215,28 @@ interface DesignStudioState {
   /** Whether the floor immediately below the one being edited is drawn
    * as a faint reference (walls + columns only, since those are what
    * this floor's own walls/columns need to line up with — see the
-   * design page's belowFloorWalls/belowFloorColumns props). Off by
-   * default: it's a reference aid for the specific moment of starting a
-   * new floor on top of an existing one, not something that should
-   * visually clutter every session by default. */
+   * design page's belowFloorWalls/belowFloorColumns props).
+   *
+   * On by default as of the duplicate/floating-geometry investigation
+   * below: this was originally off by default (a reference aid only for
+   * the specific moment of starting a new floor, not something that
+   * should clutter every session) — but a person building an upper
+   * floor by hand with this off has no visual guide at all, so every
+   * column/wall/stair on that floor snaps to the grid instead of to
+   * whatever's actually below it (see findNearestColumnBelowCenter's
+   * only call site, FloorPlanCanvas.tsx's belowColumn logic — it's
+   * gated on this flag and silently falls back to grid-snap when it's
+   * off). Grid position and true position underneath rarely match
+   * exactly, so Structural's Model Checker then reports that floor's
+   * columns/walls/stairs as "not connected to any other element or base
+   * level" even though nothing else about the floor is wrong — this
+   * flag being off by default was the actual root cause a person hit
+   * building a 5th storey freehand (backfillColumnHeights.ts and
+   * copyFloorElements's duplicate-guard, this repo's two earlier fixes
+   * for the same symptom, don't touch this at all — neither one applies
+   * when Copy Floor was never used). The visual clutter tradeoff this
+   * was originally weighed against is real but smaller than silently
+   * producing a structurally broken floor by default. */
   showFloorBelow: boolean;
   toggleShowFloorBelow: () => void;
 }
@@ -303,6 +321,6 @@ export const useDesignStudioStore = create<DesignStudioState>((set) => ({
   mobileViewMode: '2d',
   setMobileViewMode: (mode) => set({ mobileViewMode: mode }),
 
-  showFloorBelow: false,
+  showFloorBelow: true,
   toggleShowFloorBelow: () => set((s) => ({ showFloorBelow: !s.showFloorBelow })),
 }));

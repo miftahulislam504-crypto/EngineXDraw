@@ -175,6 +175,7 @@ export const bn: Translations = {
     copyFloorConfirm: '{count}টা ফ্লোরে কপি করুন',
     copyFloorCancel: 'বাতিল',
     copyFloorSuccess: '{count}টা ফ্লোরে কপি হয়েছে।',
+    copyFloorSkippedNotice: '{count}টা element টার্গেট ফ্লোরে একই জায়গায় আগে থেকেই ছিল, তাই বাদ দেওয়া হয়েছে।',
     hubSyncSyncing: 'Hub-এ sync হচ্ছে…',
     hubSyncSynced: 'Hub-এ sync হয়েছে — architectural model v{version}।',
     hubSyncFailed: 'Hub-এ sync করা যায়নি: {error}',

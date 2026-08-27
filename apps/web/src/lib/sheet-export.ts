@@ -53,10 +53,21 @@ function sanitizeForPdfText(value: string): string {
 function createPdf(options: jsPDFOptions): jsPDF {
   const pdf = new jsPDF(options);
   const originalText = pdf.text.bind(pdf);
+  // jsPDF's own .text has a wide overload set (string vs string[],
+  // optional RenderTextOptions, optional maxWidth transform, …) that
+  // isn't worth reproducing here — we're just forwarding whatever the
+  // caller passed after sanitizing the text arguments. Widened to
+  // `unknown[]` in and cast through `Function` (not `any`) at the call
+  // boundary: `Function`'s own call signature already accepts anything,
+  // so this needs no eslint-disable for a specific rule name — see the
+  // git history on this line for why naming a rule directly once broke
+  // the Vercel build (next/core-web-vitals here doesn't register
+  // @typescript-eslint/no-explicit-any, so referencing it by name is
+  // itself an ESLint error, not just unused).
+  const flexibleOriginalText = originalText as unknown as (...args: unknown[]) => jsPDF;
   pdf.text = ((text: string | string[], x: number, y: number, ...rest: unknown[]) => {
     const safeText = Array.isArray(text) ? text.map(sanitizeForPdfText) : sanitizeForPdfText(text);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- jsPDF's own .text overload set is what we're reproducing here, not something worth re-typing
-    return (originalText as any)(safeText, x, y, ...rest);
+    return flexibleOriginalText(safeText, x, y, ...rest);
   }) as typeof pdf.text;
   return pdf;
 }

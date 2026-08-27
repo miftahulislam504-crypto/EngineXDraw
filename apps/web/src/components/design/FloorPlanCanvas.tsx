@@ -1385,7 +1385,20 @@ export function FloorPlanCanvas({
                   left: { x: minX, y: (minY + maxY) / 2 },
                   right: { x: maxX, y: (minY + maxY) / 2 },
                 };
-                const labelPx = toPixels(midpointByEdge[siteBoundary.frontEdge]);
+                // Falls back to 'top' (the same default createSiteBoundary
+                // itself writes on creation — see design/page.tsx) when
+                // frontEdge is missing or an unrecognized value, rather than
+                // indexing into midpointByEdge with an invalid key. Sheet.
+                // frontEdge is typed as always-present, but Firestore
+                // doesn't enforce that: a SiteBoundary document written
+                // before this field existed (or edited outside the app)
+                // can legitimately lack it, and midpointByEdge[undefined]
+                // is undefined — toPixels() would then throw reading .x
+                // off it, crashing every floorPlan/roofPlan/sitePlan sheet
+                // that renders this building's site boundary (and, since
+                // Combined PDF export renders all of them off-screen too,
+                // that export as well).
+                const labelPx = toPixels(midpointByEdge[siteBoundary.frontEdge] ?? midpointByEdge.top);
                 return (
                   <Text
                     x={labelPx.x}

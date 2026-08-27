@@ -1,5 +1,65 @@
-import { jsPDF } from 'jspdf';
+import { jsPDF, type jsPDFOptions } from 'jspdf';
 import { SHEET_SIZES, type Sheet, type SheetViewportType, type TitleBlockInfo } from '@archibim/object-model';
+
+/**
+ * This app's PDF sheets are English-only by convention (see this
+ * project's own English-only rule for all UI/output text). jsPDF's
+ * built-in "helvetica" font only has glyphs for the WinAnsi codepage —
+ * it does NOT throw or warn on out-of-range characters, it silently
+ * reinterprets each multi-byte character's low byte as an unrelated
+ * Latin glyph. A Bengali field value typed into a project/client/
+ * location field (this app also has a Bengali UI locale — see
+ * lib/i18n/bn.ts — so it's easy for a person to type a label in
+ * Bengali without realizing the PDF export can't render it) would
+ * previously come out as scrambled Latin garbage (e.g. "প্রজেক্ট" →
+ * "Cjxf") instead of a clear, honest placeholder.
+ *
+ * containsNonAscii/sanitizeForPdfText below catch this BEFORE it
+ * reaches jsPDF, and createPdf wraps every jsPDF instance's own .text
+ * so this is enforced at one choke point rather than needing every one
+ * of this file's ~24 pdf.text(...) call sites to remember to sanitize
+ * individually — a call site added later without knowing about this
+ * gets the protection automatically.
+ */
+function containsNonAscii(value: string): boolean {
+  // eslint-disable-next-line no-control-regex -- deliberately matching
+  // anything outside printable ASCII, control chars included, since
+  // those are exactly what a non-Latin script encodes as here.
+  return /[^\x00-\x7F]/.test(value);
+}
+
+const NON_ENGLISH_TEXT_PLACEHOLDER = '(non-English text not shown)';
+
+/**
+ * Replaces any non-ASCII run with a fixed placeholder rather than
+ * dropping just the offending characters — a partially-stripped
+ * Bengali string (e.g. leftover matras/diacritics with the base
+ * consonant removed) can look like a different kind of corruption, no
+ * more informative than the placeholder, and harder to recognize as
+ * "this field had non-English text" versus a fresh bug in this
+ * function itself.
+ */
+function sanitizeForPdfText(value: string): string {
+  return containsNonAscii(value) ? NON_ENGLISH_TEXT_PLACEHOLDER : value;
+}
+
+/**
+ * Creates a jsPDF instance with .text wrapped to sanitize non-ASCII
+ * input (see sanitizeForPdfText above). Use this instead of calling
+ * `new jsPDF(...)` directly anywhere in this file, so every sheet type
+ * (info sheet, cover sheet, drawing sheet, batch export) gets the same
+ * protection without each call site needing its own guard.
+ */
+function createPdf(options: jsPDFOptions): jsPDF {
+  const pdf = new jsPDF(options);
+  const originalText = pdf.text.bind(pdf);
+  pdf.text = ((text: string | string[], x: number, y: number, ...rest: unknown[]) => {
+    const safeText = Array.isArray(text) ? text.map(sanitizeForPdfText) : sanitizeForPdfText(text);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- jsPDF's own .text overload set is what we're reproducing here, not something worth re-typing
+    return (originalText as any)(safeText, x, y, ...rest);
+  }) as typeof pdf.text;
+  return pdf;
+}
 
 /**
  * Parses a free-text scale label like "1:100", "1 : 50", "1/100" into a
@@ -567,15 +627,34 @@ function drawSidebarBlockSequence(
   );
   cy += gap(2);
 
+  // DETAIL BY / DESIGN BY / CHECKED BY share identical block sizing —
+  // name + optional credential, matching the reference sheet's own
+  // 2-line treatment for these three roles.
   const signOff: Array<[string, string | undefined, string | undefined]> = [
     ['DETAIL BY :', tb.detailByName, tb.detailByCredential],
     ['DESIGN BY :', tb.designByName, tb.designByCredential],
     ['CHECKED BY :', tb.checkedByName, tb.checkedByCredential],
-    ['APPROVED BY :', tb.approvedByName, tb.approvedByCredential],
   ];
   for (const [label, name, credential] of signOff) {
     const values = [name || '—', ...(credential ? [credential] : [])];
     cy = drawSidebarBlock(pdf, x, cy, width, label, values, { valueFontSize: 8, scale, dryRun });
+    cy += gap(1.5);
+  }
+
+  // APPROVED BY is the sidebar's final sign-off block and, in the
+  // reference sheet, visibly taller than DETAIL/DESIGN/CHECKED BY — it
+  // reserves blank vertical space above the name/credential text for an
+  // actual signature (physical or scanned) to be added later, not just
+  // another same-size name field. minHeight below adds that reserved
+  // space on top of whatever the label+values would naturally need.
+  {
+    const approvedValues = [tb.approvedByName || '—', ...(tb.approvedByCredential ? [tb.approvedByCredential] : [])];
+    cy = drawSidebarBlock(pdf, x, cy, width, 'APPROVED BY :', approvedValues, {
+      valueFontSize: 8,
+      minHeight: 22,
+      scale,
+      dryRun,
+    });
     cy += gap(1.5);
   }
 
@@ -789,7 +868,7 @@ async function drawSheetPage(pdf: jsPDF, sheet: Sheet, image: SheetExportImage, 
  */
 export async function exportSheetToPdf(sheet: Sheet, image: SheetExportImage, sidebar: SidebarContent) {
   const { widthMm, heightMm } = SHEET_SIZES[sheet.size];
-  const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [widthMm, heightMm] });
+  const pdf = createPdf({ orientation: 'landscape', unit: 'mm', format: [widthMm, heightMm] });
   await drawSheetPage(pdf, sheet, image, sidebar);
   pdf.save(`${sheet.sheetNumber || sheet.name || 'sheet'}.pdf`);
 }
@@ -1136,14 +1215,14 @@ function drawInfoSheetPage(pdf: jsPDF, sheet: Sheet, data: InfoSheetExportData, 
 
 export function exportInfoSheetToPdf(sheet: Sheet, data: InfoSheetExportData, sidebar: SidebarContent) {
   const { widthMm, heightMm } = SHEET_SIZES[sheet.size];
-  const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [widthMm, heightMm] });
+  const pdf = createPdf({ orientation: 'landscape', unit: 'mm', format: [widthMm, heightMm] });
   drawInfoSheetPage(pdf, sheet, data, sidebar);
   pdf.save(`${sheet.sheetNumber || sheet.name || 'info-sheet'}.pdf`);
 }
 
 export function exportCoverSheetToPdf(sheet: Sheet, data: CoverSheetExportData, sidebar: SidebarContent) {
   const { widthMm, heightMm } = SHEET_SIZES[sheet.size];
-  const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [widthMm, heightMm] });
+  const pdf = createPdf({ orientation: 'landscape', unit: 'mm', format: [widthMm, heightMm] });
   drawCoverSheetPage(pdf, sheet, data, sidebar);
   pdf.save(`${sheet.sheetNumber || sheet.name || 'sheet'}.pdf`);
 }
@@ -1243,7 +1322,7 @@ export function exportSheetsBatchToPdf(
   return (async () => {
     const first = inputs[0];
     const firstSize = SHEET_SIZES[first.sheet.size];
-    const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [firstSize.widthMm, firstSize.heightMm] });
+    const pdf = createPdf({ orientation: 'landscape', unit: 'mm', format: [firstSize.widthMm, firstSize.heightMm] });
 
     for (let i = 0; i < inputs.length; i++) {
       const { sheet: rawSheet, image, coverSheetData, infoSheetData, sidebar: rawSidebar } = inputs[i];

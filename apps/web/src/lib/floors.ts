@@ -49,7 +49,7 @@ import type {
   Stair,
   Wall,
 } from '@archibim/object-model';
-import { serverTimestamp } from 'firebase/firestore';
+import { serverTimestamp, Timestamp } from 'firebase/firestore';
 
 function floorsCol(projectId: string, buildingId: string) {
   return collection(db, 'projects', projectId, 'buildings', buildingId, 'floors');
@@ -132,17 +132,36 @@ export async function createFloor(
   projectId: string,
   buildingId: string,
   existingFloors: Floor[],
-) {
+): Promise<Floor> {
   const topLevel = existingFloors.reduce((max, f) => Math.max(max, f.level), -1);
   const nextLevel = topLevel + 1;
-  const floorRef = await addDoc(floorsCol(projectId, buildingId), {
+  const data = {
     buildingId,
     level: nextLevel,
     name: floorLevelName(nextLevel),
     floorToFloorHeight: 3.05,
+  };
+  const floorRef = await addDoc(floorsCol(projectId, buildingId), {
+    ...data,
     createdAt: serverTimestamp(),
   });
-  return floorRef.id;
+  // Returns the full Floor, not just its id — the design page's own
+  // `floors` state (the source of currentFloorLevel) only gets this new
+  // floor once subscribeToFloors's onSnapshot round-trips back, which
+  // does NOT happen within this same call. Without the full object to
+  // push in optimistically, a person who starts drawing on the new floor
+  // before that round-trip lands would have `floors.find(...)` come up
+  // empty and currentFloorLevel silently fall back to 0 — indistinguish-
+  // able from actually being on the ground floor, which is exactly the
+  // condition FloorPlanCanvas's column-below snap gates on
+  // (currentFloorLevel > 0) to decide whether there's a floor below to
+  // snap onto at all. A column placed while that fallback is wrong skips
+  // the snap and lands on the plain grid intersection instead — which,
+  // for any floor except the very first, essentially never lines up with
+  // the real column below closely enough (0.3m tolerance) for Structural's
+  // Model Checker to consider it connected, hence "fully floating" even
+  // though the person always draws with the below-floor reference on.
+  return { id: floorRef.id, ...data, createdAt: Timestamp.now() };
 }
 
 export function subscribeToWalls(

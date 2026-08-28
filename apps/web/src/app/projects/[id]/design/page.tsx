@@ -302,11 +302,17 @@ export default function DesignStudioPage() {
     if (!buildingId || isAddingFloor) return;
     setIsAddingFloor(true);
     try {
-      const newFloorId = await createFloor(projectId, buildingId, floors);
-      // subscribeToFloors will push the new floor into `floors` on its own,
-      // but switch the dropdown to it right away instead of waiting on that
-      // round trip, so tapping "+" feels immediate.
-      setFloorId(newFloorId);
+      const newFloor = await createFloor(projectId, buildingId, floors);
+      // subscribeToFloors will eventually push the same floor into
+      // `floors` on its own, but that round-trip is exactly the race
+      // window that used to make currentFloorLevel fall back to 0 (see
+      // its own comment) for anyone drawing right after tapping "+" —
+      // pushing the real Floor object in here closes that window instead
+      // of just making the dropdown feel instant while the data catches
+      // up later. onSnapshot reconciling the same floor back in afterward
+      // is a no-op (same id, same fields), not a duplicate.
+      setFloors((prev) => [...prev, newFloor]);
+      setFloorId(newFloor.id);
       if (hubBuildingInfo && floors.length + 1 > hubBuildingInfo.numFloors) {
         showNoticeMessage(
           formatTemplate(t.designStudio.structuralBlock.floorCountExceedsHub, {

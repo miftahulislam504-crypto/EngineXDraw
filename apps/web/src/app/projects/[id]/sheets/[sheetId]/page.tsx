@@ -91,6 +91,22 @@ export default function SheetDetailPage() {
     return subscribeToLibrary('MATERIAL', setMaterialLibraryItems);
   }, []);
 
+  // floors is a Firestore onSnapshot-backed array (see subscribeToFloors
+  // in lib/floors.ts): .map().sort() there means it hands back a
+  // brand-new array (and brand-new Floor objects) on every snapshot,
+  // even when the floor documents themselves haven't actually changed —
+  // the same reference-instability pattern documented in
+  // SheetCapture.tsx/FloorPlanCanvas.tsx (see the useMemo/useCallback
+  // comments there) that has caused a runaway re-render loop in this
+  // codebase before. Depending on `floors` directly below would tear
+  // down and recreate every one of subscribeToFloorElements's ~22
+  // per-element-type Firestore listeners, for every floor, on every
+  // such snapshot — not just once on real add/remove. floorIds is a
+  // primitive derived from the one thing this effect actually needs
+  // (which floors exist), so it only re-subscribes when a floor is
+  // genuinely added or removed.
+  const floorIds = floors.map((f) => f.id).join(',');
+
   useEffect(() => {
     if (!buildingId || floors.length === 0) return;
     const unsubs = floors.map((floor) =>
@@ -99,7 +115,10 @@ export default function SheetDetailPage() {
       }),
     );
     return () => unsubs.forEach((unsub) => unsub());
-  }, [projectId, buildingId, floors]);
+    // floors is intentionally read inside the effect (for floor.id) but
+    // NOT listed as a dependency — see the comment above floorIds.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, buildingId, floorIds]);
 
   // Reset any capture from a previous sheet when the id in the URL
   // changes — otherwise navigating from one sheet's page to another

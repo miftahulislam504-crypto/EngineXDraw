@@ -300,6 +300,19 @@ export default function SheetsPage() {
     });
   }, [projectId, buildingId]);
 
+  // floors is a Firestore onSnapshot-backed array (see subscribeToFloors
+  // in lib/floors.ts, which always returns a fresh .map().sort() array —
+  // a new reference even when the floor documents themselves haven't
+  // changed). The three effects below each re-subscribe a per-floor
+  // Firestore listener set keyed off `floors`, so depending on the array
+  // itself tears all of them down and recreates them on every such
+  // snapshot, not just on a genuine floor add/remove — the same
+  // reference-instability pattern already documented and fixed in
+  // SheetCapture.tsx/FloorPlanCanvas.tsx. floorIds is the one thing they
+  // actually need (which floors exist), so depending on it instead only
+  // re-subscribes when a floor is genuinely added or removed.
+  const floorIds = floors.map((f) => f.id).join(',');
+
   useEffect(() => {
     if (!buildingId || floors.length === 0) return;
     const unsubs = floors.map((floor) =>
@@ -308,7 +321,8 @@ export default function SheetsPage() {
       }),
     );
     return () => unsubs.forEach((unsub) => unsub());
-  }, [projectId, buildingId, floors]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, buildingId, floorIds]);
 
   // Feeds "Generate Standard Sheet Set" — a Roof Plan sheet is only
   // auto-created for floors that actually have a Roof element, so this
@@ -323,7 +337,8 @@ export default function SheetsPage() {
       }),
     );
     return () => unsubs.forEach((unsub) => unsub());
-  }, [projectId, buildingId, floors]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, buildingId, floorIds]);
 
   useEffect(() => {
     if (!buildingId) return;
@@ -341,7 +356,8 @@ export default function SheetsPage() {
       }),
     );
     return () => unsubs.forEach((unsub) => unsub());
-  }, [projectId, buildingId, floors]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, buildingId, floorIds]);
 
   useEffect(() => {
     if (!buildingId) return;

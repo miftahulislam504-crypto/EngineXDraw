@@ -223,7 +223,7 @@ export default function FixColumnHeightsPage() {
         </div>
       )}
 
-      {status === 'scanned' && (
+      {(status === 'scanned' || status === 'applying') && (
         <div className="space-y-4 rounded-sheet border border-line-strong bg-surface p-5">
           <p className="text-sm text-ink-muted">মোট {scannedCount}টা column স্ক্যান করা হয়েছে।</p>
 

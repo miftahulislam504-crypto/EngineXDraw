@@ -215,6 +215,11 @@ export default function FixColumnHeightsPage() {
         >
           {status === 'scanning' ? 'স্ক্যান হচ্ছে...' : 'স্ক্যান করুন (Dry Run — কিছু লেখা হবে না)'}
         </Button>
+        {(!projectId || !buildingId) && (
+          <p className="text-sm text-ink-muted">
+            উপরে প্রজেক্ট ও বিল্ডিং দুটোই বেছে নিলে বাটন সক্রিয় হবে।
+          </p>
+        )}
       </div>
 
       {errorMsg && (

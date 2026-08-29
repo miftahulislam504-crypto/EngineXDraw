@@ -100,6 +100,8 @@ import {
   isFootingOverlappingFooting,
   isSlabOverlappingSlab,
   isStairFlightOverlappingStair,
+  isParapetOverlappingParapet,
+  isGutterOverlappingGutter,
   detectBuildingFootprint,
 } from '@archibim/core-engine';
 import { subscribeToBuildings, updateBuilding } from '@/lib/projects';
@@ -1072,6 +1074,10 @@ export default function DesignStudioPage() {
     await withCreateGuard(async () => {
       if (!buildingId || !floorId) return;
       if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
+      if (isParapetOverlappingParapet(start, end, parapets)) {
+        showBlockMessage(t.designStudio.structuralBlock.parapetOverlapsParapet);
+        return;
+      }
       const data = {
         start,
         end,
@@ -1090,6 +1096,10 @@ export default function DesignStudioPage() {
     await withCreateGuard(async () => {
       if (!buildingId || !floorId) return;
       if (Math.hypot(end.x - start.x, end.y - start.y) < 0.05) return;
+      if (isGutterOverlappingGutter(start, end, gutters)) {
+        showBlockMessage(t.designStudio.structuralBlock.gutterOverlapsGutter);
+        return;
+      }
       const data = {
         start,
         end,

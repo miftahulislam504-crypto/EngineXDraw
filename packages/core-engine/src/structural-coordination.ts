@@ -36,7 +36,7 @@
  *    only tells the person what currently lacks support so they can add
  *    it.
  */
-import type { Beam, Column, Footing, Roof, Slab, Stair, Point2D, Wall } from '@archibim/object-model';
+import type { Beam, Column, Footing, Gutter, Parapet, Roof, Slab, Stair, Point2D, Wall } from '@archibim/object-model';
 import { distance, pointToSegmentDistance, polygonOverlapArea, polygonArea } from './geometry-utils';
 
 // A column/footing pair counts as "aligned" if their centers are within
@@ -296,6 +296,44 @@ export function isBeamOverlappingBeam(
     if (b.id === excludeBeamId) continue;
     if (!areCollinear(start, end, b.start, b.end)) continue;
     if (collinearOverlapLength(start, end, b.start, b.end) >= MIN_OVERLAP_LENGTH_M) return true;
+  }
+  return false;
+}
+
+/** Same idea for parapets — a new parapet drawn along the same line as
+ * an existing one for a meaningful stretch (e.g. re-tracing the same
+ * roofline edge). Wall/Beam/Slab/Stair already had this guard; parapet
+ * (and gutter, below) had none, which let a double-tap while tracing a
+ * roof outline create two identical parapet documents with no warning —
+ * exactly the "elements share the exact same vertices" duplicate the
+ * Model Checker later flags in Structural. */
+export function isParapetOverlappingParapet(
+  start: Point2D,
+  end: Point2D,
+  parapets: Parapet[],
+  excludeParapetId?: string,
+): boolean {
+  for (const p of parapets) {
+    if (p.id === excludeParapetId) continue;
+    if (!areCollinear(start, end, p.start, p.end)) continue;
+    if (collinearOverlapLength(start, end, p.start, p.end) >= MIN_OVERLAP_LENGTH_M) return true;
+  }
+  return false;
+}
+
+/** Same idea for gutters — see isParapetOverlappingParapet above; gutters
+ * are drawn along the same roofline edges and were missing the same
+ * guard. */
+export function isGutterOverlappingGutter(
+  start: Point2D,
+  end: Point2D,
+  gutters: Gutter[],
+  excludeGutterId?: string,
+): boolean {
+  for (const g of gutters) {
+    if (g.id === excludeGutterId) continue;
+    if (!areCollinear(start, end, g.start, g.end)) continue;
+    if (collinearOverlapLength(start, end, g.start, g.end) >= MIN_OVERLAP_LENGTH_M) return true;
   }
   return false;
 }

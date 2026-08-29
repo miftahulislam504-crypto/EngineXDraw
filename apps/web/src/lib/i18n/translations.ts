@@ -239,6 +239,8 @@ export interface Translations {
       footingOverlapsFooting: string;
       slabOverlapsSlab: string;
       stairOverlapsStair: string;
+      parapetOverlapsParapet: string;
+      gutterOverlapsGutter: string;
     };
     polygonDraft: {
       vertexCount: string; // use {n} as placeholder

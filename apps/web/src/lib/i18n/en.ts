@@ -219,6 +219,8 @@ export const en: Translations = {
       footingOverlapsFooting: "Can't place this footing — it overlaps an existing footing. Place it somewhere else.",
       slabOverlapsSlab: "Can't place this slab — it duplicates an existing slab. Draw it somewhere else, or edit the existing slab instead.",
       stairOverlapsStair: "Can't place this stair — it runs directly along an existing stair flight. Draw it somewhere else, or edit the existing stair instead.",
+      parapetOverlapsParapet: "Can't place this parapet — it runs directly along an existing parapet. Draw it somewhere else, or extend/edit the existing parapet instead.",
+      gutterOverlapsGutter: "Can't place this gutter — it runs directly along an existing gutter. Draw it somewhere else, or extend/edit the existing gutter instead.",
     },
     polygonDraft: {
       vertexCount: '{n} point(s) placed',

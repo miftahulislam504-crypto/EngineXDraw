@@ -307,16 +307,45 @@ export function SheetCapture({
       // toDataURL, or the true-scale computation reads every pixel as
       // covering the wrong real-world distance.
       const pixelRatio = 2;
-      onCaptured({
-        sheetId: sheet.id,
-        image: {
-          dataUrl: s.toDataURL({ pixelRatio }),
-          width: s.width() * pixelRatio,
-          height: s.height() * pixelRatio,
-          metersPerPixel: pixelsPerMeter ? 1 / (pixelsPerMeter * pixelRatio) : undefined,
-        },
-        sidebar,
-      });
+      // Deferred by one tick — DELIBERATELY not calling s.toDataURL()
+      // synchronously here. react-konva's <Stage> (ReactKonvaCore.js)
+      // runs TWO separate useLayoutEffects: the first (mount-only, `[]`
+      // deps) creates the Konva.Stage and invokes this ref callback
+      // ("_setRef(stage.current)") — BEFORE it has attached any
+      // children (Layers/Shapes) to that stage at all. The second
+      // effect (no dependency array, so it runs after every render)
+      // is what actually calls Konva's updateContainer to attach/update
+      // children — and it runs AFTER the first effect, meaning after
+      // _setRef has already fired. Calling toDataURL() synchronously
+      // inside this callback — which is exactly what _setRef invokes —
+      // therefore captures the Stage in the split second before it has
+      // any walls/openings/etc. drawn into it: a real, successfully
+      // "captured" image that is nonetheless completely blank.
+      // Reproduced directly: mounting SheetCapture with real wall data
+      // present from the very first render still captured 0 non-white
+      // pixels without this deferral.
+      // A one-tick setTimeout runs after React has finished flushing
+      // ALL of this commit's layout effects (including that second
+      // Stage effect that attaches children), so by the time this
+      // fires, whatever this Stage should currently be showing is
+      // actually drawn. lastCapturedStageRef is still set synchronously
+      // above (not inside this timeout) so that if react-konva's
+      // dependency-less effect re-invokes this same ref callback again
+      // for the same Stage before this timeout fires, that duplicate
+      // call is skipped rather than scheduling a second redundant
+      // capture of the same node.
+      setTimeout(() => {
+        onCaptured({
+          sheetId: sheet.id,
+          image: {
+            dataUrl: s.toDataURL({ pixelRatio }),
+            width: s.width() * pixelRatio,
+            height: s.height() * pixelRatio,
+            metersPerPixel: pixelsPerMeter ? 1 / (pixelsPerMeter * pixelRatio) : undefined,
+          },
+          sidebar,
+        });
+      }, 0);
     },
     [sheet.id, onCaptured, sidebar, isDataReady],
   );

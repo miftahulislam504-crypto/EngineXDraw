@@ -1,57 +1,61 @@
 'use client';
 
-// TEMPORARY debugging aid — safe to delete once the Floor Plan / Site
-// Plan crash (React error #185, "Maximum update depth exceeded") is
-// found and fixed. Not linked from anywhere and adds no bundle weight
-// to normal pages; it only renders when Next.js's root error boundary
-// catches an unrecoverable render error, which is exactly the crash
-// we're chasing.
-//
-// Why this shows more than the browser console does: production
-// builds minify error MESSAGES for logging (hence "React error #185"),
-// but the `error` object handed to this boundary is unminified. Its
-// `.message` and `.stack` here are the real thing — no DevTools or
-// desktop browser needed to read them.
+import { useEffect } from 'react';
+
+/**
+ * Root-level error boundary — ONLY fires if root layout.tsx itself
+ * throws (error.tsx can't catch that, since layout.tsx is error.tsx's
+ * own parent). layout.tsx currently has almost no logic, so this is
+ * unlikely to be the actual source of the Sheets crash (see error.tsx
+ * for that, which covers everything layout.tsx renders as {children}),
+ * but Next.js requires a global-error.tsx to exist for root-layout
+ * crashes to show anything other than an unstyled blank page — so this
+ * is a safety net, not the primary fix.
+ *
+ * Must render its own <html>/<body> — this REPLACES the root layout
+ * entirely when it fires, so none of layout.tsx's markup (fonts,
+ * DebugConsole, PwaServiceWorker) is available here to reuse.
+ */
 export default function GlobalError({
   error,
+  reset,
 }: {
-  error: Error & { digest ? : string };
+  error: Error & { digest?: string };
   reset: () => void;
 }) {
+  useEffect(() => {
+    console.error('[EngineXDraw] Uncaught root layout error:', error);
+  }, [error]);
+
   return (
     <html lang="en">
-      <body
-        style={{
-          margin: 0,
-          padding: 16,
-          fontFamily: 'monospace',
-          fontSize: 13,
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-          background: '#fff',
-          color: '#111',
-        }}
-      >
-        <h2 style={{ margin: '0 0 12px', fontSize: 16 }}>Debug: caught error</h2>
-
-        <div style={{ marginBottom: 12 }}>
-          <strong>message:</strong>
-          {'\n'}
-          {error?.message || '(no message)'}
-        </div>
-
-        {error?.digest && (
-          <div style={{ marginBottom: 12 }}>
-            <strong>digest:</strong>
-            {'\n'}
-            {error.digest}
+      <body style={{ margin: 0, fontFamily: 'monospace', background: '#131B2E', color: '#F5F5F0' }}>
+        <div style={{ minHeight: '100vh', padding: '24px 16px' }}>
+          <h1 style={{ fontSize: 18, marginBottom: 8 }}>The app itself failed to load</h1>
+          <div
+            style={{
+              background: '#1E293B',
+              border: '1px solid #334155',
+              borderRadius: 8,
+              padding: 12,
+              marginBottom: 16,
+              overflowX: 'auto',
+            }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: '#F87171' }}>
+              {error.name || 'Error'}: {error.message || '(no message)'}
+            </div>
+            {error.digest && <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 6 }}>digest: {error.digest}</div>}
+            {error.stack && (
+              <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', margin: 0, opacity: 0.85 }}>{error.stack}</pre>
+            )}
           </div>
-        )}
-
-        <div>
-          <strong>stack:</strong>
-          {'\n'}
-          {error?.stack || '(no stack)'}
+          <button
+            onClick={() => reset()}
+            style={{ padding: '8px 14px', borderRadius: 6, border: '1px solid #475569', background: '#1E293B', color: '#F5F5F0' }}
+          >
+            Try again
+          </button>
         </div>
       </body>
     </html>

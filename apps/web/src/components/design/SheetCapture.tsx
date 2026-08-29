@@ -6,6 +6,7 @@ import type {
   Building,
   Floor,
   LibraryItem,
+  Point2D,
   Project,
   SectionLine,
   Shaft,
@@ -162,6 +163,78 @@ export function SheetCapture({
   // idempotency guard below for why capture would otherwise fire before
   // data was ready in the first place.
   const isDataReady = !isFloorBasedSheet || floorPlanElements !== undefined;
+
+  // Matches the width/height literally passed to FloorPlanCanvas in the
+  // JSX below — kept as one named pair instead of two separate magic
+  // numbers so the fit-to-bounds math here and the actual rendered
+  // canvas size can never drift out of sync with each other.
+  const FLOOR_PLAN_CANVAS_WIDTH = 900;
+  const FLOOR_PLAN_CANVAS_HEIGHT = 560;
+  // Fraction of the canvas the building's bounding box is scaled to
+  // fill (leaving the rest as margin on every side) — 1.0 would size
+  // the drawing exactly to the shorter canvas dimension with zero
+  // border, which reads as uncomfortably cropped/touching the sheet's
+  // own frame.
+  const FIT_PADDING_FACTOR = 0.85;
+
+  // viewOverride below — see its own doc comment on
+  // FloorPlanCanvasProps for the full "why" — makes THIS floor plan
+  // sheet's read-only export viewport independent of
+  // useDesignStudioStore's shared pixelsPerMeter/panOffset, which is a
+  // single global singleton also read/written by the live, editable
+  // Design Studio canvas. Without an override computed from this
+  // floor's own geometry, a Sheet's export would just inherit whatever
+  // zoom/pan the person last left the live canvas at — anywhere from
+  // "a bit off-center" up to "zoomed into one room, rest of the
+  // building entirely outside the capture frame", which is exactly the
+  // empty-canvas symptom this fixes.
+  const viewOverride = useMemo(() => {
+    if (!isFloorBasedSheet) return undefined;
+    const walls = floorPlanElements?.walls ?? EMPTY_FLOOR_ELEMENTS.walls;
+    const boundaryPoints: Point2D[] = siteBoundary?.boundary ?? [];
+    const points: Point2D[] = [
+      ...walls.flatMap((w) => [w.start, w.end]),
+      ...boundaryPoints,
+    ];
+    if (points.length === 0) return undefined;
+
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const p of points) {
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y);
+      maxY = Math.max(maxY, p.y);
+    }
+    const contentWidth = maxX - minX;
+    const contentHeight = maxY - minY;
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    // A single wall, or a perfectly axis-aligned sliver of geometry,
+    // can leave one dimension at (or near) zero — falling back to the
+    // other dimension alone (and finally to a fixed default) instead
+    // of dividing by ~0 and producing an absurd/Infinity zoom level.
+    const pixelsPerMeterX = contentWidth > 0.01 ? (FLOOR_PLAN_CANVAS_WIDTH * FIT_PADDING_FACTOR) / contentWidth : undefined;
+    const pixelsPerMeterY =
+      contentHeight > 0.01 ? (FLOOR_PLAN_CANVAS_HEIGHT * FIT_PADDING_FACTOR) / contentHeight : undefined;
+    const candidates = [pixelsPerMeterX, pixelsPerMeterY].filter((v): v is number => v !== undefined);
+    const pixelsPerMeter = candidates.length > 0 ? Math.min(...candidates) : 40;
+
+    // Solved from FloorPlanCanvas's own toPixels formula (origin =
+    // width*0.5 + panOffset, pixelX = origin.x + worldX*pixelsPerMeter,
+    // pixelY = origin.y - worldY*pixelsPerMeter — note the Y flip) for
+    // the panOffset that puts this bounding box's center exactly at the
+    // canvas's own center (width/2, height/2).
+    const panOffset: Point2D = {
+      x: -centerX * pixelsPerMeter,
+      y: centerY * pixelsPerMeter,
+    };
+
+    return { pixelsPerMeter, panOffset };
+  }, [isFloorBasedSheet, floorPlanElements, siteBoundary]);
 
   const titleBlock = mergeTitleBlockOverrides(building?.titleBlock, titleBlockOverrides);
   const sidebar = useMemo<SidebarContent>(
@@ -445,8 +518,8 @@ export function SheetCapture({
           onCreateSectionLine={noop}
           onMoveWallEndpoint={noop}
           onUpdateDimension={noop}
-          width={900}
-          height={560}
+          width={FLOOR_PLAN_CANVAS_WIDTH}
+          height={FLOOR_PLAN_CANVAS_HEIGHT}
           readOnly
           onStageReady={handleStageReady}
           northAngleDeg={building?.northAngleDeg ?? 0}
@@ -455,6 +528,7 @@ export function SheetCapture({
           sheetEmphasisLinear={sheet.sheetEmphasisLinear}
           setbackBuildableArea={setbackBuildableArea}
           hideStructuralElements={sheet.hideStructuralElements}
+          viewOverride={viewOverride}
         />
       )}
     </div>

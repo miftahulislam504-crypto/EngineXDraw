@@ -13,6 +13,7 @@ import {
   LayoutGrid,
   Box as Box3DIcon,
   Copy,
+  CopyX,
 } from 'lucide-react';
 import type {
   Balcony,
@@ -104,6 +105,7 @@ import {
   isGutterOverlappingGutter,
   detectBuildingFootprint,
 } from '@archibim/core-engine';
+import { findAllDuplicates } from '@/lib/duplicate-detection';
 import { subscribeToBuildings, updateBuilding } from '@/lib/projects';
 import { useDesignHistoryStore } from '@/lib/design-history';
 import { buildExportPayload } from '@/lib/hub/hub-read';
@@ -411,6 +413,68 @@ export default function DesignStudioPage() {
       setCopyFloorTargetIds([]);
     } finally {
       setIsCopyingFloor(false);
+    }
+  }
+
+  // Find Duplicates — retroactive cleanup for elements that already
+  // occupy the exact same (or near-identical) position on this floor,
+  // using the same overlap definition Copy Floor's own duplicate-guard
+  // and every handleCreateX's create-time gate already use (see
+  // duplicate-detection.ts's file header for the full reasoning). Those
+  // two guards stop NEW duplicates; this cleans up ones already written
+  // to Firestore before those guards existed — exactly what Structural's
+  // Model Checker reports downstream as "2 elements occupy the exact
+  // same geometry" / "share the exact same vertices".
+  //
+  // The scan itself is a pure, synchronous computation over this
+  // render's already-subscribed walls/columns/beams/... arrays (no
+  // Firestore read of its own — everything it needs is already live in
+  // this component), so it only runs when the panel opens rather than on
+  // every render; a floor's element count is small enough that this is
+  // effectively instant, but re-running an O(n^2) scan on every keystroke
+  // elsewhere in the component would still be wasted work for a result
+  // nothing but this panel consumes.
+  const [isFindDuplicatesPanelOpen, setIsFindDuplicatesPanelOpen] = useState(false);
+  const [duplicatesScanResult, setDuplicatesScanResult] = useState<ReturnType<typeof findAllDuplicates> | null>(
+    null,
+  );
+  const [isDeletingDuplicates, setIsDeletingDuplicates] = useState(false);
+
+  function openFindDuplicatesPanel() {
+    setDuplicatesScanResult(
+      findAllDuplicates({ walls, columns, beams, slabs, footings, stairs, parapets, gutters }),
+    );
+    setIsFindDuplicatesPanelOpen(true);
+  }
+
+  async function handleDeleteDuplicates() {
+    if (!buildingId || !floorId || !duplicatesScanResult || isDeletingDuplicates) return;
+    if (duplicatesScanResult.totalRemoveCount === 0) return;
+    setIsDeletingDuplicates(true);
+    try {
+      // Only call a category's batch-delete when it actually has ids to
+      // remove — an empty-array batch write is harmless but pointless,
+      // and skipping it keeps this readable as "one call per kind that
+      // actually needs cleanup" rather than eight unconditional calls.
+      const { walls: w, columns: c, beams: b, slabs: s, footings: f, stairs: st, parapets: p, gutters: g } =
+        duplicatesScanResult;
+      await Promise.all([
+        w.removeIds.length > 0 ? deleteWallsBatch(projectId, buildingId, floorId, w.removeIds) : null,
+        c.removeIds.length > 0 ? deleteColumnsBatch(projectId, buildingId, floorId, c.removeIds) : null,
+        b.removeIds.length > 0 ? deleteBeamsBatch(projectId, buildingId, floorId, b.removeIds) : null,
+        s.removeIds.length > 0 ? deleteSlabsBatch(projectId, buildingId, floorId, s.removeIds) : null,
+        f.removeIds.length > 0 ? footingCrud.removeBatch(projectId, buildingId, floorId, f.removeIds) : null,
+        st.removeIds.length > 0 ? stairCrud.removeBatch(projectId, buildingId, floorId, st.removeIds) : null,
+        p.removeIds.length > 0 ? parapetCrud.removeBatch(projectId, buildingId, floorId, p.removeIds) : null,
+        g.removeIds.length > 0 ? gutterCrud.removeBatch(projectId, buildingId, floorId, g.removeIds) : null,
+      ]);
+      showNoticeMessage(
+        formatTemplate(t.designStudio.findDuplicatesSuccess, { count: duplicatesScanResult.totalRemoveCount }),
+      );
+      setIsFindDuplicatesPanelOpen(false);
+      setDuplicatesScanResult(null);
+    } finally {
+      setIsDeletingDuplicates(false);
     }
   }
 
@@ -1779,6 +1843,111 @@ export default function DesignStudioPage() {
                             {isCopyingFloor
                               ? '…'
                               : formatTemplate(t.designStudio.copyFloorConfirm, { count: copyFloorTargetIds.length })}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  if (isFindDuplicatesPanelOpen) {
+                    setIsFindDuplicatesPanelOpen(false);
+                    setDuplicatesScanResult(null);
+                  } else {
+                    openFindDuplicatesPanel();
+                  }
+                }}
+                disabled={!buildingId || !floorId}
+                title={t.designStudio.findDuplicatesTooltip}
+                aria-label={t.designStudio.findDuplicates}
+                aria-expanded={isFindDuplicatesPanelOpen}
+                className="flex shrink-0 items-center justify-center rounded-sheet border border-line-strong p-1.5 text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
+              >
+                <CopyX size={14} aria-hidden />
+              </button>
+
+              {isFindDuplicatesPanelOpen && duplicatesScanResult && (
+                // Same fixed-position + full-screen-backdrop approach as
+                // the Copy Floor panel just above, and for the identical
+                // reason — this button lives inside the toolbar's own
+                // overflow-x-auto row, so an absolutely positioned panel
+                // would anchor to that scrolled content instead of the
+                // viewport.
+                <>
+                  <div
+                    className="fixed inset-0 z-20"
+                    onClick={() => {
+                      setIsFindDuplicatesPanelOpen(false);
+                      setDuplicatesScanResult(null);
+                    }}
+                  />
+                  <div className="fixed left-1/2 top-16 z-30 w-[calc(100vw-2rem)] max-w-xs -translate-x-1/2 rounded-sheet border border-line-strong bg-paper p-3 shadow-lg">
+                    <p className="text-xs font-medium text-ink">{t.designStudio.findDuplicatesPanelTitle}</p>
+
+                    {duplicatesScanResult.totalRemoveCount === 0 ? (
+                      <p className="mt-1 text-xs text-ink-faint">{t.designStudio.findDuplicatesNoneFound}</p>
+                    ) : (
+                      <>
+                        <p className="mt-1 text-xs text-ink-faint">{t.designStudio.findDuplicatesPanelDescription}</p>
+
+                        <div className="mt-3 space-y-1">
+                          {(
+                            [
+                              ['walls', 'wall'],
+                              ['columns', 'column'],
+                              ['beams', 'beam'],
+                              ['slabs', 'slab'],
+                              ['footings', 'footing'],
+                              ['stairs', 'stair'],
+                              ['parapets', 'parapet'],
+                              ['gutters', 'gutter'],
+                            ] as const
+                          )
+                            .filter(([resultKey]) => duplicatesScanResult[resultKey].removeIds.length > 0)
+                            .map(([resultKey, kind]) => (
+                              <p key={resultKey} className="text-xs text-ink">
+                                {formatTemplate(t.designStudio.findDuplicatesSummaryLine, {
+                                  count: duplicatesScanResult[resultKey].removeIds.length,
+                                  kind: t.designStudio.selectionKinds[kind],
+                                })}
+                              </p>
+                            ))}
+                        </div>
+
+                        <p className="mt-3 text-xs font-medium text-ink-muted">
+                          {formatTemplate(t.designStudio.findDuplicatesTotalLabel, {
+                            count: duplicatesScanResult.totalRemoveCount,
+                          })}
+                        </p>
+
+                        <div className="mt-3 flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsFindDuplicatesPanelOpen(false);
+                              setDuplicatesScanResult(null);
+                            }}
+                            className="rounded-sheet px-2 py-1 text-xs text-ink-muted hover:text-ink"
+                          >
+                            {t.designStudio.findDuplicatesCancel}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleDeleteDuplicates}
+                            disabled={isDeletingDuplicates}
+                            className="rounded-sheet bg-accent px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+                          >
+                            {isDeletingDuplicates
+                              ? t.designStudio.findDuplicatesDeleting
+                              : formatTemplate(t.designStudio.findDuplicatesConfirm, {
+                                  count: duplicatesScanResult.totalRemoveCount,
+                                })}
                           </button>
                         </div>
                       </>

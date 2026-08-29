@@ -192,6 +192,26 @@ export interface Translations {
     copyFloorCancel: string;
     copyFloorSuccess: string; // use {count} placeholder — notice shown after a successful copy
     copyFloorSkippedNotice: string; // use {count} placeholder — appended note when some elements were skipped as exact duplicates already on the target floor(s)
+    // Find Duplicates — scans the current floor for elements that occupy
+    // (near-)identical geometry (see duplicate-detection.ts) and offers
+    // one-click cleanup. Retroactive counterpart to Copy Floor's own
+    // duplicate-guard above and the create-time overlap checks — those
+    // stop NEW duplicates; this cleans up ones already in Firestore from
+    // before those guards existed (the exact "2 elements occupy the
+    // exact same geometry" / "share the exact same vertices" cases
+    // Structural's Model Checker reports downstream).
+    findDuplicates: string; // Toolbar button that opens the find-duplicates panel
+    findDuplicatesTooltip: string; // tooltip for the find-duplicates button
+    findDuplicatesPanelTitle: string; // heading inside the find-duplicates panel
+    findDuplicatesPanelDescription: string; // short explanation of what counts as a duplicate and what happens on delete
+    findDuplicatesScanning: string; // shown briefly while the scan runs
+    findDuplicatesNoneFound: string; // shown when the scan finds nothing to clean up
+    findDuplicatesSummaryLine: string; // use {count} and {kind} placeholders — one line per element kind with duplicates, e.g. "3 walls"
+    findDuplicatesTotalLabel: string; // use {count} placeholder — total elements proposed for deletion, above the confirm button
+    findDuplicatesConfirm: string; // use {count} placeholder — confirm-delete button, e.g. "Delete 7 duplicates"
+    findDuplicatesCancel: string;
+    findDuplicatesDeleting: string; // shown on the confirm button while the batch delete is in flight
+    findDuplicatesSuccess: string; // use {count} placeholder — notice shown after a successful cleanup
     // Push button সরিয়ে auto-sync করা হয়েছে (ব্যবহারকারীর নির্দেশে —
     // ডেটা পাঠানোর জন্য কোনো ম্যানুয়াল বাটন থাকবে না)। এই তিনটা key
     // এখন একটা ছোট, non-intrusive status indicator-এর জন্য (দেখুন

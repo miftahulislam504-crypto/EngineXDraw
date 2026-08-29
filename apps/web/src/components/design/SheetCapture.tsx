@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type Konva from 'konva';
 import type {
   Building,
@@ -113,16 +113,42 @@ export function SheetCapture({
   // lib/floors.ts) hand back a brand-new object reference on every
   // snapshot even when the underlying document content is unchanged,
   // so depending on the objects directly made this useMemo recompute
-  // on effectively every snapshot tick. That gave handleCanvasReady/
-  // handleStageReady below a new function identity each time too,
-  // which — since FloorPlanCanvas's onStageReady effect lists
-  // onStageReady itself as a dependency — re-fired onCaptured on every
-  // render, which set state in the parent, which re-rendered this
-  // component, which recomputed sidebar again... an infinite update
-  // loop that surfaced as React error #185 ("Maximum update depth
-  // exceeded") whenever a Floor Plan/Roof Plan/Site Plan sheet (or the
-  // Combined PDF export, which renders every sheet through this same
-  // component off-screen) was opened.
+  // on effectively every snapshot tick, which used to give
+  // handleCanvasReady/handleStageReady below a new function identity
+  // each time too. That part is fixed by the primitive deps here.
+  //
+  // BUT that was never the whole story. Reproduced in isolation
+  // (SheetCapture mounted with static mock data, zero Firestore
+  // involved): onCaptured still fires on EVERY render even once
+  // handleStageReady/sidebar are 100% stable (confirmed identical by
+  // reference across renders). The actual source is inside
+  // react-konva's own <Stage> implementation (StageWrap in
+  // react-konva/es/ReactKonvaCore.js) — it holds a SECOND
+  // useLayoutEffect with no dependency array at all, so on every single
+  // render (not just mount) it re-invokes `forwardedRef(stage)` to keep
+  // imperative Konva props in sync with React props. That call reaches
+  // our onStageReady prop regardless of whether onStageReady's own
+  // identity changed, so onCaptured fires, the parent sets state to
+  // store the capture, that state update triggers a re-render, and
+  // react-konva's unconditional effect fires again — closing the loop.
+  // handleStageReady/handleCanvasReady deliberately CANNOT fix this by
+  // being more stable; the effect that calls them has no dependency
+  // array to stabilize. (FloorPlanCanvas/Design Studio hit the same
+  // repeated calls, but there onStageReady is optional and nothing
+  // downstream sets state from it, so nothing loops — this is specific
+  // to onCaptured feeding a parent setState.)
+  //
+  // Fix: make onCaptured idempotent per DOM/Konva node instead. Track
+  // the last node we actually captured from; if react-konva calls us
+  // again for that exact same node (same reference — a real new sheet
+  // or a real geometry change always produces a new node), skip firing
+  // onCaptured again. This doesn't (and can't) stop react-konva from
+  // re-invoking the ref callback — it stops each redundant invocation
+  // from turning into a parent state update, which is what was actually
+  // driving the loop.
+  const lastCapturedCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const lastCapturedStageRef = useRef<Konva.Stage | null>(null);
+
   const titleBlock = mergeTitleBlockOverrides(building?.titleBlock, titleBlockOverrides);
   const sidebar = useMemo<SidebarContent>(
     () =>
@@ -158,6 +184,8 @@ export function SheetCapture({
 
   const handleCanvasReady = useCallback(
     (el: HTMLCanvasElement, metersPerPixel: number) => {
+      if (lastCapturedCanvasRef.current === el) return;
+      lastCapturedCanvasRef.current = el;
       onCaptured({
         sheetId: sheet.id,
         image: {
@@ -174,6 +202,8 @@ export function SheetCapture({
 
   const handleStageReady = useCallback(
     (s: Konva.Stage, pixelsPerMeter: number) => {
+      if (lastCapturedStageRef.current === s) return;
+      lastCapturedStageRef.current = s;
       // Matches the pixelRatio the single-sheet detail page captures
       // at — see that page's own comment on why the dimensions passed
       // here must scale together with the pixelRatio used for

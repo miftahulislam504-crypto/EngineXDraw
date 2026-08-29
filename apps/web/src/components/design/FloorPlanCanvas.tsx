@@ -2360,4 +2360,514 @@ export function FloorPlanCanvas({
                 </Fragment>
               );
             }
-            const y = toPixels({ x: 0, y: line.position
+            const y = toPixels({ x: 0, y: line.position }).y;
+            return (
+              <Fragment key={line.id}>
+                <Line
+                  points={[0, y, width, y]}
+                  stroke={color}
+                  strokeWidth={1}
+                  hitStrokeWidth={20}
+                  dash={[6, 4]}
+                  onClick={(e) => {
+                    if (activeTool === 'select') {
+                      e.cancelBubble = true;
+                      handleSelectClick('gridLine', line.id);
+                    }
+                  }}
+                  onTap={(e) => {
+                    if (activeTool === 'select') {
+                      e.cancelBubble = true;
+                      handleSelectClick('gridLine', line.id);
+                    }
+                  }}
+                />
+                <Circle x={16} y={y} radius={12} fill="#fff" stroke={color} strokeWidth={1.5} listening={false} />
+                <Text
+                  x={16}
+                  y={y}
+                  text={label}
+                  fontFamily="monospace"
+                  fontSize={11}
+                  fill={color}
+                  align="center"
+                  width={24}
+                  offsetX={12}
+                  offsetY={6}
+                  listening={false}
+                />
+              </Fragment>
+            );
+          })}
+
+          {/* Notes — Phase 4 Annotation System. Freeform text callouts;
+              the only annotation type with no auto-computed content. */}
+          {notes.map((note) => {
+            const px = toPixels(note.position);
+            const isSelected = isElementSelected('note', note.id);
+            // Person-chosen size (set in the placement popup, editable
+            // later in the Properties panel) — 10 matches the original
+            // fixed size, so notes created before fontSize existed are
+            // unaffected. This is a literal screen-pixel value with no
+            // multiplication by pixelsPerMeter anywhere below, so it
+            // stays the same physical size on screen at any zoom level
+            // — only its position (px.x/px.y, which does scale with
+            // zoom) moves relative to the drawing, exactly like every
+            // other on-canvas label in this file.
+            const fontSize = note.fontSize ?? 10;
+            const paddingX = 4;
+            const paddingY = fontSize * 0.35;
+            const boxWidth = Math.max(fontSize * 2, note.text.length * fontSize * 0.55) + paddingX * 2;
+            const boxHeight = fontSize + paddingY * 2;
+            return (
+              <Fragment key={note.id}>
+                {/* Plain text, no background/border — matches the clean
+                    hand-drafted look being asked for (Image 1 reference:
+                    bold black text directly on the plan, nothing boxed).
+                    A fully transparent Rect sits underneath purely so
+                    Select-tool clicks/taps have something solid-shaped
+                    to hit; it's invisible until the note is selected, at
+                    which point a thin outline appears so it's clear
+                    what's currently selected. */}
+                <Rect
+                  x={px.x - paddingX}
+                  y={px.y - paddingY}
+                  width={boxWidth}
+                  height={boxHeight}
+                  fill="transparent"
+                  stroke={isSelected ? '#2D6CDF' : undefined}
+                  strokeWidth={isSelected ? 1.5 : 0}
+                  dash={isSelected ? [3, 2] : undefined}
+                  onClick={(e) => {
+                    if (activeTool === 'select') {
+                      e.cancelBubble = true;
+                      handleSelectClick('note', note.id);
+                    }
+                  }}
+                  onTap={(e) => {
+                    if (activeTool === 'select') {
+                      e.cancelBubble = true;
+                      handleSelectClick('note', note.id);
+                    }
+                  }}
+                />
+                <Text
+                  x={px.x}
+                  y={px.y - paddingY + fontSize * 0.15}
+                  text={note.text}
+                  fontFamily="sans-serif"
+                  fontSize={fontSize}
+                  fontStyle="bold"
+                  fill="#1A1D24"
+                  listening={false}
+                />
+              </Fragment>
+            );
+          })}
+
+          {/* Section lines — Phase 4 Annotation System (Section Marks) +
+              Phase 4 Drawing Documentation (defines the actual Section cut).
+              Heavier dash pattern than Dimension/Grid so it reads as a
+              distinct, more consequential mark on the plan. */}
+          {sectionLines.map((line) => {
+            const label = line.label ?? getSectionLineAutoLabel(line, sectionLines);
+            const bubbleLabel = label.includes('-') ? label.split('-')[0] : label;
+            const isSelected = isElementSelected('sectionLine', line.id);
+            const color = isSelected ? '#2D6CDF' : '#B4620F';
+            const a = toPixels(line.start);
+            const b = toPixels(line.end);
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const len = Math.hypot(dx, dy) || 1e-6;
+            const ux = dx / len;
+            const uy = dy / len;
+            // Left-hand normal of the a->b direction, in pixel space (screen
+            // y grows downward, so this matches the meter-space left-normal
+            // used when defining the clipping plane for the 3D Section view).
+            const nx = -uy;
+            const ny = ux;
+            const arrowDir = line.viewDirection === 'left' ? 1 : -1;
+            const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+            const arrowTip = { x: mid.x + nx * 18 * arrowDir, y: mid.y + ny * 18 * arrowDir };
+            return (
+              <Fragment key={line.id}>
+                <Line
+                  points={[a.x, a.y, b.x, b.y]}
+                  stroke={color}
+                  strokeWidth={2}
+                  dash={[16, 4, 3, 4]}
+                  onClick={(e) => {
+                    if (activeTool === 'select') {
+                      e.cancelBubble = true;
+                      handleSelectClick('sectionLine', line.id);
+                    }
+                  }}
+                  onTap={(e) => {
+                    if (activeTool === 'select') {
+                      e.cancelBubble = true;
+                      handleSelectClick('sectionLine', line.id);
+                    }
+                  }}
+                />
+                <Line points={[mid.x, mid.y, arrowTip.x, arrowTip.y]} stroke={color} strokeWidth={2} listening={false} />
+                {[a, b].map((pt, i) => (
+                  <Fragment key={i}>
+                    <Circle x={pt.x} y={pt.y} radius={11} fill="#fff" stroke={color} strokeWidth={1.5} listening={false} />
+                    <Text
+                      x={pt.x}
+                      y={pt.y}
+                      text={bubbleLabel}
+                      fontFamily="monospace"
+                      fontSize={11}
+                      fill={color}
+                      align="center"
+                      width={22}
+                      offsetX={11}
+                      offsetY={5.5}
+                      listening={false}
+                    />
+                  </Fragment>
+                ))}
+              </Fragment>
+            );
+          })}
+
+          {/* Elevation Marks — Phase 4 Annotation System. Auto-derived from
+              the wall bounding box (no separate placed object, same idea
+              as Room Tags/Levels), one per cardinal direction, clickable
+              straight through to that Elevation view. */}
+          {wallBounds &&
+            (['N', 'S', 'E', 'W'] as const).map((dir) => {
+              const margin = 1.2;
+              const point: Point2D =
+                dir === 'N'
+                  ? { x: wallBounds.centerX, y: wallBounds.maxY + margin }
+                  : dir === 'S'
+                    ? { x: wallBounds.centerX, y: wallBounds.minY - margin }
+                    : dir === 'E'
+                      ? { x: wallBounds.maxX + margin, y: wallBounds.centerY }
+                      : { x: wallBounds.minX - margin, y: wallBounds.centerY };
+              const px = toPixels(point);
+              return (
+                <Fragment key={dir}>
+                  <Circle
+                    x={px.x}
+                    y={px.y}
+                    radius={13}
+                    fill="#FFFFFF"
+                    stroke="#3F7A4E"
+                    strokeWidth={1.5}
+                    onClick={(e) => {
+                      if (activeTool === 'select' && onOpenElevation) {
+                        e.cancelBubble = true;
+                        onOpenElevation(dir);
+                      }
+                    }}
+                    onTap={(e) => {
+                      if (activeTool === 'select' && onOpenElevation) {
+                        e.cancelBubble = true;
+                        onOpenElevation(dir);
+                      }
+                    }}
+                  />
+                  <Text
+                    x={px.x}
+                    y={px.y}
+                    text={dir}
+                    fontFamily="monospace"
+                    fontSize={12}
+                    fill="#3F7A4E"
+                    align="center"
+                    width={26}
+                    offsetX={13}
+                    offsetY={6}
+                    listening={false}
+                  />
+                </Fragment>
+              );
+            })}
+
+          {/* Draggable endpoint handles for the selected wall — Parametric Editing */}
+          {selection?.kind === 'wall' &&
+            (() => {
+              const wall = walls.find((w) => w.id === selection.id);
+              if (!wall) return null;
+              const startPx = toPixels(wall.start);
+              const endPx = toPixels(wall.end);
+              return (
+                <>
+                  <Circle
+                    x={startPx.x}
+                    y={startPx.y}
+                    radius={6}
+                    fill="#fff"
+                    stroke="#2D6CDF"
+                    strokeWidth={2}
+                    draggable
+                    onDragEnd={(e) => handleEndpointDragEnd(wall.id, 'start', e)}
+                  />
+                  <Circle
+                    x={endPx.x}
+                    y={endPx.y}
+                    radius={6}
+                    fill="#fff"
+                    stroke="#2D6CDF"
+                    strokeWidth={2}
+                    draggable
+                    onDragEnd={(e) => handleEndpointDragEnd(wall.id, 'end', e)}
+                  />
+                </>
+              );
+            })()}
+
+          {SNAP_AWARE_TOOLS.includes(activeTool) &&
+            !RECTANGLE_TOOLS.includes(activeTool) &&
+            drawStart &&
+            snappedCursor && (
+              <>
+                <Line
+                  points={[
+                    toPixels(drawStart).x,
+                    toPixels(drawStart).y,
+                    toPixels(snappedCursor).x,
+                    toPixels(snappedCursor).y,
+                  ]}
+                  stroke="#2D6CDF"
+                  strokeWidth={2}
+                  dash={[6, 4]}
+                />
+                {/* Wall/Beam tool with a length already locked in — label
+                    the preview with that fixed length so it's clear the
+                    number typed in the prompt is what's about to be
+                    placed, not whatever distance the cursor happens to
+                    be at. Positioned at the segment's midpoint, offset
+                    upward slightly so it doesn't sit directly on the
+                    dashed line. */}
+                {LENGTH_LOCKED_TOOLS.includes(activeTool) && pendingWallLength != null && (
+                  <Text
+                    x={(toPixels(drawStart).x + toPixels(snappedCursor).x) / 2}
+                    y={(toPixels(drawStart).y + toPixels(snappedCursor).y) / 2 - 16}
+                    text={formatFeetInches(pendingWallLength)}
+                    fontSize={12}
+                    fontStyle="bold"
+                    fill="#2D6CDF"
+                    align="center"
+                    offsetX={20}
+                  />
+                )}
+              </>
+            )}
+
+          {/* Polygon boundary tools (Slab/Ceiling/Foundation/Roof/
+              Balcony/Shaft/SiteBoundary) — in-progress vertex chain,
+              live segment to the cursor, and a highlighted first vertex
+              showing where to click to close the shape. Separate from
+              the drawStart-based single-segment preview above since
+              these tools track an open-ended vertex list, not one
+              start point. */}
+          {RECTANGLE_TOOLS.includes(activeTool) && polygonDraft && polygonDraft.length > 0 && (
+            <>
+              <Line
+                points={polygonDraft.flatMap((p) => {
+                  const px = toPixels(p);
+                  return [px.x, px.y];
+                })}
+                stroke="#2D6CDF"
+                strokeWidth={2}
+                dash={polygonDraft.length < 2 ? undefined : [6, 4]}
+              />
+              {snappedCursor && (
+                <Line
+                  points={[
+                    toPixels(polygonDraft[polygonDraft.length - 1]).x,
+                    toPixels(polygonDraft[polygonDraft.length - 1]).y,
+                    toPixels(snappedCursor).x,
+                    toPixels(snappedCursor).y,
+                  ]}
+                  stroke="#2D6CDF"
+                  strokeWidth={1.5}
+                  dash={[3, 3]}
+                />
+              )}
+              {polygonDraft.length >= 3 && snappedCursor && (
+                // Closing preview — a faint line back to vertex 1, so
+                // the shape that would result from clicking Finish (or
+                // clicking back on vertex 1) is visible before committing.
+                <Line
+                  points={[
+                    toPixels(snappedCursor).x,
+                    toPixels(snappedCursor).y,
+                    toPixels(polygonDraft[0]).x,
+                    toPixels(polygonDraft[0]).y,
+                  ]}
+                  stroke="#2D6CDF"
+                  strokeWidth={1}
+                  opacity={0.4}
+                  dash={[2, 4]}
+                />
+              )}
+              {polygonDraft.map((p, i) => {
+                const px = toPixels(p);
+                const isFirst = i === 0;
+                return (
+                  <Circle
+                    key={i}
+                    x={px.x}
+                    y={px.y}
+                    radius={isFirst && polygonDraft.length >= 3 ? 7 : 4}
+                    fill={isFirst && polygonDraft.length >= 3 ? '#FFFFFF' : '#2D6CDF'}
+                    stroke={isFirst && polygonDraft.length >= 3 ? '#2D6CDF' : undefined}
+                    strokeWidth={isFirst && polygonDraft.length >= 3 ? 2 : 0}
+                  />
+                );
+              })}
+            </>
+          )}
+
+          {/* Stair tool — in-progress flight-point chain and live segment
+              to the cursor. Simpler than the polygon preview above since
+              a stair never closes into a loop; finishing is only via the
+              design page's Finish bar. Gated to plain 'stair' — 'stairU'
+              gets its own rectangle-shaped preview below instead, since a
+              raw point-to-point polyline wouldn't show the box shape the
+              3-click gesture is actually building. */}
+          {activeTool === 'stair' && stairDraft && stairDraft.length > 0 && (
+            <>
+              <Line
+                points={stairDraft.flatMap((p) => {
+                  const px = toPixels(p);
+                  return [px.x, px.y];
+                })}
+                stroke="#2D6CDF"
+                strokeWidth={2}
+              />
+              {snappedCursor && (
+                <Line
+                  points={[
+                    toPixels(stairDraft[stairDraft.length - 1]).x,
+                    toPixels(stairDraft[stairDraft.length - 1]).y,
+                    toPixels(snappedCursor).x,
+                    toPixels(snappedCursor).y,
+                  ]}
+                  stroke="#2D6CDF"
+                  strokeWidth={1.5}
+                  dash={[3, 3]}
+                />
+              )}
+              {stairDraft.map((p, i) => {
+                const px = toPixels(p);
+                return <Circle key={i} x={px.x} y={px.y} radius={4} fill="#2D6CDF" />;
+              })}
+            </>
+          )}
+
+          {/* 'stairU' tool — 3-click width-line/length-line gesture (see
+              deriveUShapeStairFromRectangle). Before the 2nd click:
+              just the width line, same as the plain stair preview.
+              After the 2nd click: the full rectangle outline, computed
+              live against the cursor as the (not-yet-placed) 3rd point,
+              so the person sees the actual box — including its
+              computed 4th corner — before committing. */}
+          {activeTool === 'stairU' && stairDraft && stairDraft.length > 0 && (
+            <>
+              {stairDraft.length === 1 && snappedCursor && (
+                <Line
+                  points={[
+                    toPixels(stairDraft[0]).x,
+                    toPixels(stairDraft[0]).y,
+                    toPixels(snappedCursor).x,
+                    toPixels(snappedCursor).y,
+                  ]}
+                  stroke="#2D6CDF"
+                  strokeWidth={2}
+                  dash={[3, 3]}
+                />
+              )}
+              {stairDraft.length >= 2 &&
+                (() => {
+                  const p1 = stairDraft[0];
+                  const p2 = stairDraft[1];
+                  const p3 = snappedCursor ?? p2;
+                  const { flights } = deriveUShapeStairFromRectangle(p1, p2, p3);
+                  // The two flights' 4 endpoints are exactly the
+                  // rectangle's 4 corners, already in the right winding
+                  // order to draw as a closed outline (see
+                  // deriveUShapeStairFromRectangle's doc: flight 0 is
+                  // p2->p2Run, flight 1 is p1Run->p1).
+                  const corners = [flights[0].start, flights[0].end, flights[1].start, flights[1].end];
+                  const rectPoints = corners.flatMap((p) => {
+                    const px = toPixels(p);
+                    return [px.x, px.y];
+                  });
+                  return (
+                    <Line
+                      points={rectPoints}
+                      closed
+                      stroke="#2D6CDF"
+                      strokeWidth={2}
+                      dash={stairDraft.length === 2 ? [3, 3] : undefined}
+                      fill="rgba(45, 108, 223, 0.08)"
+                    />
+                  );
+                })()}
+              {stairDraft.map((p, i) => {
+                const px = toPixels(p);
+                return <Circle key={i} x={px.x} y={px.y} radius={4} fill="#2D6CDF" />;
+              })}
+            </>
+          )}
+
+          {guide && (
+            <Line
+              points={[
+                toPixels(guide.from).x,
+                toPixels(guide.from).y,
+                toPixels(guide.to).x,
+                toPixels(guide.to).y,
+              ]}
+              stroke="#E8871E"
+              strokeWidth={1}
+              dash={[2, 4]}
+            />
+          )}
+
+          {drawStart && !RECTANGLE_TOOLS.includes(activeTool) && (
+            <Circle x={toPixels(drawStart).x} y={toPixels(drawStart).y} radius={4} fill="#2D6CDF" />
+          )}
+        </Layer>
+
+        {/* Phase C — Sheet annotation: north arrow, fixed to a screen
+            corner in raw pixel coordinates (not toPixels()) so it stays
+            put through pan/zoom, the same convention a compass rose has
+            on a printed drawing regardless of how far you've scrolled.
+            Only rendered when a caller passes northAngleDeg — most
+            design-studio usage of this canvas doesn't want an overlay
+            competing with the live editing UI. */}
+        {northAngleDeg !== undefined && (
+          <Layer listening={false}>
+            <NorthArrow x={width - 44} y={56} rotationDeg={northAngleDeg} />
+          </Layer>
+        )}
+      </Stage>
+    </div>
+  );
+}
+
+/** A simple compass-rose north arrow: a long spike pointing toward north
+ * with a short tail, a ring around the pivot, and an "N" label — same
+ * visual language as the circular north-arrow markers in the reference
+ * elevation set's plan sheets, just drawn from Konva primitives instead
+ * of an imported icon (avoids pulling in an SVG asset for one marker). */
+function NorthArrow({ x, y, rotationDeg }: { x: number; y: number; rotationDeg: number }) {
+  const spike = 20;
+  const tail = 8;
+  const headWidth = 6;
+  return (
+    <Group x={x} y={y} rotation={rotationDeg}>
+      <Circle radius={spike + 6} stroke="#5B6478" strokeWidth={1} fill="rgba(255,255,255,0.85)" />
+      <Line points={[0, -spike, headWidth, 4, 0, -2, -headWidth, 4]} closed fill="#1C2430" />
+      <Line points={[0, -2, 0, tail]} stroke="#1C2430" strokeWidth={2} />
+      <Text text="N" x={-5} y={-spike - 18} width={10} align="center" fontSize={11} fontStyle="bold" fill="#1C2430" />
+    </Group>
+  );
+}

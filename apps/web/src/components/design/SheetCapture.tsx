@@ -149,6 +149,20 @@ export function SheetCapture({
   const lastCapturedCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastCapturedStageRef = useRef<Konva.Stage | null>(null);
 
+  const isFloorBasedSheet = (FLOOR_BASED_TYPES as readonly string[]).includes(sheet.viewportType);
+  const floorPlanElements = isFloorBasedSheet && sheet.floorId ? floorElements[sheet.floorId] : undefined;
+  // A Floor/Roof/Site Plan sheet's data hasn't actually arrived yet
+  // until floorPlanElements exists (see subscribeToFloorElements in
+  // lib/floors.ts: it starts every floor at EMPTY_FLOOR_ELEMENTS and
+  // fills in walls/openings/columns/... via ~20 independent Firestore
+  // listeners, arriving asynchronously one at a time). Capturing before
+  // that finishes produces a real screenshot of a real Stage — just one
+  // that's genuinely empty, since react-konva/Konva have nothing to
+  // draw walls with yet. This is the readiness half of the fix; see the
+  // idempotency guard below for why capture would otherwise fire before
+  // data was ready in the first place.
+  const isDataReady = !isFloorBasedSheet || floorPlanElements !== undefined;
+
   const titleBlock = mergeTitleBlockOverrides(building?.titleBlock, titleBlockOverrides);
   const sidebar = useMemo<SidebarContent>(
     () =>
@@ -203,6 +217,16 @@ export function SheetCapture({
   const handleStageReady = useCallback(
     (s: Konva.Stage, pixelsPerMeter: number) => {
       if (lastCapturedStageRef.current === s) return;
+      // Don't lock in a capture of a real-but-still-empty Stage —
+      // Firestore's floor-elements listeners (see isDataReady above)
+      // haven't necessarily delivered walls/openings/etc. yet on first
+      // mount, and react-konva's Stage re-invokes this same ref
+      // callback on every render regardless (see the long comment
+      // above sidebar's useMemo for why), so simply returning WITHOUT
+      // setting lastCapturedStageRef here means the very next render —
+      // the one after floorPlanElements actually arrives — reaches this
+      // callback again for the same Stage and captures it then instead.
+      if (!isDataReady) return;
       lastCapturedStageRef.current = s;
       // Matches the pixelRatio the single-sheet detail page captures
       // at — see that page's own comment on why the dimensions passed
@@ -221,7 +245,7 @@ export function SheetCapture({
         sidebar,
       });
     },
-    [sheet.id, onCaptured, sidebar],
+    [sheet.id, onCaptured, sidebar, isDataReady],
   );
 
   const sectionLine: SectionLine | undefined =
@@ -229,8 +253,10 @@ export function SheetCapture({
       ? floors.flatMap((f) => floorElements[f.id]?.sectionLines ?? []).find((s) => s.id === sheet.sectionLineId)
       : undefined;
 
-  const isFloorBasedSheet = (FLOOR_BASED_TYPES as readonly string[]).includes(sheet.viewportType);
-  const floorPlanElements = isFloorBasedSheet && sheet.floorId ? floorElements[sheet.floorId] : undefined;
+  // isFloorBasedSheet/floorPlanElements are declared earlier in this
+  // component now (needed there for the capture-readiness gate) — this
+  // just keeps floorPlanFloorLevel next to the other section/floor-plan
+  // derived values it's used alongside below.
   const floorPlanFloorLevel = floors.find((f) => f.id === sheet.floorId)?.level ?? 0;
 
   // Audit Gap Closure Phase 2 — the required building-line inset only

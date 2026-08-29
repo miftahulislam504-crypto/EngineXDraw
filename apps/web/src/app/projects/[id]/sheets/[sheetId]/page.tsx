@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button, PageHeader } from '@archibim/shared-ui';
@@ -91,21 +91,27 @@ export default function SheetDetailPage() {
     return subscribeToLibrary('MATERIAL', setMaterialLibraryItems);
   }, []);
 
-  // floors is a Firestore onSnapshot-backed array (see subscribeToFloors
-  // in lib/floors.ts): .map().sort() there means it hands back a
-  // brand-new array (and brand-new Floor objects) on every snapshot,
-  // even when the floor documents themselves haven't actually changed —
-  // the same reference-instability pattern documented in
-  // SheetCapture.tsx/FloorPlanCanvas.tsx (see the useMemo/useCallback
-  // comments there) that has caused a runaway re-render loop in this
-  // codebase before. Depending on `floors` directly below would tear
-  // down and recreate every one of subscribeToFloorElements's ~22
-  // per-element-type Firestore listeners, for every floor, on every
-  // such snapshot — not just once on real add/remove. floorIds is a
-  // primitive derived from the one thing this effect actually needs
-  // (which floors exist), so it only re-subscribes when a floor is
-  // genuinely added or removed.
-  const floorIds = floors.map((f) => f.id).join(',');
+  // Deliberately keyed on a primitive derived from floor IDs, NOT on
+  // the `floors` array itself. subscribeToFloors (like every other
+  // onSnapshot-backed subscribe* in lib/floors.ts) hands back a brand
+  // new array reference on every Firestore snapshot tick even when the
+  // set of floors hasn't actually changed, so depending on `floors`
+  // directly re-ran this whole effect — tearing down and rebuilding
+  // every per-floor subscribeToFloorElements listener — on effectively
+  // every snapshot tick. Each rebuild starts that floor's elements back
+  // at EMPTY_FLOOR_ELEMENTS (see subscribeToFloorElements's own `let
+  // current = { ...EMPTY_FLOOR_ELEMENTS }`) until its ~20 underlying
+  // per-field listeners (walls, openings, columns, ...) re-deliver, so
+  // floorElements could be caught mid-flight with genuinely no walls in
+  // it yet. That was invisible before the infinite-loop fix elsewhere
+  // in this file, because the loop kept re-rendering/re-capturing until
+  // a render happened to land after the walls listener had reported
+  // in. Once the loop was fixed so capture only fires once, an export
+  // that happened to fire on a rebuild caught mid-flight would produce
+  // exactly the empty-canvas symptom this key change prevents by not
+  // rebuilding the subscriptions unless the actual set of floor IDs
+  // changed.
+  const floorIdsKey = useMemo(() => floors.map((f) => f.id).sort().join(','), [floors]);
 
   useEffect(() => {
     if (!buildingId || floors.length === 0) return;
@@ -115,10 +121,8 @@ export default function SheetDetailPage() {
       }),
     );
     return () => unsubs.forEach((unsub) => unsub());
-    // floors is intentionally read inside the effect (for floor.id) but
-    // NOT listed as a dependency — see the comment above floorIds.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, buildingId, floorIds]);
+  }, [projectId, buildingId, floorIdsKey]);
 
   // Reset any capture from a previous sheet when the id in the URL
   // changes — otherwise navigating from one sheet's page to another

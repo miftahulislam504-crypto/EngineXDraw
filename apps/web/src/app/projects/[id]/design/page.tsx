@@ -1914,7 +1914,7 @@ export default function DesignStudioPage() {
                               <p key={resultKey} className="text-xs text-ink">
                                 {formatTemplate(t.designStudio.findDuplicatesSummaryLine, {
                                   count: duplicatesScanResult[resultKey].removeIds.length,
-                                  kind: t.designStudio.selectionKinds[kind],
+                                  kind: t.selectionKinds[kind],
                                 })}
                               </p>
                             ))}

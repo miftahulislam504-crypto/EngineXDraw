@@ -304,15 +304,6 @@ export function deriveStairLandings(stair: Stair): StairLanding[] {
   return landings;
 }
 
-/** How far apart (meters, center-to-center) the two parallel flights of
- * a U-shape/switchback preset sit — needs to clear the stair's own
- * width so the up-flight and down-flight don't overlap, plus a little
- * headroom for the mid landing itself to read as a real platform
- * rather than a hairline gap. */
-function uShapeFlightGap(stairWidth: number): number {
-  return stairWidth + Math.max(0.9, stairWidth);
-}
-
 /** Reshapes a stair's flights into a standard U-shape (switchback):
  * two parallel straight flights, same total rise as before, connected
  * by a 180° turn at a mid landing — the most common residential/
@@ -342,11 +333,18 @@ export function applyUShapeStairPreset(stair: Stair): StairFlight[] {
   // path below (origin at 0,0, +x direction) instead of throwing.
   const flights = stair.flights ?? [];
   const first = flights[0];
-  const totalSteps = Math.max(2, stairTotalSteps(stair) || 12);
   const riserHeight = first?.riserHeight ?? DEFAULT_STAIR_RISER_HEIGHT;
 
-  const lowerSteps = Math.ceil(totalSteps / 2);
-  const upperSteps = totalSteps - lowerSteps;
+  // Fixed 12 steps per flight (24 total), not a total split in half.
+  // A U-shape stair connects one floor to the next — the flight's
+  // combined rise has to land exactly on the floor-above slab, and
+  // splitting an arbitrary total unevenly (or re-deriving it from
+  // whatever the stair happened to have before) drifts that landing
+  // elevation away from the slab. Each flight climbing a fixed, equal
+  // DEFAULT_STAIR_STEPS keeps both flights' rise identical and the
+  // total rise a predictable multiple of the standard riser height.
+  const lowerSteps = DEFAULT_STAIR_STEPS;
+  const upperSteps = DEFAULT_STAIR_STEPS;
 
   const origin: Point2D = first?.start ?? { x: 0, y: 0 };
   // Direction of travel for the lower (first) flight — reuse the
@@ -362,18 +360,31 @@ export function applyUShapeStairPreset(stair: Stair): StairFlight[] {
     dx = rawDx / len;
     dy = rawDy / len;
   }
-  // Perpendicular direction — where the return flight sits, offset by
-  // the gap so it doesn't overlap the first flight or its landing.
+  // Perpendicular direction — where the return flight sits. Offset by
+  // exactly the stair's own width, NOT uShapeFlightGap's inflated
+  // (~2x width) spacing. buildTurnLandingBoundary's switchback case
+  // already builds the single mid-landing platform flush against both
+  // flights' facing edges using stair.width as its depth — stacking a
+  // second, larger offset here on top of that just pushes flight B
+  // away from that landing, leaving a floating gap that reads as a
+  // duplicate/disconnected half-landing between the two flights (the
+  // exact reported defect). Offsetting by stair.width means flight A's
+  // end and flight B's start sit exactly stair.width apart — precisely
+  // the span buildTurnLandingBoundary spans with its one landing slab,
+  // so the flights connect through a single flush horizontal landing
+  // with no extra platform and no gap.
   const px = -dy;
   const py = dx;
-  const gap = uShapeFlightGap(stair.width);
+  const gap = stair.width;
 
   const lowerRun = lowerSteps * treadDepthForPreset(stair.width);
   const lowerEnd: Point2D = { x: origin.x + dx * lowerRun, y: origin.y + dy * lowerRun };
 
-  // Upper flight runs back the way it came (switchback), offset
-  // sideways by `gap`, ending directly above (in plan) the point
-  // `gap` away from the origin — i.e. the classic U shape.
+  // Upper flight runs back the way it came (switchback), starting
+  // right at the far edge of the single mid-landing (gap away from
+  // flight A's end), so the landing is the only platform between the
+  // two flights — ending directly above (in plan) the point `gap`
+  // away from the origin — i.e. the classic U shape.
   const upperStart: Point2D = { x: lowerEnd.x + px * gap, y: lowerEnd.y + py * gap };
   const upperRun = upperSteps * treadDepthForPreset(stair.width);
   const upperEnd: Point2D = { x: upperStart.x - dx * upperRun, y: upperStart.y - dy * upperRun };
@@ -492,12 +503,13 @@ export function deriveUShapeStairFromRectangle(
   const bFar: Point2D = { x: p2.x - wx * bOffset, y: p2.y - wy * bOffset };
   const bNear: Point2D = { x: bFar.x + rx * length, y: bFar.y + ry * length };
 
-  // Total rise is split evenly across both flights (their own
-  // numberOfSteps/riserHeight can be re-tuned afterward in the
-  // Properties Panel, same as any stair) so the two flights climb
-  // equal amounts, matching the classic U-shape shopfloor convention.
-  const lowerSteps = Math.ceil(DEFAULT_STAIR_STEPS / 2);
-  const upperSteps = DEFAULT_STAIR_STEPS - lowerSteps;
+  // Fixed DEFAULT_STAIR_STEPS (12) per flight — not split — so each
+  // flight's rise lands exactly on the floor-above slab regardless of
+  // riser height, matching applyUShapeStairPreset's same fixed-steps
+  // rule above (their own numberOfSteps/riserHeight can still be
+  // re-tuned afterward in the Properties Panel, same as any stair).
+  const lowerSteps = DEFAULT_STAIR_STEPS;
+  const upperSteps = DEFAULT_STAIR_STEPS;
 
   const flights: StairFlight[] = [
     { start: aStart, end: aEnd, numberOfSteps: lowerSteps, riserHeight: DEFAULT_STAIR_RISER_HEIGHT },

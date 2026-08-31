@@ -170,12 +170,27 @@ export function SheetCapture({
   // canvas size can never drift out of sync with each other.
   const FLOOR_PLAN_CANVAS_WIDTH = 900;
   const FLOOR_PLAN_CANVAS_HEIGHT = 560;
-  // Fraction of the canvas the building's bounding box is scaled to
-  // fill (leaving the rest as margin on every side) — 1.0 would size
-  // the drawing exactly to the shorter canvas dimension with zero
-  // border, which reads as uncomfortably cropped/touching the sheet's
-  // own frame.
-  const FIT_PADDING_FACTOR = 0.85;
+  // Fraction of the canvas the computed bounding box (walls +
+  // siteBoundary + grid line positions + dimension offset lines — see
+  // viewOverride below) is scaled to fill, leaving the rest as margin
+  // on every side. Deliberately well under 1.0 for two independent
+  // reasons: (1) 1.0 would size the drawing exactly to the shorter
+  // canvas dimension with zero border, reading as uncomfortably
+  // cropped/touching the sheet's own frame, and (2) the bounding box
+  // above is built from POINTS (wall endpoints, a grid line's own
+  // coordinate, a dimension's offset line) — it doesn't know that a
+  // grid line's label bubble has its own ~12–13px radius drawn AROUND
+  // that point, or that a dimension's measurement text has its own
+  // width extending past its marker circle. Reproduced directly: with
+  // this at 0.85, a grid/dimension label circle still landed a few
+  // pixels outside the 0–560 canvas height even though the POINT it's
+  // centered on was correctly included in the bounds. 0.7 leaves
+  // enough margin to absorb that radius/label-width overshoot without
+  // computing exact per-label pixel extents (which would need font
+  // metrics for every possible label string — not worth the
+  // complexity for a margin that just needs to be "comfortably more
+  // than the largest label's own footprint").
+  const FIT_PADDING_FACTOR = 0.7;
 
   // viewOverride below — see its own doc comment on
   // FloorPlanCanvasProps for the full "why" — makes THIS floor plan
@@ -190,11 +205,65 @@ export function SheetCapture({
   // empty-canvas symptom this fixes.
   const viewOverride = useMemo(() => {
     if (!isFloorBasedSheet) return undefined;
-    const walls = floorPlanElements?.walls ?? EMPTY_FLOOR_ELEMENTS.walls;
+    const fe = floorPlanElements;
+    const walls = fe?.walls ?? EMPTY_FLOOR_ELEMENTS.walls;
+    const gridLines = fe?.gridLines ?? EMPTY_FLOOR_ELEMENTS.gridLines;
+    const dimensions = fe?.dimensions ?? EMPTY_FLOOR_ELEMENTS.dimensions;
     const boundaryPoints: Point2D[] = siteBoundary?.boundary ?? [];
+
+    // Every OTHER element type FloorPlanCanvas renders for a floor
+    // plan, collected the same way walls/siteBoundary are: as a flat
+    // list of Point2D to fold into one min/max bounding box below.
+    // Deliberately exhaustive (every array-typed prop FloorPlanCanvas
+    // accepts except Opening, which has no independent plan position —
+    // it's always wallId + a 0–1 parametric position along that wall,
+    // so it can never fall outside that wall's own already-included
+    // start/end) rather than only the two categories (gridLines,
+    // dimensions) the original bug report happened to surface: a
+    // balcony or parapet is routine architectural convention to
+    // project outward past the wall it's attached to (that's the whole
+    // point of a balcony), a curtain wall/railing/gutter/beam is its
+    // own independent start/end run that isn't guaranteed to lie
+    // inside the wall bounding box, and a stray Note can be placed
+    // anywhere on the floor, including well outside the building
+    // outline. Grouped below by which of the four geometry shapes
+    // (start/end pair, boundary polygon, single center/position point,
+    // or Stair's nested flights) each type actually uses, rather than
+    // spelling out the same three-line push per type twenty times over.
+    const startEndPoints: Point2D[] = [
+      ...(fe?.beams ?? EMPTY_FLOOR_ELEMENTS.beams).flatMap((b) => [b.start, b.end]),
+      ...(fe?.ramps ?? EMPTY_FLOOR_ELEMENTS.ramps).flatMap((r) => [r.start, r.end]),
+      ...(fe?.railings ?? EMPTY_FLOOR_ELEMENTS.railings).flatMap((r) => [r.start, r.end]),
+      ...(fe?.curtainWalls ?? EMPTY_FLOOR_ELEMENTS.curtainWalls).flatMap((c) => [c.start, c.end]),
+      ...(fe?.parapets ?? EMPTY_FLOOR_ELEMENTS.parapets).flatMap((p) => [p.start, p.end]),
+      ...(fe?.gutters ?? EMPTY_FLOOR_ELEMENTS.gutters).flatMap((g) => [g.start, g.end]),
+    ];
+    const boundaryPolygonPoints: Point2D[] = [
+      ...(fe?.slabs ?? EMPTY_FLOOR_ELEMENTS.slabs).flatMap((s) => s.boundary),
+      ...(fe?.ceilings ?? EMPTY_FLOOR_ELEMENTS.ceilings).flatMap((c) => c.boundary),
+      ...(fe?.foundations ?? EMPTY_FLOOR_ELEMENTS.foundations).flatMap((f) => f.boundary),
+      ...(fe?.roofs ?? EMPTY_FLOOR_ELEMENTS.roofs).flatMap((r) => r.boundary),
+      ...(fe?.balconies ?? EMPTY_FLOOR_ELEMENTS.balconies).flatMap((b) => b.boundary),
+      ...(fe?.rooms ?? EMPTY_FLOOR_ELEMENTS.rooms).flatMap((r) => r.boundary),
+    ];
+    const centerOrPositionPoints: Point2D[] = [
+      ...(fe?.columns ?? EMPTY_FLOOR_ELEMENTS.columns).map((c) => c.center),
+      ...(fe?.footings ?? EMPTY_FLOOR_ELEMENTS.footings).map((f) => f.center),
+      ...(fe?.skylights ?? EMPTY_FLOOR_ELEMENTS.skylights).map((s) => s.center),
+      ...(fe?.placedObjects ?? EMPTY_FLOOR_ELEMENTS.placedObjects).map((p) => p.center),
+      ...(fe?.notes ?? EMPTY_FLOOR_ELEMENTS.notes).map((n) => n.position),
+    ];
+    const stairPoints: Point2D[] = (fe?.stairs ?? EMPTY_FLOOR_ELEMENTS.stairs).flatMap((st) =>
+      st.flights.flatMap((f) => [f.start, f.end]),
+    );
+
     const points: Point2D[] = [
       ...walls.flatMap((w) => [w.start, w.end]),
       ...boundaryPoints,
+      ...startEndPoints,
+      ...boundaryPolygonPoints,
+      ...centerOrPositionPoints,
+      ...stairPoints,
     ];
     if (points.length === 0) return undefined;
 
@@ -208,6 +277,52 @@ export function SheetCapture({
       minY = Math.min(minY, p.y);
       maxY = Math.max(maxY, p.y);
     }
+
+    // Grid lines are drawn independently of every element type above —
+    // see FloorPlanCanvas.tsx's own gridLines.map — and are routine
+    // architectural convention to run a little past the wall/outline
+    // they line up with. Reproduced directly: with bounds computed
+    // from geometry alone (no grid lines folded in), a Circle (grid
+    // label bubble) landed at y=-29 / y=589 — both outside this
+    // component's own 0–560 canvas height — which is exactly why
+    // grid content was captured seemingly not drawn at all, when what
+    // had actually happened is it was drawn just outside the auto-fit
+    // frame. Extending minX/maxX/minY/maxY to also cover every grid
+    // line's own position (along its own axis only — a grid line spans
+    // the full opposite axis by definition, so it never meaningfully
+    // constrains that axis' bounds) keeps it inside the same fitted
+    // frame every other element type above already gets.
+    for (const g of gridLines) {
+      if (g.orientation === 'vertical') {
+        minX = Math.min(minX, g.position);
+        maxX = Math.max(maxX, g.position);
+      } else {
+        minY = Math.min(minY, g.position);
+        maxY = Math.max(maxY, g.position);
+      }
+    }
+    for (const d of dimensions) {
+      const dx = d.end.x - d.start.x;
+      const dy = d.end.y - d.start.y;
+      const len = Math.hypot(dx, dy) || 1e-6;
+      // Perpendicular unit vector — matches FloorPlanCanvas's own
+      // dimensions.map offset-line calculation exactly (nx/ny there),
+      // so the offset line this predicts is the same one actually
+      // drawn.
+      const nx = -(dy / len);
+      const ny = dx / len;
+      const offsetPoints: Point2D[] = [
+        { x: d.start.x + nx * d.offset, y: d.start.y + ny * d.offset },
+        { x: d.end.x + nx * d.offset, y: d.end.y + ny * d.offset },
+      ];
+      for (const p of offsetPoints) {
+        minX = Math.min(minX, p.x);
+        maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y);
+        maxY = Math.max(maxY, p.y);
+      }
+    }
+
     const contentWidth = maxX - minX;
     const contentHeight = maxY - minY;
     const centerX = (minX + maxX) / 2;

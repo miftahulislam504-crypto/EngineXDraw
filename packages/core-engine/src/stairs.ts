@@ -172,24 +172,29 @@ function buildTurnLandingBoundary(a: StairFlight, b: StairFlight, stairWidth: nu
     const p2 = { x: a.end.x + A.ux * spanMax, y: a.end.y + A.uy * spanMax };
 
     // Landing depth across the gap axis (perpendicular to travel,
-    // between the two flights' facing edges): a real switchback landing
-    // is only as deep as the stair itself is wide (`stairWidth`) — the
-    // same "landing depth = stair width" rule the bottom/top end
-    // landings already follow (see MIN_END_LANDING_DEPTH's own comment)
-    // — flush against flight A's facing edge and extending exactly
-    // `stairWidth` toward flight B, NOT stretched across the whole
-    // flight-to-flight gap. Stretching to fill the whole gap (the
-    // previous nearA = half, nearB = gapLen - half) is what made the
-    // landing swallow almost the entire gap between the two flights
-    // instead of leaving a proper narrow gap alongside a stair-width
-    // -deep landing platform.
+    // between the two flights' facing edges): the landing must span
+    // EXACTLY the real physical gap between the flights (gapLen) —
+    // flush against flight A's facing edge and flush against flight
+    // B's facing edge, with no leftover strip and no overshoot past
+    // either flight. Earlier versions used `stairWidth` as the depth
+    // instead of `gapLen`: that's correct only when the two happen to
+    // be equal, but deriveUShapeStairFromRectangle's side-by-side
+    // layout sizes the gap from uShapeWellGap (a small fixed
+    // well-width) while `stairWidth` here is a per-flight width — a
+    // different, usually larger, number. Using `stairWidth` as depth
+    // in that case pushed the landing rectangle PAST flight B's own
+    // facing edge and into flight B's footprint, producing a landing
+    // that overlapped/clipped through flight B's steps (the reported
+    // jagged/broken geometry). Using `gapLen` always lands exactly on
+    // flight B's edge — neither short of it nor past it — regardless
+    // of how `stairWidth` compares to the actual drawn gap.
     const gapDx = b.start.x - a.end.x;
     const gapDy = b.start.y - a.end.y;
     const gapLen = Math.hypot(gapDx, gapDy) || 1e-9;
     const gx = gapDx / gapLen;
     const gy = gapDy / gapLen;
     const nearA = 0;
-    const nearB = Math.min(stairWidth, gapLen);
+    const nearB = gapLen;
 
     return [
       { x: p1.x + gx * nearA, y: p1.y + gy * nearA },

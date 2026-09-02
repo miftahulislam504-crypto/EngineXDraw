@@ -173,28 +173,42 @@ function buildTurnLandingBoundary(a: StairFlight, b: StairFlight, stairWidth: nu
 
     // Landing depth across the gap axis (perpendicular to travel,
     // between the two flights' facing edges): the landing must span
-    // EXACTLY the real physical gap between the flights (gapLen) —
-    // flush against flight A's facing edge and flush against flight
-    // B's facing edge, with no leftover strip and no overshoot past
-    // either flight. Earlier versions used `stairWidth` as the depth
-    // instead of `gapLen`: that's correct only when the two happen to
-    // be equal, but deriveUShapeStairFromRectangle's side-by-side
-    // layout sizes the gap from uShapeWellGap (a small fixed
-    // well-width) while `stairWidth` here is a per-flight width — a
-    // different, usually larger, number. Using `stairWidth` as depth
-    // in that case pushed the landing rectangle PAST flight B's own
-    // facing edge and into flight B's footprint, producing a landing
-    // that overlapped/clipped through flight B's steps (the reported
-    // jagged/broken geometry). Using `gapLen` always lands exactly on
-    // flight B's edge — neither short of it nor past it — regardless
-    // of how `stairWidth` compares to the actual drawn gap.
-    const gapDx = b.start.x - a.end.x;
-    const gapDy = b.start.y - a.end.y;
-    const gapLen = Math.hypot(gapDx, gapDy) || 1e-9;
-    const gx = gapDx / gapLen;
-    const gy = gapDy / gapLen;
-    const nearA = 0;
-    const nearB = gapLen;
+    // EXACTLY the real physical gap between the flights' FOOTPRINT
+    // EDGES, flush against each, with no leftover strip and no
+    // overshoot past either flight.
+    //
+    // `b.start - a.end` is NOT that gap — it's the distance between the
+    // two flights' CENTERLINES. deriveUShapeStairFromRectangle places
+    // each flight's centerline half a flight-width in from its own side
+    // of the drawn rectangle (see its aOffset/bOffset), so the
+    // centerlines end up a full `stairWidth` further apart than their
+    // facing edges actually are: centerline gap = edge gap + half of
+    // flight A's width + half of flight B's width. Using the raw
+    // centerline distance as the landing depth (an earlier version of
+    // this fix) made the landing balloon out far past both flights'
+    // real edges — engulfing the flights themselves instead of sitting
+    // as the slim connecting strip uShapeWellGap actually sized (the
+    // reported swollen/overlapping landing). Subtracting each flight's
+    // own half-width from the centerline distance recovers the true
+    // edge-to-edge gap, so the landing lands exactly flush on both
+    // flights' facing edges again — for both the 3-click stairU tool's
+    // layout and applyUShapeStairPreset's, the two switchback producers
+    // that reach this branch (an L-turn never does; it's handled by the
+    // separate, unconditional branch below).
+    const halfA = stairWidth / 2;
+    const halfB = stairWidth / 2;
+    const centerlineDx = b.start.x - a.end.x;
+    const centerlineDy = b.start.y - a.end.y;
+    const centerlineLen = Math.hypot(centerlineDx, centerlineDy) || 1e-9;
+    const gx = centerlineDx / centerlineLen;
+    const gy = centerlineDy / centerlineLen;
+    // Fall back to a.end itself (edge gap 0) if the flights' own
+    // half-widths already consume the whole centerline span — an
+    // unusually tight or hand-edited stair — rather than letting the
+    // strip invert to a negative depth.
+    const gapLen = Math.max(1e-9, centerlineLen - halfA - halfB);
+    const nearA = halfA;
+    const nearB = halfA + gapLen;
 
     return [
       { x: p1.x + gx * nearA, y: p1.y + gy * nearA },
@@ -365,22 +379,26 @@ export function applyUShapeStairPreset(stair: Stair): StairFlight[] {
     dx = rawDx / len;
     dy = rawDy / len;
   }
-  // Perpendicular direction — where the return flight sits. Offset by
-  // exactly the stair's own width, NOT uShapeFlightGap's inflated
-  // (~2x width) spacing. buildTurnLandingBoundary's switchback case
-  // already builds the single mid-landing platform flush against both
-  // flights' facing edges using stair.width as its depth — stacking a
-  // second, larger offset here on top of that just pushes flight B
-  // away from that landing, leaving a floating gap that reads as a
-  // duplicate/disconnected half-landing between the two flights (the
-  // exact reported defect). Offsetting by stair.width means flight A's
-  // end and flight B's start sit exactly stair.width apart — precisely
-  // the span buildTurnLandingBoundary spans with its one landing slab,
-  // so the flights connect through a single flush horizontal landing
-  // with no extra platform and no gap.
+  // Perpendicular direction — where the return flight sits. Centerline
+  // offset is uShapeWellGap(stair.width) PLUS a full stair.width — not
+  // stair.width alone. buildTurnLandingBoundary's switchback case reads
+  // this offset as the gap between the two flights' CENTERLINES, then
+  // derives the actual walkable landing depth by subtracting each
+  // flight's own half-width from that centerline distance (see its own
+  // doc). So a centerline gap of exactly stair.width, as this used to
+  // be set to, always nets out to a landing depth of stair.width minus
+  // stair.width/2 minus stair.width/2 — i.e. zero: the two flights end
+  // up touching edge-to-edge with no walkable strip between them at
+  // all, regardless of how wide the stair is. Adding
+  // uShapeWellGap(stair.width) on top of the width recovers a real,
+  // physically-sized landing (uShapeWellGap deep, flush against both
+  // flights, no floating extra gap) — the same landing depth
+  // deriveUShapeStairFromRectangle's 3-click tool already produces, so
+  // both ways of building a U-shape stair agree on how deep its mid
+  // landing is.
   const px = -dy;
   const py = dx;
-  const gap = stair.width;
+  const gap = stair.width + uShapeWellGap(stair.width);
 
   const lowerRun = lowerSteps * treadDepthForPreset(stair.width);
   const lowerEnd: Point2D = { x: origin.x + dx * lowerRun, y: origin.y + dy * lowerRun };

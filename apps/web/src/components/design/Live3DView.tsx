@@ -568,12 +568,29 @@ export function StairMesh({ stair, selected, colorOverride }: { stair: Stair; se
   });
 
   const landingMeshes = landings.map((landing, i) => {
-    const xs = landing.boundary.map((p) => p.x);
-    const zs = landing.boundary.map((p) => p.y);
-    const width = Math.max(0.05, Math.max(...xs) - Math.min(...xs));
-    const depth = Math.max(0.05, Math.max(...zs) - Math.min(...zs));
-    const centerX = (Math.min(...xs) + Math.max(...xs)) / 2;
-    const centerZ = (Math.min(...zs) + Math.max(...zs)) / 2;
+    // landing.boundary is a proper oriented rectangle (see
+    // deriveStairLandings/buildTurnLandingBoundary — flush against each
+    // flight's own facing edge, at whatever angle the stair itself is
+    // drawn at). Taking the min/max of its x/z coordinates here would
+    // throw away that orientation and draw the boundary's axis-aligned
+    // BOUNDING box instead of the rectangle itself — correct only when
+    // the stair happens to run exactly along world X or Z, and visibly
+    // wrong (oversized, off-footprint, not flush with the flights) for
+    // any stair drawn at an angle, which is the normal case on a real
+    // floor plan. Instead, measure the rectangle's own two edge
+    // lengths and rotate the mesh to match, the same way flightGroups
+    // above orients each flight with rotation={[0, -angle, 0]} rather
+    // than an axis-aligned box.
+    const [p0, p1, , p3] = landing.boundary;
+    const edgeAx = p1.x - p0.x;
+    const edgeAz = p1.y - p0.y;
+    const edgeBx = p3.x - p0.x;
+    const edgeBz = p3.y - p0.y;
+    const sideA = Math.max(0.05, Math.hypot(edgeAx, edgeAz));
+    const sideB = Math.max(0.05, Math.hypot(edgeBx, edgeBz));
+    const angle = Math.atan2(edgeAz, edgeAx);
+    const centerX = landing.boundary.reduce((s, p) => s + p.x, 0) / landing.boundary.length;
+    const centerZ = landing.boundary.reduce((s, p) => s + p.y, 0) / landing.boundary.length;
     // Landing thickness matches one riser height so its top surface
     // sits flush with the last step of the flight below it.
     const thickness = stair.flights[landing.flightIndexBefore]?.riserHeight ?? 0.15;
@@ -581,10 +598,11 @@ export function StairMesh({ stair, selected, colorOverride }: { stair: Stair; se
       <mesh
         key={`landing-${i}`}
         position={[centerX, landing.elevation - thickness / 2, centerZ]}
+        rotation={[0, -angle, 0]}
         castShadow
         receiveShadow
       >
-        <boxGeometry args={[width, thickness, depth]} />
+        <boxGeometry args={[sideA, thickness, sideB]} />
         <meshStandardMaterial color={color} />
       </mesh>
     );

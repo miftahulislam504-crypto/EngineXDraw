@@ -75,14 +75,18 @@ export interface StairLanding {
   flightIndexAfter: number;
 }
 
-/** Depth (meters, along the direction of travel) of the platform added
- * at each end of a stair. BNBC 2020 and most residential codes want a
- * landing at least as deep as the stair is wide; using the stair's own
- * width as the depth keeps this proportional (a wider stair gets a
- * proportionally deeper landing) while matching that minimum exactly
- * rather than a fixed number that would be oversized for a narrow
- * stair or undersized for a wide one. */
+/** Depth (meters, along the direction of travel) BNBC 2020 and most
+ * residential codes require for a landing platform at least as deep as
+ * the stair is wide. No longer used to build automatic bottom/top
+ * end-landings — deriveStairLandings only produces landings at actual
+ * turns now, since the auto-added platform at the very start and very
+ * end of a stair (before the first step and after the last) wasn't
+ * something every stair should get; it showed up as an unwanted extra
+ * slab floating off the flights even on a simple switchback with no
+ * turn there. Kept as a documented reference value in case an explicit,
+ * user-requested end-landing feature is added later. */
 const MIN_END_LANDING_DEPTH = 0.9; // meters — floor below which a platform reads as unusably small even for a narrow stair
+void MIN_END_LANDING_DEPTH; // referenced only in comments/docs above until an end-landing feature uses it again
 
 /** Builds the landing footprint between flight[i] and flight[i+1], for
  * every consecutive pair whose direction actually changes (see
@@ -295,35 +299,6 @@ export function deriveStairLandings(stair: Stair): StairLanding[] {
   if (!Array.isArray(stair.flights) || stair.flights.length === 0) return landings;
 
   const half = stair.width / 2;
-  const endLandingDepth = Math.max(MIN_END_LANDING_DEPTH, stair.width);
-
-  // Bottom landing: a platform at the very start of flight 0, in the
-  // direction opposite travel (so it sits before the first step, not
-  // overlapping it) — where a person stands before starting to climb.
-  const first = stair.flights[0];
-  {
-    const dx = first.end.x - first.start.x;
-    const dy = first.end.y - first.start.y;
-    const len = Math.hypot(dx, dy) || 1e-9;
-    const ux = dx / len;
-    const uy = dy / len;
-    const nx = -uy;
-    const ny = ux;
-    const backX = first.start.x - ux * endLandingDepth;
-    const backY = first.start.y - uy * endLandingDepth;
-    landings.push({
-      kind: 'bottom',
-      boundary: [
-        { x: first.start.x + nx * half, y: first.start.y + ny * half },
-        { x: first.start.x - nx * half, y: first.start.y - ny * half },
-        { x: backX - nx * half, y: backY - ny * half },
-        { x: backX + nx * half, y: backY + ny * half },
-      ],
-      elevation: 0,
-      flightIndexBefore: -1,
-      flightIndexAfter: 0,
-    });
-  }
 
   let elevationSoFar = 0;
   for (let i = 0; i < stair.flights.length - 1; i++) {
@@ -340,36 +315,6 @@ export function deriveStairLandings(stair: Stair): StairLanding[] {
       elevation: elevationSoFar,
       flightIndexBefore: i,
       flightIndexAfter: i + 1,
-    });
-  }
-
-  // Top landing: a platform at the very end of the last flight, in the
-  // direction travel continues — where a person steps off onto the
-  // floor above. This is the one that was missing for a plain
-  // single-flight stair (the common case): without it, the stair just
-  // stops at the last step with nowhere solid drawn to step onto.
-  const last = stair.flights[stair.flights.length - 1];
-  {
-    const dx = last.end.x - last.start.x;
-    const dy = last.end.y - last.start.y;
-    const len = Math.hypot(dx, dy) || 1e-9;
-    const ux = dx / len;
-    const uy = dy / len;
-    const nx = -uy;
-    const ny = ux;
-    const frontX = last.end.x + ux * endLandingDepth;
-    const frontY = last.end.y + uy * endLandingDepth;
-    landings.push({
-      kind: 'top',
-      boundary: [
-        { x: last.end.x + nx * half, y: last.end.y + ny * half },
-        { x: last.end.x - nx * half, y: last.end.y - ny * half },
-        { x: frontX - nx * half, y: frontY - ny * half },
-        { x: frontX + nx * half, y: frontY + ny * half },
-      ],
-      elevation: stairTotalRise(stair),
-      flightIndexBefore: stair.flights.length - 1,
-      flightIndexAfter: -1,
     });
   }
 

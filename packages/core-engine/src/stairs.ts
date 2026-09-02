@@ -106,10 +106,18 @@ const MIN_END_LANDING_DEPTH = 0.9; // meters — floor below which a platform re
  *
  * A near-zero gap (flight[i+1] starting almost exactly where flight[i]
  * ends, for a tight L-turn) still works — the landing just comes out
- * very shallow — but a TRUE zero gap has no defined gap direction, so
- * degenerates to a zero-area landing; the multi-flight draw tool avoids
- * this by never letting flight[i+1]'s start land exactly on
- * flight[i]'s end when they turn (see FloorPlanCanvas's stair tool). */
+ * very shallow — but a TRUE zero gap has no defined gap direction to
+ * divide by. This is NOT a rare edge case: handleCreateStair's own
+ * point-by-point tool (click bottom -> click turn -> click top) hands
+ * flight[i+1].start === flight[i].end exactly every time someone hand-
+ * draws a switchback, since it's one continuous polyline. This used to
+ * degenerate into a landing collapsed to a sliver pointed in
+ * essentially arbitrary float noise — a landing floating off to one
+ * side instead of sitting flush at the turn. buildTurnLandingBoundary's
+ * switchback branch now detects this exact-zero case directly and
+ * falls back to a compact stairWidth-square centered on the shared
+ * joint (the same shape the L-turn branch below already uses), instead
+ * of dividing by a direction that doesn't exist. */
 /** A flight's own direction-of-travel (ux,uy) and width axis (nx,ny) —
  * the exact same pair FloorPlanCanvas uses to draw the flight's
  * rectangle, so any landing built from these axes is guaranteed to meet
@@ -191,15 +199,53 @@ function buildTurnLandingBoundary(a: StairFlight, b: StairFlight, stairWidth: nu
     // reported swollen/overlapping landing). Subtracting each flight's
     // own half-width from the centerline distance recovers the true
     // edge-to-edge gap, so the landing lands exactly flush on both
-    // flights' facing edges again — for both the 3-click stairU tool's
+    // flights' facing edges again — for the 3-click stairU tool's
     // layout and applyUShapeStairPreset's, the two switchback producers
-    // that reach this branch (an L-turn never does; it's handled by the
-    // separate, unconditional branch below).
+    // whose flights sit a real gap apart (an L-turn never reaches this
+    // branch; it's handled by the separate, unconditional branch below).
     const halfA = stairWidth / 2;
     const halfB = stairWidth / 2;
     const centerlineDx = b.start.x - a.end.x;
     const centerlineDy = b.start.y - a.end.y;
-    const centerlineLen = Math.hypot(centerlineDx, centerlineDy) || 1e-9;
+    const centerlineLen = Math.hypot(centerlineDx, centerlineDy);
+
+    // The person's own hand-drawn switchback (handleCreateStair's
+    // point-by-point tool: click bottom -> click turn -> click top) is
+    // the common case that reaches THIS branch with b.start === a.end
+    // EXACTLY — a real 180° turn drawn as one continuous line, not two
+    // flights left a gap apart. centerlineLen is then a true zero, not
+    // just small, so it has no defined direction to divide by; the old
+    // code's `|| 1e-9` fallback let it through anyway and produced a
+    // landing collapsed to a sliver pointed in essentially arbitrary
+    // float noise — a landing floating off to one side instead of
+    // sitting flush at the turn (see the design page's screenshot
+    // reports). Detect that case directly and build the landing from
+    // the flights' OWN axes instead of a gap direction that doesn't
+    // exist here: a stairWidth x stairWidth square (same physical size
+    // uShapeWellGap's gap flights get) centered on the shared joint,
+    // spanning half of A's own width axis (nx,ny) to each side — the
+    // natural landing footprint when both flights already meet at one
+    // point with no travelled gap between them.
+    if (centerlineLen < 1e-6) {
+      // Both flights already meet at this exact point — same as the
+      // L-turn case below, a compact stairWidth x stairWidth square
+      // centered on the shared joint is the landing: flush against
+      // flight A's last step (which ends exactly at this point) and
+      // flight B's first step (which starts exactly at this point),
+      // with no extension past the joint in either flight's own
+      // travel direction — extending it along A's direction would
+      // push the landing past where A actually stops instead of
+      // sitting at the turn.
+      const cx = a.end.x;
+      const cy = a.end.y;
+      return [
+        { x: cx - half, y: cy - half },
+        { x: cx + half, y: cy - half },
+        { x: cx + half, y: cy + half },
+        { x: cx - half, y: cy + half },
+      ];
+    }
+
     const gx = centerlineDx / centerlineLen;
     const gy = centerlineDy / centerlineLen;
     // Fall back to a.end itself (edge gap 0) if the flights' own

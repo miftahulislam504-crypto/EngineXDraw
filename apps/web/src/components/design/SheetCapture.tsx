@@ -75,6 +75,16 @@ export interface SheetCaptureProps {
    * component reporting a synthetic failure, since "never ready" and
    * "still rendering" look identical from in here. */
   onCaptured: (result: SheetCaptureResult) => void;
+  /** Whether this floor's GridLine documents are known to be
+   * reconciled against the building's GridSystem — see
+   * SheetDetailPage's own grid-sync effect and isGridSyncReadyForSheet
+   * for the full "why". Optional and defaults to true (ready) so every
+   * OTHER caller of this component — anything that doesn't itself
+   * drive that sync (a test harness; a future caller that doesn't need
+   * grid lines at all) — behaves exactly as before this prop existed.
+   * SheetDetailPage is the only caller that has a reason to ever pass
+   * false. */
+  isGridSyncReady?: boolean;
 }
 
 /**
@@ -105,6 +115,7 @@ export function SheetCapture({
   libraryItems,
   titleBlockOverrides,
   onCaptured,
+  isGridSyncReady = true,
 }: SheetCaptureProps) {
   const { t } = useI18nStore();
 
@@ -162,7 +173,28 @@ export function SheetCapture({
   // draw walls with yet. This is the readiness half of the fix; see the
   // idempotency guard below for why capture would otherwise fire before
   // data was ready in the first place.
-  const isDataReady = !isFloorBasedSheet || floorPlanElements !== undefined;
+  //
+  // isGridSyncReady covers a SEPARATE, later async step floorPlanElements
+  // existing doesn't account for: floorPlanElements goes non-undefined
+  // the moment ANY snapshot arrives for this floor, which can (and in
+  // practice does) happen before this floor's own GridLine documents
+  // have been reconciled against the building's GridSystem — that sync
+  // is a genuinely different asynchronous operation (a Firestore
+  // round-trip triggered by SheetDetailPage, not part of the
+  // floorElements subscription this component itself reads). Without
+  // this half, capture could fire the instant walls arrive — correctly
+  // non-blank, but still missing grid lines that hadn't been written
+  // yet — and then never fire again once the idempotency guard below
+  // locks in that first capture. See SheetDetailPage's own
+  // isGridSyncReadyForSheet for where this value actually comes from.
+  // Gated behind isFloorBasedSheet in isDataReady below — grid lines
+  // are exclusively a floor-plan concept (FloorPlanCanvas is the only
+  // renderer that ever draws them), so a cover sheet/elevation/section
+  // must never wait on it: those mount BuildingElevationView/
+  // BuildingSectionView/CoverSheetView instead of FloorPlanCanvas
+  // entirely, and would otherwise block on a readiness condition
+  // that has nothing to do with what they're actually rendering.
+  const isDataReady = (!isFloorBasedSheet || floorPlanElements !== undefined) && (!isFloorBasedSheet || isGridSyncReady);
 
   // Matches the width/height literally passed to FloorPlanCanvas in the
   // JSX below — kept as one named pair instead of two separate magic

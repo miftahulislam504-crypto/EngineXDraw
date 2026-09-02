@@ -23,7 +23,7 @@ export default function SheetDetailPage() {
   const { t } = useI18nStore();
 
   const [buildingId, setBuildingId] = useState<string | null>(searchParams.get('buildingId'));
-  const [buildings, setBuildings] = useState<Building[]>([]);
+  const [buildings, setBuildings] = useState<Building[] | undefined>(undefined);
   const [project, setProject] = useState<Project | null>(null);
   const [sheet, setSheet] = useState<Sheet | null | undefined>(undefined);
   const [allSheets, setAllSheets] = useState<Sheet[]>([]);
@@ -34,8 +34,9 @@ export default function SheetDetailPage() {
   const [materialLibraryItems, setMaterialLibraryItems] = useState<LibraryItem[]>([]);
   const [capture, setCapture] = useState<SheetCaptureResult | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [gridSyncedFloorIds, setGridSyncedFloorIds] = useState<Set<string>>(new Set());
 
-  const building = buildings.find((b) => b.id === buildingId) ?? null;
+  const building = buildings?.find((b) => b.id === buildingId) ?? null;
 
   useEffect(() => {
     return subscribeToBuildings(projectId, (bs) => {
@@ -126,6 +127,34 @@ export default function SheetDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, buildingId, floorIdsKey]);
 
+  // Whether the current sheet's floor either has no GridSystem to sync
+  // from (nothing to wait for) or has already finished syncing (the
+  // effect below added it to gridSyncedFloorIds) — the readiness half
+  // of the grid-line fix, passed through to SheetCapture as an extra
+  // condition on top of its own isDataReady so capture doesn't fire
+  // while sync is still in flight. See the effect's own comment for why
+  // this is a genuinely separate async operation from the
+  // floorElements subscription isDataReady already covers: floorElements
+  // going non-undefined only means SOME snapshot arrived, not that this
+  // specific floor's GridLine documents have been written yet — sync
+  // is a Firestore round-trip (gridLineCrud.getOnce, then a conditional
+  // batch write) with no relationship to when floorElements first
+  // resolves.
+  //
+  // buildings === undefined (subscribeToBuildings hasn't delivered its
+  // first snapshot yet) is deliberately treated as NOT ready, same as
+  // "sync still in flight" below — not folded into the `!building?.
+  // gridSystem` branch reading as "nothing to sync, proceed". Before
+  // this check, that's exactly what an in-flight subscription looked
+  // like (buildings defaulted to [], building derived to null,
+  // building?.gridSystem read as undefined) — indistinguishable from a
+  // building that had genuinely finished loading with no GridSystem set
+  // at all, so capture could fire before buildings' own first snapshot
+  // ever arrived and lock in a state from before this building's real
+  // gridSystem value was even known.
+  const isGridSyncReadyForSheet =
+    buildings !== undefined && (!building?.gridSystem || (sheet ? gridSyncedFloorIds.has(sheet.floorId ?? '') : true));
+
   // Reconciles every floor's real GridLine documents against the
   // building's GridSystem, the same sync Design Studio's own page runs
   // (see that page's own near-identical effect and
@@ -160,9 +189,24 @@ export default function SheetDetailPage() {
     for (const floor of floors) {
       gridLineCrud.getOnce(projectId, buildingId, floor.id).then((existingLines) => {
         if (cancelled) return;
-        syncFloorGridLinesFromSystem(projectId, buildingId, floor.id, gridSystem, existingLines).catch((err) => {
-          console.error('syncFloorGridLinesFromSystem failed:', err);
-        });
+        syncFloorGridLinesFromSystem(projectId, buildingId, floor.id, gridSystem, existingLines)
+          .catch((err) => {
+            console.error('syncFloorGridLinesFromSystem failed:', err);
+          })
+          .finally(() => {
+            // Marks this floor ready regardless of success/failure — a
+            // permanently-failed sync (e.g. a permissions error) must
+            // not permanently block capture from ever firing at all;
+            // it just means this floor's export won't have grid lines,
+            // which is strictly better than exporting nothing forever.
+            if (cancelled) return;
+            setGridSyncedFloorIds((prev) => {
+              if (prev.has(floor.id)) return prev;
+              const next = new Set(prev);
+              next.add(floor.id);
+              return next;
+            });
+          });
       });
     }
     return () => {
@@ -235,6 +279,7 @@ export default function SheetDetailPage() {
               siteBoundary={siteBoundary}
               libraryItems={materialLibraryItems}
               onCaptured={handleCaptured}
+              isGridSyncReady={isGridSyncReadyForSheet}
             />
 
             <div className="mt-3 flex items-center justify-between rounded-sheet border border-line bg-surface px-4 py-3 font-mono text-xs text-ink-muted">

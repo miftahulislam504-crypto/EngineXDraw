@@ -234,13 +234,24 @@ function buildTurnLandingBoundary(a: StairFlight, b: StairFlight, stairWidth: nu
 
     const gx = centerlineDx / centerlineLen;
     const gy = centerlineDy / centerlineLen;
-    // Fall back to a.end itself (edge gap 0) if the flights' own
-    // half-widths already consume the whole centerline span — an
-    // unusually tight or hand-edited stair — rather than letting the
-    // strip invert to a negative depth.
-    const gapLen = Math.max(1e-9, centerlineLen - halfA - halfB);
-    const nearA = halfA;
-    const nearB = halfA + gapLen;
+    // The landing must span the FULL width of the staircase — from
+    // flight A's own outer edge all the way to flight B's own outer
+    // edge — not just the narrow gap between them. A landing that only
+    // covers the gap (halfA to halfA+gapLen) leaves it looking like a
+    // thin strip wedged between the two flights instead of the single
+    // continuous platform a real switchback landing is (see the design
+    // page's screenshot: the landing needs to reach and attach to both
+    // flights across their entire width, matching the reference U-shape
+    // images). a.end sits on flight A's own CENTERLINE (not its outer
+    // edge), so measuring from a.end, flight A's outer edge is halfA
+    // BEHIND it (negative along gx,gy — back toward flight A's own
+    // body), and flight B's centerline sits centerlineLen along this
+    // axis with its own outer edge a further halfB past that. So the
+    // full span the landing must cover, measured from a.end along
+    // gx,gy, is -halfA (flight A's outer edge) through
+    // centerlineLen + halfB (flight B's outer edge).
+    const nearA = -halfA;
+    const nearB = centerlineLen + halfB;
 
     // The landing's footprint along each flight's OWN travel direction
     // (ux,uy) — a compact stairWidth-deep platform flush at a.end,

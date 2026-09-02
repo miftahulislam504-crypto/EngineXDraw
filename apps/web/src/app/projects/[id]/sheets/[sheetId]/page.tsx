@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { Button, PageHeader } from '@archibim/shared-ui';
 import type { Building, Floor, LibraryItem, Project, Sheet, Shaft, SiteBoundary } from '@archibim/object-model';
 import { subscribeToBuildings, subscribeToProject } from '@/lib/projects';
-import { subscribeToFloors, subscribeToFloorElements, type FloorElements } from '@/lib/floors';
+import { subscribeToFloors, subscribeToFloorElements, gridLineCrud, syncFloorGridLinesFromSystem, type FloorElements } from '@/lib/floors';
 import { subscribeToShafts } from '@/lib/shafts';
 import { subscribeToSiteBoundary } from '@/lib/siteBoundary';
 import { subscribeToSheet, subscribeToSheets } from '@/lib/sheets';
@@ -34,6 +34,8 @@ export default function SheetDetailPage() {
   const [materialLibraryItems, setMaterialLibraryItems] = useState<LibraryItem[]>([]);
   const [capture, setCapture] = useState<SheetCaptureResult | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+
+  const building = buildings.find((b) => b.id === buildingId) ?? null;
 
   useEffect(() => {
     return subscribeToBuildings(projectId, (bs) => {
@@ -124,6 +126,51 @@ export default function SheetDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, buildingId, floorIdsKey]);
 
+  // Reconciles every floor's real GridLine documents against the
+  // building's GridSystem, the same sync Design Studio's own page runs
+  // (see that page's own near-identical effect and
+  // syncFloorGridLinesFromSystem's doc comment) — but Design Studio
+  // only ever does this for whichever single floor the person currently
+  // has open there. A floor that person has never actually opened in
+  // Design Studio in this browser session (picked a different floor to
+  // work on; came straight to Sheets from somewhere else) has real,
+  // live geometry — GridSystem is a building-level field, not
+  // per-floor — but its own floor-scoped GridLine sub-collection can
+  // legitimately still be empty, since nothing has ever written to it.
+  // Reproduced directly: a floor plan sheet exported without ever
+  // visiting that floor in Design Studio first came out with walls
+  // correctly drawn but zero grid lines, while Design Studio (which
+  // WAS opened on some floor of the same building, if not this one)
+  // reported grid lines "visible" — true for the floor(s) it was
+  // actually opened on, not the one being exported. Runs for every
+  // floor here, not just the current sheet's, since Combined PDF Export
+  // renders every sheet — including other floors' — off-screen through
+  // this same SheetCapture without ever mounting Design Studio for any
+  // of them either. gridLineCrud.getOnce/syncFloorGridLinesFromSystem
+  // is itself a no-op write once a floor's lines already match its
+  // GridSystem-derived set (see that function's own doc comment), so
+  // this is safe to run unconditionally on every floor on every
+  // building/floor-list change rather than needing to first check
+  // whether each floor's sync is already up to date.
+  useEffect(() => {
+    if (!buildingId || floors.length === 0) return;
+    const gridSystem = building?.gridSystem;
+    if (!gridSystem) return;
+    let cancelled = false;
+    for (const floor of floors) {
+      gridLineCrud.getOnce(projectId, buildingId, floor.id).then((existingLines) => {
+        if (cancelled) return;
+        syncFloorGridLinesFromSystem(projectId, buildingId, floor.id, gridSystem, existingLines).catch((err) => {
+          console.error('syncFloorGridLinesFromSystem failed:', err);
+        });
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, buildingId, floorIdsKey, building?.gridSystem]);
+
   // Reset any capture from a previous sheet when the id in the URL
   // changes — otherwise navigating from one sheet's page to another
   // via the sheet list would briefly show the OLD sheet's capture as
@@ -154,8 +201,6 @@ export default function SheetDetailPage() {
       setIsExporting(false);
     }
   }
-
-  const building = buildings.find((b) => b.id === buildingId) ?? null;
 
   return (
     <div className="px-8 py-8">

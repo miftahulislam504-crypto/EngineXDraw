@@ -15,6 +15,18 @@ import { useEffect } from 'react';
  */
 export function PwaServiceWorker() {
   useEffect(() => {
+    // A successful mount means this load's JS actually matches a live
+    // deploy — clear global-error.tsx's one-shot stale-chunk reload
+    // guard so a LATER stale-chunk error (e.g. after a subsequent
+    // deploy, in the same long-lived tab) still gets one reload of its
+    // own rather than silently skipping straight to the error screen
+    // because an earlier, unrelated recovery already spent the guard.
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.removeItem('enginexdraw-chunk-reload');
+    }
+  }, []);
+
+  useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!('serviceWorker' in navigator)) return;
 

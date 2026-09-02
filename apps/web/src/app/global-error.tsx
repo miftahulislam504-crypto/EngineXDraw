@@ -25,6 +25,40 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     console.error('[EngineXDraw] Uncaught root layout error:', error);
+
+    // A stale-chunk crash isn't a real app bug — it means this tab's
+    // already-loaded JS is asking for a file a NEWER deploy has since
+    // replaced/removed (Next.js/Vercel call this "version skew"; see
+    // sw.js's own cache-first /_next/static/ rule, which can keep
+    // serving a stale chunk from a PREVIOUS visit even after the CDN
+    // itself has pruned it). reset() can't fix this — it only re-runs
+    // React with the SAME stale JS already sitting in memory, which
+    // still doesn't have the new deploy's chunk map. The actual fix is
+    // a full page reload, which fetches fresh HTML/JS from whichever
+    // deploy is live right now.
+    //
+    // Chrome/Android report this as `ChunkLoadError`; some browsers
+    // instead throw a `SyntaxError` while trying to parse Vercel's
+    // plain-text 404 body as if it were the requested JS file — same
+    // underlying cause, different error name, so both are treated as
+    // the same case here.
+    const isStaleChunk =
+      error.name === 'ChunkLoadError' ||
+      (error.name === 'SyntaxError' && /Unexpected token ?<|Unexpected end of input/.test(error.message));
+
+    if (isStaleChunk && typeof window !== 'undefined') {
+      // sessionStorage, not a JS variable — a variable would just be
+      // wiped out by the reload this triggers, defeating its own
+      // purpose. Guards against an infinite reload loop if the
+      // deployment itself is genuinely broken (missing chunk that no
+      // reload will ever fix): reload once per tab session, then fall
+      // through to the normal error screen below on any repeat.
+      const alreadyReloaded = window.sessionStorage.getItem('enginexdraw-chunk-reload') === '1';
+      if (!alreadyReloaded) {
+        window.sessionStorage.setItem('enginexdraw-chunk-reload', '1');
+        window.location.reload();
+      }
+    }
   }, [error]);
 
   return (

@@ -133,16 +133,20 @@ function flightAxes(flight: StairFlight) {
 
 /** Builds the turn-landing boundary connecting flight `a` (ending) to
  * flight `b` (starting). Two genuinely different shapes depending on
- * how the flights turn — treating them with one formula was the source
- * of a real bug (landing corners bulging out past the flight's own
- * drawn width, into open space with no flight underneath):
+ * how the flights turn:
  *
- *  - Switchback (a 180° turn, the U-shape preset's case — flights run
- *    parallel, opposite direction): the landing is a `stair.width`-deep
- *    strip sandwiched flush between the two flights' facing edges,
- *    spanning their full overlapping length. This matches the physical
- *    stairwell — the platform between the up-flight and the return
- *    flight is as long as the flights themselves, not a small square.
+ *  - Switchback (a 180° turn — flights run parallel, opposite
+ *    direction): the landing is a compact platform sitting flush at
+ *    the far end of both flights (where a.end and b.start actually
+ *    are), `stairWidth` deep along each flight's own travel direction
+ *    and spanning the gap between the two flights' facing edges. This
+ *    is the small platform a real switchback stair has at the turn —
+ *    NOT a strip running the flights' full length (an earlier version
+ *    of this function spanned the flights' entire overlapping run,
+ *    which drew a landing the size of the whole stairwell instead of
+ *    the platform at its top — see the design page's screenshot
+ *    reports of a landing reading as a long diagonal slab beside the
+ *    stair rather than a platform at the turn).
  *
  *  - Any other turn angle (an L-shaped corner, hand-drawn with the
  *    point-by-point stair tool): the landing is a compact
@@ -157,33 +161,15 @@ function buildTurnLandingBoundary(a: StairFlight, b: StairFlight, stairWidth: nu
   const dot = A.ux * B.ux + A.uy * B.uy;
 
   if (dot < -0.5) {
-    // Switchback: find how far flight A and flight B overlap along A's
-    // own travel direction (normally ~identical lengths, but computed
-    // generally in case of a hand-edited stair), then build a
-    // stair.width-deep strip across that overlap, flush against each
-    // flight's facing edge (no gap, no overshoot past either flight).
-    const projAStart = (a.start.x - a.end.x) * A.ux + (a.start.y - a.end.y) * A.uy;
-    const projBStart = (b.start.x - a.end.x) * A.ux + (b.start.y - a.end.y) * A.uy;
-    const projBEnd = (b.end.x - a.end.x) * A.ux + (b.end.y - a.end.y) * A.uy;
-    const rangeAMin = Math.min(projAStart, 0);
-    const rangeAMax = Math.max(projAStart, 0);
-    const rangeBMin = Math.min(projBStart, projBEnd);
-    const rangeBMax = Math.max(projBStart, projBEnd);
-    const overlapMin = Math.max(rangeAMin, rangeBMin);
-    const overlapMax = Math.min(rangeAMax, rangeBMax);
-    // Flights that don't actually overlap in length (unusual hand-edit)
-    // fall back to a stair.width-deep patch flush at a.end.
-    const spanMin = overlapMin < overlapMax ? overlapMin : -stairWidth;
-    const spanMax = overlapMin < overlapMax ? overlapMax : 0;
-
-    const p1 = { x: a.end.x + A.ux * spanMin, y: a.end.y + A.uy * spanMin };
-    const p2 = { x: a.end.x + A.ux * spanMax, y: a.end.y + A.uy * spanMax };
-
-    // Landing depth across the gap axis (perpendicular to travel,
-    // between the two flights' facing edges): the landing must span
-    // EXACTLY the real physical gap between the flights' FOOTPRINT
-    // EDGES, flush against each, with no leftover strip and no
-    // overshoot past either flight.
+    // Switchback: the landing sits flush at a.end (where flight A's
+    // last step is) extending stairWidth further in flight A's own
+    // travel direction (ux,uy) — i.e. the compact platform at the top
+    // of the climb, not a strip running back down the flight's whole
+    // length. Depth across the gap axis (perpendicular to travel,
+    // between the two flights' facing edges) spans EXACTLY the real
+    // physical gap between the flights' FOOTPRINT EDGES, flush against
+    // each, with no leftover strip and no overshoot past either
+    // flight.
     //
     // `b.start - a.end` is NOT that gap — it's the distance between the
     // two flights' CENTERLINES. deriveUShapeStairFromRectangle places
@@ -255,6 +241,16 @@ function buildTurnLandingBoundary(a: StairFlight, b: StairFlight, stairWidth: nu
     const gapLen = Math.max(1e-9, centerlineLen - halfA - halfB);
     const nearA = halfA;
     const nearB = halfA + gapLen;
+
+    // The landing's footprint along each flight's OWN travel direction
+    // (ux,uy) — a compact stairWidth-deep platform flush at a.end,
+    // extending forward (the direction flight A was already heading,
+    // continuing past its last step) rather than a strip spanning back
+    // down the flight's whole run. p1/p2 are the near/far edge of that
+    // platform along A's direction; the actual landing rectangle below
+    // sweeps this segment across the gap axis (gx,gy) to reach flight B.
+    const p1 = a.end;
+    const p2 = { x: a.end.x + A.ux * stairWidth, y: a.end.y + A.uy * stairWidth };
 
     return [
       { x: p1.x + gx * nearA, y: p1.y + gy * nearA },

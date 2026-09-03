@@ -380,16 +380,36 @@ export default function DesignStudioPage() {
     setIsCopyingFloor(true);
     try {
       let totalSkipped = 0;
+      // বাগফিক্স (Miftahul, 2026-09-03): source/target floor-এর
+      // floorToFloorHeight এখানেই resolve করে copyFloorElements()-এ পাস
+      // করা হচ্ছে, যাতে কপি হওয়া Wall/Column height ও Beam elevation
+      // target floor-এর আসল height অনুযায়ী ঠিক হয়ে যায় — copyFloorElements-
+      // এর নিজের param comment ও Structural Model Checker "not connected"
+      // error-এর root cause নোট দ্রষ্টব্য। sourceFloorToFloorHeight একবারই
+      // বের করা হলো (loop-এর বাইরে, প্রতিটা target-এর জন্য একই উৎস floor)।
+      const sourceFloorToFloorHeight = floors.find((f) => f.id === floorId)?.floorToFloorHeight;
       for (const targetId of copyFloorTargetIds) {
-        const result = await copyFloorElements(projectId, buildingId, floorId, targetId, {
-          walls,
-          columns,
-          beams,
-          slabs,
-          footings,
-          openings,
-          stairs,
-        });
+        const targetFloorToFloorHeight = floors.find((f) => f.id === targetId)?.floorToFloorHeight;
+        const floorHeights =
+          typeof sourceFloorToFloorHeight === 'number' && typeof targetFloorToFloorHeight === 'number'
+            ? { source: sourceFloorToFloorHeight, target: targetFloorToFloorHeight }
+            : undefined;
+        const result = await copyFloorElements(
+          projectId,
+          buildingId,
+          floorId,
+          targetId,
+          {
+            walls,
+            columns,
+            beams,
+            slabs,
+            footings,
+            openings,
+            stairs,
+          },
+          floorHeights,
+        );
         totalSkipped +=
           result.walls.skipped +
           result.columns.skipped +

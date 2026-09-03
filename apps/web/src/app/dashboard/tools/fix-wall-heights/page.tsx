@@ -4,43 +4,48 @@ import { useEffect, useState } from 'react';
 import { Button, PageHeader } from '@archibim/shared-ui';
 import { useAuthStore } from '@/lib/auth-store';
 import { subscribeToMyProjects, subscribeToBuildings } from '@/lib/projects';
-import { getFloorsOnce, getColumnsOnce, updateColumnsPatchBatch } from '@/lib/floors';
+import { getFloorsOnce, getWallsOnce, updateWallsPatchBatch } from '@/lib/floors';
 import type { Project, Building } from '@archibim/object-model';
 
 /**
- * Column Height Backfill — in-app replacement for
- * functions/src/scripts/backfillColumnHeights.ts.
+ * Wall Height Review — fix-column-heights/page.tsx-এর wall-সংস্করণ।
  *
- * সেই script কাজ করত ঠিকই, কিন্তু Firebase Admin SDK এবং Node লাগত —
- * যেখানে ডেভেলপমেন্ট পুরোপুরি মোবাইল থেকে, কোনো লোকাল কম্পিউটার ছাড়া,
- * শুধু GitHub commit → Vercel deploy দিয়ে চলে, সেখানে সেই script
- * আদৌ চালানোর কোনো উপায় নেই। এই পেজ একই ফিক্স — "column.height যেন তার
- * নিজের floor-এর floorToFloorHeight-এর সমান হয়" — কিন্তু client-side
- * Firebase SDK (firebase/firestore-এর writeBatch, updateColumnsPatchBatch
- * এর মধ্যে দিয়ে) ব্যবহার করে করে, ঠিক যেভাবে অ্যাপের বাকি সব write হয়।
- * Firestore rules অনুযায়ী যেকোনো signed-in ইউজারেরই এই collection-এ
- * write access আছে (firestore.rules দেখুন), তাই আলাদা কোনো admin
- * credential লাগে না — শুধু স্বাভাবিকভাবে লগইন করা থাকলেই চলবে।
+ * ⚠️ কেন Column tool-এর মতো "সব mismatch অটো-ফিক্স" না: Column সবসময়
+ * base থেকে ঠিক floor-to-floor height পর্যন্ত যায় (handleCreateColumn-
+ * এর কনভেনশন), তাই "height ≠ floorToFloorHeight" মানেই নিশ্চিতভাবে ভুল।
+ * কিন্তু Wall ভিন্ন — একটা legitimate parapet-height low wall বা
+ * ভবিষ্যতের partial-height partition wall-ও floorToFloorHeight থেকে
+ * ইচ্ছাকৃতভাবে কম হতে পারে (Draw এখন পর্যন্ত এমন wall বানানোর UI না
+ * থাকলেও, ডেটা মডেলে thickness/height যেকোনো ধনাত্মক সংখ্যা হতে পারে,
+ * তাই ভবিষ্যতে বা পুরনো কোনো ম্যানুয়াল edit থেকে এমন wall থাকতে পারে)।
+ * তাই এই tool শুধু scan করে mismatch তালিকা দেখায়, প্রতিটা wall-এ
+ * আলাদা checkbox দিয়ে ইঞ্জিনিয়ার নিজে বেছে নেন কোনগুলো আসলেই
+ * "floor height পর্যন্ত পৌঁছানো উচিত ছিল কিন্তু copyFloorElements()-এর
+ * পুরনো বাগে (height হুবহু কপি হতো, দেখুন floors.ts-এর
+ * copyFloorElements() param comment) ভুল height নিয়ে এসেছে" — ডিফল্টে
+ * সব checked থাকে (বেশিরভাগ ক্ষেত্রেই এটাই হবে) কিন্তু আনচেক করার
+ * সুযোগ থাকে।
  *
- * এটা কোনো স্থায়ী প্রোডাক্ট ফিচার না, বরং একবারের backfill utility —
- * ভবিষ্যতে দরকার হলে আবার ব্যবহার করা যাবে (যেমন কোনো পুরনো import বা
- * ম্যানুয়াল Firestore edit থেকে আবার mismatch তৈরি হলে), তাই সরিয়ে না
- * ফেলে dashboard-এর নিচে রাখা হলো।
+ * Column tool-এর মতোই client-side Firebase SDK (updateWallsPatchBatch,
+ * floors.ts) ব্যবহার করে — মোবাইল-অনলি workflow-এর জন্য, কোনো
+ * Node/Admin SDK লাগে না।
  */
 
 const HEIGHT_MATCH_TOLERANCE_M = 0.001;
 
-interface ColumnFix {
+interface WallFix {
   floorId: string;
   floorName: string;
-  columnId: string;
+  wallId: string;
+  wallLabel: string;
   oldHeight: number;
   newHeight: number;
+  selected: boolean;
 }
 
 type ScanStatus = 'idle' | 'scanning' | 'scanned' | 'applying' | 'done' | 'error';
 
-export default function FixColumnHeightsPage() {
+export default function FixWallHeightsPage() {
   const { user } = useAuthStore();
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState<string>('');
@@ -48,7 +53,7 @@ export default function FixColumnHeightsPage() {
   const [buildingId, setBuildingId] = useState<string>('');
 
   const [status, setStatus] = useState<ScanStatus>('idle');
-  const [fixes, setFixes] = useState<ColumnFix[]>([]);
+  const [fixes, setFixes] = useState<WallFix[]>([]);
   const [scannedCount, setScannedCount] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [appliedCount, setAppliedCount] = useState(0);
@@ -82,24 +87,26 @@ export default function FixColumnHeightsPage() {
 
     try {
       const floors = await getFloorsOnce(projectId, buildingId);
-      const found: ColumnFix[] = [];
+      const found: WallFix[] = [];
       let scanned = 0;
 
       for (const floor of floors) {
         if (typeof floor.floorToFloorHeight !== 'number' || Number.isNaN(floor.floorToFloorHeight)) {
           continue;
         }
-        const columns = await getColumnsOnce(projectId, buildingId, floor.id);
-        for (const col of columns) {
+        const walls = await getWallsOnce(projectId, buildingId, floor.id);
+        for (const wall of walls) {
           scanned += 1;
-          if (typeof col.height !== 'number' || Number.isNaN(col.height)) continue;
-          if (Math.abs(col.height - floor.floorToFloorHeight) > HEIGHT_MATCH_TOLERANCE_M) {
+          if (typeof wall.height !== 'number' || Number.isNaN(wall.height)) continue;
+          if (Math.abs(wall.height - floor.floorToFloorHeight) > HEIGHT_MATCH_TOLERANCE_M) {
             found.push({
               floorId: floor.id,
               floorName: floor.name || floor.id,
-              columnId: col.id,
-              oldHeight: col.height,
+              wallId: wall.id,
+              wallLabel: `${wall.start.x.toFixed(2)},${wall.start.y.toFixed(2)} → ${wall.end.x.toFixed(2)},${wall.end.y.toFixed(2)}`,
+              oldHeight: wall.height,
               newHeight: floor.floorToFloorHeight,
+              selected: true,
             });
           }
         }
@@ -114,21 +121,24 @@ export default function FixColumnHeightsPage() {
     }
   }
 
+  function toggleFix(wallId: string) {
+    setFixes((prev) => prev.map((f) => (f.wallId === wallId ? { ...f, selected: !f.selected } : f)));
+  }
+
   async function applyFixes() {
-    if (fixes.length === 0) return;
+    const selectedFixes = fixes.filter((f) => f.selected);
+    if (selectedFixes.length === 0) return;
     setStatus('applying');
     setErrorMsg(null);
     setAppliedCount(0);
 
     try {
-      // updateColumnsPatchBatch একটা single floor-এর জন্য একবারে কাজ
-      // করে, তাই floor অনুযায়ী গ্রুপ করে প্রতিটা floor-এ আলাদা batch
-      // পাঠানো হচ্ছে — কিন্তু প্রতিটা column তার নিজের সঠিক height
-      // (তার নিজের floor অনুযায়ী) পাচ্ছে, একই patch সবার জন্য না
-      // (যা updateColumnsPatchBatch-এর single-patch সিগনেচারে
-      // সরাসরি সম্ভব না বলে column-ভিত্তিক আলাদা করে গ্রুপ করা হলো)।
-      const byFloorAndHeight = new Map<string, ColumnFix[]>();
-      for (const fix of fixes) {
+      // updateWallsPatchBatch একটা single floor-এর জন্য একবারে কাজ করে
+      // এবং একটাই patch সব wallId-তে বসায় — column tool-এর মতোই
+      // floor+newHeight দিয়ে group করা হচ্ছে, যাতে প্রতিটা wall তার
+      // নিজের সঠিক (floor-অনুযায়ী) height পায়।
+      const byFloorAndHeight = new Map<string, WallFix[]>();
+      for (const fix of selectedFixes) {
         const key = `${fix.floorId}::${fix.newHeight}`;
         const list = byFloorAndHeight.get(key) ?? [];
         list.push(fix);
@@ -138,11 +148,11 @@ export default function FixColumnHeightsPage() {
       let done = 0;
       for (const [, group] of byFloorAndHeight) {
         const { floorId, newHeight } = group[0];
-        await updateColumnsPatchBatch(
+        await updateWallsPatchBatch(
           projectId,
           buildingId,
           floorId,
-          group.map((g) => g.columnId),
+          group.map((g) => g.wallId),
           { height: newHeight },
         );
         done += group.length;
@@ -156,7 +166,7 @@ export default function FixColumnHeightsPage() {
     }
   }
 
-  const fixesByFloor = new Map<string, ColumnFix[]>();
+  const fixesByFloor = new Map<string, WallFix[]>();
   for (const fix of fixes) {
     const key = `${fix.floorName} (${fix.floorId})`;
     const list = fixesByFloor.get(key) ?? [];
@@ -164,17 +174,18 @@ export default function FixColumnHeightsPage() {
     fixesByFloor.set(key, list);
   }
 
+  const selectedCount = fixes.filter((f) => f.selected).length;
+
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <PageHeader eyebrow="ইউটিলিটি" title="Column Height Backfill" />
+      <PageHeader eyebrow="ইউটিলিটি" title="Wall Height Review" />
       <p className="-mt-4 text-sm text-ink-muted">
-        যেসব column-এর height তাদের নিজের floor-এর floorToFloorHeight-এর সাথে মিলছে না, সেগুলো
-        খুঁজে ঠিক করুন — Structural App-এর &quot;fully floating&quot; Model Checker error-এর root
-        cause fix। Wall-এ একই ধরনের mismatch থাকলে{' '}
-        <a href="/dashboard/tools/fix-wall-heights" className="underline">
-          Wall Height Review
-        </a>{' '}
-        টুলও দেখুন।
+        যেসব wall-এর height তাদের নিজের floor-এর floorToFloorHeight-এর সাথে মিলছে না, সেগুলো
+        খুঁজে দেখায় — সাধারণত Copy Floor-এর পুরনো বাগ (height উৎস floor থেকে হুবহু কপি হতো) এর
+        ফলাফল, Structural App-এর &quot;end point not connected&quot; Model Checker error-এর একটা
+        কারণ। Column-এর মতো এখানে সব mismatch স্বয়ংক্রিয়ভাবে &quot;ভুল&quot; ধরা হয় না — নিচে
+        প্রতিটা wall আলাদাভাবে বেছে/বাদ দিয়ে শুধু আসলেই ভুল হওয়া wall গুলো ঠিক করুন (ইচ্ছাকৃতভাবে
+        কম-উচ্চতার wall থাকলে সেটার checkbox বাদ দিন)।
       </p>
 
       <div className="space-y-4 rounded-sheet border border-line-strong bg-surface p-5">
@@ -234,35 +245,48 @@ export default function FixColumnHeightsPage() {
 
       {(status === 'scanned' || status === 'applying') && (
         <div className="space-y-4 rounded-sheet border border-line-strong bg-surface p-5">
-          <p className="text-sm text-ink-muted">মোট {scannedCount}টা column স্ক্যান করা হয়েছে।</p>
+          <p className="text-sm text-ink-muted">মোট {scannedCount}টা wall স্ক্যান করা হয়েছে।</p>
 
           {fixes.length === 0 ? (
             <p className="text-sm font-medium text-ink">
-              কোনো mismatch পাওয়া যায়নি — প্রতিটা column-এর height ইতিমধ্যে তার floor-এর সাথে মিলছে।
+              কোনো mismatch পাওয়া যায়নি — প্রতিটা wall-এর height ইতিমধ্যে তার floor-এর সাথে
+              মিলছে।
             </p>
           ) : (
             <>
               <p className="text-sm font-medium text-ink">
-                {fixes.length}টা column-এ mismatch পাওয়া গেছে:
+                {fixes.length}টা wall-এ mismatch পাওয়া গেছে ({selectedCount}টা নির্বাচিত):
               </p>
-              <div className="max-h-80 space-y-3 overflow-y-auto text-sm">
+              <div className="max-h-96 space-y-3 overflow-y-auto text-sm">
                 {Array.from(fixesByFloor.entries()).map(([floorKey, list]) => (
                   <div key={floorKey}>
                     <p className="font-medium text-ink">{floorKey}</p>
-                    <ul className="ml-4 list-disc text-ink-muted">
+                    <ul className="ml-4 space-y-1">
                       {list.map((f) => (
-                        <li key={f.columnId}>
-                          column {f.columnId}: {f.oldHeight}m → {f.newHeight}m
+                        <li key={f.wallId} className="flex items-center gap-2 text-ink-muted">
+                          <input
+                            type="checkbox"
+                            checked={f.selected}
+                            onChange={() => toggleFix(f.wallId)}
+                            disabled={status === 'applying'}
+                          />
+                          <span>
+                            wall ({f.wallLabel}): {f.oldHeight}m → {f.newHeight}m
+                          </span>
                         </li>
                       ))}
                     </ul>
                   </div>
                 ))}
               </div>
-              <Button variant="danger" onClick={applyFixes} disabled={status === 'applying'}>
+              <Button
+                variant="danger"
+                onClick={applyFixes}
+                disabled={status === 'applying' || selectedCount === 0}
+              >
                 {status === 'applying'
-                  ? `লেখা হচ্ছে... (${appliedCount}/${fixes.length})`
-                  : `${fixes.length}টা column আপডেট করুন (Apply)`}
+                  ? `লেখা হচ্ছে... (${appliedCount}/${selectedCount})`
+                  : `${selectedCount}টা wall আপডেট করুন (Apply)`}
               </Button>
             </>
           )}
@@ -271,9 +295,9 @@ export default function FixColumnHeightsPage() {
 
       {status === 'done' && (
         <div className="rounded-sheet border border-line-strong bg-surface p-5 text-sm font-medium text-ink">
-          সম্পন্ন — {appliedCount}টা column-এর height ঠিক করা হয়েছে। এখন EngineXDraw থেকে আবার
-          publish করে Structural App-এ &quot;Draw থেকে আনুন&quot; চাপলে upper-floor column-গুলো আর
-          floating দেখানো উচিত না।
+          সম্পন্ন — {appliedCount}টা wall-এর height ঠিক করা হয়েছে। এখন EngineXDraw থেকে আবার
+          publish হয়ে গেলে (auto-sync) Structural App-এ &quot;Draw থেকে আনুন&quot; চাপলে সেই
+          wall গুলো আর floating দেখানো উচিত না।
         </div>
       )}
     </div>

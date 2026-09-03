@@ -836,6 +836,20 @@ export async function copyFloorElements(
     openings: Opening[];
     stairs: Stair[];
   },
+  /**
+   * বাগফিক্স (Miftahul, 2026-09-03): আগে এই ফাংশন Wall.height/Column.height/
+   * Beam.elevation উৎস floor-এর মান হুবহু কপি করত (`...rest` spread) —
+   * target floor-এর floorToFloorHeight ভিন্ন হলে (Hub-seeded building বা
+   * ম্যানুয়ালি edit করা কোনো floor-এ প্রায়ই হয়, দেখুন handleCreateColumn-এর
+   * "বাগফিক্স" নোট, design/page.tsx) কপি করা wall/column-এর top ভুল
+   * elevation-এ বসত — পরের floor-এর base-এর সাথে মিলত না। ফলাফল ঠিক
+   * সেই Structural Model Checker "end point is not connected" error, শুধু
+   * freehand-drawn column-এর জন্যই না, Copy Floor দিয়ে বানানো প্রতিটা
+   * wall/column/beam-এই। height/elevation পাস করা optional রাখা হলো
+   * (আগের সব caller/টেস্ট না ভাঙার জন্য) — না দিলে আগের আচরণ (হুবহু কপি)
+   * অপরিবর্তিত থাকে, দিলে নিচের adjustHeights ব্লক চলে।
+   */
+  floorHeights?: { source: number; target: number },
 ): Promise<CopyFloorElementsResult> {
   const { walls, columns, beams, slabs, footings, openings, stairs } = elements;
 
@@ -872,17 +886,47 @@ export async function copyFloorElements(
   // doesn't itself decide what's a duplicate, so its returned `copied`
   // count is simply items.length. Skip-counts are computed by the
   // caller from (original array length − filtered array length).
+  // floorHeights দেওয়া থাকলে target floor-এর height-এর সাপেক্ষে
+  // Column.height/Beam.elevation ঠিক করার জন্য — উপরের param comment
+  // দ্রষ্টব্য কেন এটা দরকার। Column সবসময় base থেকে ঠিক floor-to-floor
+  // height পর্যন্ত যায় (handleCreateColumn-এর কনভেনশন), তাই সরাসরি
+  // target height বসানো হয়, source-এর সাথে ratio/offset না নিয়ে —
+  // এভাবে column-এর top সবসময় ঠিক পরের floor-এর base-এ পড়বে, source
+  // floor-এর height যাই থাক না কেন। Beam-এর elevation (soffit height)
+  // ভিন্ন — সেটা "floor height বিয়োগ beam depth" থেকে আসে
+  // (handleCreateBeam-এর কনভেনশন), তাই সরাসরি target height বসালে
+  // ভুল হতো (beam-এর নিজস্ব depth ভিন্ন হতে পারে) — উচিত shift হলো
+  // দুই floor-এর height-এর পার্থক্যটুকু যোগ করা, যাতে beam soffit
+  // আপেক্ষিকভাবে একই জায়গায় থাকে (ছাদের কাছে) কিন্তু নতুন floor-এর
+  // আসল height অনুযায়ী।
+  function adjustedHeight(current: number): number {
+    if (!floorHeights) return current;
+    return floorHeights.target;
+  }
+  function adjustedElevation(current: number): number {
+    if (!floorHeights) return current;
+    return current + (floorHeights.target - floorHeights.source);
+  }
+
   async function copyOne<T extends { id: string; floorId: string; createdAt: unknown; updatedAt?: unknown }>(
     items: T[],
     col: ReturnType<typeof subCol>,
+    heightField?: 'height' | 'elevation',
   ): Promise<{ copied: number }> {
     if (items.length === 0) return { copied: 0 };
     const batch = writeBatch(db);
     for (const item of items) {
       const { id: _id, floorId: _floorId, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = item as T & { updatedAt?: unknown };
       const ref = doc(col);
+      const heightPatch =
+        heightField === 'height' && typeof (rest as Record<string, unknown>).height === 'number'
+          ? { height: adjustedHeight((rest as unknown as { height: number }).height) }
+          : heightField === 'elevation' && typeof (rest as Record<string, unknown>).elevation === 'number'
+            ? { elevation: adjustedElevation((rest as unknown as { elevation: number }).elevation) }
+            : {};
       batch.set(ref, {
         ...rest,
+        ...heightPatch,
         floorId: targetFloorId,
         createdAt: serverTimestamp(),
         ...('updatedAt' in item ? { updatedAt: serverTimestamp() } : {}),
@@ -932,6 +976,7 @@ export async function copyFloorElements(
       wallIdMap.set(oldId, ref.id);
       batch.set(ref, {
         ...rest,
+        height: adjustedHeight(rest.height),
         floorId: targetFloorId,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -946,8 +991,8 @@ export async function copyFloorElements(
 
   const [columnsResult, beamsResult, slabsResult, footingsResult, openingsResult, stairsResult] =
     await Promise.all([
-      copyOne(nonDuplicateColumns, columnsCol(projectId, buildingId, targetFloorId)),
-      copyOne(nonDuplicateBeams, beamsCol(projectId, buildingId, targetFloorId)),
+      copyOne(nonDuplicateColumns, columnsCol(projectId, buildingId, targetFloorId), 'height'),
+      copyOne(nonDuplicateBeams, beamsCol(projectId, buildingId, targetFloorId), 'elevation'),
       copyOne(nonDuplicateSlabs, slabsCol(projectId, buildingId, targetFloorId)),
       copyOne(nonDuplicateFootings, subCol(projectId, buildingId, targetFloorId, 'footings')),
       copyOne(remappedOpenings, openingsCol(projectId, buildingId, targetFloorId)),

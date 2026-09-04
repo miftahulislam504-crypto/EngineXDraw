@@ -149,39 +149,78 @@ async function floorElements(
 
   const refs: BuildingElementRef[] = [];
 
-  // Wall → 'wall' | 'shear-wall' export split (Miftahul, 2026-08-25).
-  // Every wall in Draw is still just a Wall for every Draw-side purpose
-  // (drawing, join/miter, room boundary, rendering) — `isShearWall` (see
-  // geometry.ts's field comment) only changes the Hub `type` tag, which
-  // Structural uses to decide how the wall participates there:
-  //   - type: 'shear-wall'  → Structural models it as a full lateral-load-
-  //     resisting ShearWallElement (design/capacity checks apply).
-  //   - type: 'wall'        → Structural still models it (self-weight/dead-
-  //     load contribution, same AreaElement treatment as before) but it
-  //     never enters lateral design/capacity checks — Structural's own
-  //     design engine already only branches on shear-wall/core-wall for
-  //     that (weightOptimization.ts), so an ordinary wall was never more
-  //     than a self-weight source there even when this export always said
-  //     'wall'. This split just makes the intent explicit at the Hub
-  //     boundary instead of leaving it as an unstated downstream fact.
-  // Geometry shape is identical either way — only `type` differs.
+  // Wall → 'wall' | 'shear-wall' export split (Miftahul, 2026-08-25),
+  // revised to a payload-size split (Miftahul, 2026-09-04): Hub/Firestore
+  // load from walls was the single largest contributor to this export's
+  // size (a typical floor has far more ordinary walls than shear walls),
+  // so ordinary walls now cross the Hub boundary as a deliberately small
+  // ref instead of the full geometry payload shear walls still carry.
+  //   - type: 'shear-wall'  → full geometry (unchanged from before this
+  //     revision). Structural models it as a full lateral-load-resisting
+  //     ShearWallElement (design/capacity checks apply), so it needs
+  //     everything a modeled AreaElement needs.
+  //   - type: 'wall'        → lightweight ref: start/end (required —
+  //     Structural positions the self-weight line load along this
+  //     centerline, see hub-geometry-parser.ts's mapWallSelfWeightRef()),
+  //     thickness, height (both needed for the self-weight formula
+  //     itself), wallType, materialLabel, and libraryItemId. These four
+  //     short scalars are kept (unlike fireRatingMinutes, dropped below,
+  //     which nothing downstream reads) because two other consumers of
+  //     this same refs array still need them even for an ordinary wall:
+  //     buildScheduleExport() (this file, Estimate's wall schedule) reads
+  //     wallType/thicknessM for the Masonry BOQ, and the "Floor Loads
+  //     (Dead Load Source)" pass a little further down (referencedMaterialIds)
+  //     joins against libraryItemId to resolve the material's unit
+  //     weight — materialLabel can't substitute for that join, it's a
+  //     display string, not a catalog key. None of these four scalars is
+  //     the payload weight this split targets; fireRatingMinutes is
+  //     dropped from this ref because Structural's self-weight path has
+  //     no use for it and nothing else reads it off this refs array —
+  //     hub-schedule-export.ts's own Wall Schedule fetches walls
+  //     directly from Firestore (getWallsOnce), independent of this ref,
+  //     so it still gets fireRatingMinutes unaffected by this change.
+  //     Structural never models an ordinary wall as a WallElement
+  //     anymore — only a derived self-weight load lands on whatever
+  //     beam/slab actually carries it (Structural's own design engine
+  //     already only branched on shear-wall/core-wall for lateral
+  //     checks, so an ordinary wall was never more than a self-weight
+  //     source there — this just stops paying full-geometry-object cost
+  //     for that, and stops Structural persisting a modeled element per
+  //     ordinary wall).
   for (const w of walls as Wall[]) {
-    refs.push({
-      id: w.id,
-      type: w.isShearWall ? 'shear-wall' : 'wall',
-      levelId: floor.id,
-      geometry: {
-        start: w.start,
-        end: w.end,
-        thickness: w.thickness,
-        height: w.height,
-        wallType: w.type,
-        // Finish Schedule / Dead Load Source
-        materialLabel: w.materialLabel,
-        libraryItemId: w.libraryItemId,
-        fireRatingMinutes: w.fireRatingMinutes,
-      },
-    });
+    if (w.isShearWall) {
+      refs.push({
+        id: w.id,
+        type: 'shear-wall',
+        levelId: floor.id,
+        geometry: {
+          start: w.start,
+          end: w.end,
+          thickness: w.thickness,
+          height: w.height,
+          wallType: w.type,
+          // Finish Schedule / Dead Load Source
+          materialLabel: w.materialLabel,
+          libraryItemId: w.libraryItemId,
+          fireRatingMinutes: w.fireRatingMinutes,
+        },
+      });
+    } else {
+      refs.push({
+        id: w.id,
+        type: 'wall',
+        levelId: floor.id,
+        geometry: {
+          start: w.start,
+          end: w.end,
+          thickness: w.thickness,
+          height: w.height,
+          wallType: w.type,
+          materialLabel: w.materialLabel,
+          libraryItemId: w.libraryItemId,
+        },
+      });
+    }
   }
   for (const o of openings as Opening[]) {
     refs.push({

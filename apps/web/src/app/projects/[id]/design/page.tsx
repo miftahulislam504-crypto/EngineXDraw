@@ -332,10 +332,10 @@ export default function DesignStudioPage() {
 
   // Copy Floor — duplicates the currently-open floor's structural and
   // architectural elements (Wall, Column, Beam, Slab, Footing, Door/
-  // Window Opening, Stair) onto one or more other floors, at identical
-  // x/y position. See copyFloorElements in lib/floors.ts for exactly
-  // what is and isn't copied, and how openings get remapped onto their
-  // corresponding copied wall.
+  // Window Opening, Stair, Dimension, Note) onto one or more other
+  // floors, at identical x/y position. See copyFloorElements in
+  // lib/floors.ts for exactly what is and isn't copied, and how
+  // openings get remapped onto their corresponding copied wall.
   const [isCopyFloorPanelOpen, setIsCopyFloorPanelOpen] = useState(false);
   const [copyFloorTargetIds, setCopyFloorTargetIds] = useState<string[]>([]);
   const [isCopyingFloor, setIsCopyingFloor] = useState(false);
@@ -407,6 +407,8 @@ export default function DesignStudioPage() {
             footings,
             openings,
             stairs,
+            dimensions,
+            notes,
           },
           floorHeights,
         );
@@ -417,7 +419,9 @@ export default function DesignStudioPage() {
           result.slabs.skipped +
           result.footings.skipped +
           result.openings.skipped +
-          result.stairs.skipped;
+          result.stairs.skipped +
+          result.dimensions.skipped +
+          result.notes.skipped;
       }
       const successMessage = formatTemplate(t.designStudio.copyFloorSuccess, {
         count: copyFloorTargetIds.length,

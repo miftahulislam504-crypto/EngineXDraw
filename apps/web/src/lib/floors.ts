@@ -755,10 +755,24 @@ export const roofCrud = makeElementCrud<Roof>('roofs');
 /**
  * Copy Floor — duplicates one floor's structural and architectural
  * elements (Wall, Column, Beam, Slab, Footing, Door/Window Opening,
- * Stair) onto a different floor, at identical x/y plan position. Used
- * for "draw the ground floor once, then copy it to every floor above" —
- * a very common workflow, since most floors in a multi-storey building
- * repeat the same column/beam/wall/slab/opening/stair layout.
+ * Stair, Dimension, Note) onto a different floor, at identical x/y plan
+ * position. Used for "draw the ground floor once, then copy it to every
+ * floor above" — a very common workflow, since most floors in a
+ * multi-storey building repeat the same column/beam/wall/slab/opening/
+ * stair layout, and the dimension strings/notes annotating that layout
+ * are just as repetitive floor-to-floor as the geometry they describe.
+ *
+ * Dimensions and Notes carry no wall/element reference (a Dimension's
+ * start/end are bare geometric points, not tied to the wall they
+ * happen to measure) and no elevation-bearing field, so — like
+ * Stairs — they copy the same straightforward way as columns/beams/
+ * slabs/footings: verbatim aside from a fresh id and floorId. Neither
+ * kind goes through a duplicate-geometry guard (unlike walls/columns/
+ * beams/slabs/footings/stairs below) — two overlapping dimension
+ * strings or notes aren't a structural-modeling problem the way two
+ * overlapping columns are, so re-running Copy Floor onto a target that
+ * already has annotations will add a second copy rather than skip it;
+ * the person can delete the extras by hand if that happens.
  *
  * Walls are copied first and in isolation from the rest so an
  * old-wall-id -> new-wall-id map can be built from the result: each
@@ -820,6 +834,11 @@ export interface CopyFloorElementsResult {
   footings: { copied: number; skipped: number };
   openings: { copied: number; skipped: number };
   stairs: { copied: number; skipped: number };
+  /** No duplicate-geometry guard for these two (see function docstring)
+   * — skipped is always 0, kept only so the shape matches every other
+   * kind for callers that sum `.skipped` across the result. */
+  dimensions: { copied: number; skipped: number };
+  notes: { copied: number; skipped: number };
 }
 
 export async function copyFloorElements(
@@ -835,6 +854,8 @@ export async function copyFloorElements(
     footings: Footing[];
     openings: Opening[];
     stairs: Stair[];
+    dimensions: Dimension[];
+    notes: Note[];
   },
   /**
    * বাগফিক্স (Miftahul, 2026-09-03): আগে এই ফাংশন Wall.height/Column.height/
@@ -851,7 +872,7 @@ export async function copyFloorElements(
    */
   floorHeights?: { source: number; target: number },
 ): Promise<CopyFloorElementsResult> {
-  const { walls, columns, beams, slabs, footings, openings, stairs } = elements;
+  const { walls, columns, beams, slabs, footings, openings, stairs, dimensions, notes } = elements;
 
   // Read what's already on the target floor BEFORE writing anything, so
   // every duplicate check below (including wall-vs-wall further down)
@@ -989,15 +1010,25 @@ export async function copyFloorElements(
     .filter((o) => wallIdMap.has(o.wallId))
     .map((o) => ({ ...o, wallId: wallIdMap.get(o.wallId)! }));
 
-  const [columnsResult, beamsResult, slabsResult, footingsResult, openingsResult, stairsResult] =
-    await Promise.all([
-      copyOne(nonDuplicateColumns, columnsCol(projectId, buildingId, targetFloorId), 'height'),
-      copyOne(nonDuplicateBeams, beamsCol(projectId, buildingId, targetFloorId), 'elevation'),
-      copyOne(nonDuplicateSlabs, slabsCol(projectId, buildingId, targetFloorId)),
-      copyOne(nonDuplicateFootings, subCol(projectId, buildingId, targetFloorId, 'footings')),
-      copyOne(remappedOpenings, openingsCol(projectId, buildingId, targetFloorId)),
-      copyOne(nonDuplicateStairs, subCol(projectId, buildingId, targetFloorId, 'stairs')),
-    ]);
+  const [
+    columnsResult,
+    beamsResult,
+    slabsResult,
+    footingsResult,
+    openingsResult,
+    stairsResult,
+    dimensionsResult,
+    notesResult,
+  ] = await Promise.all([
+    copyOne(nonDuplicateColumns, columnsCol(projectId, buildingId, targetFloorId), 'height'),
+    copyOne(nonDuplicateBeams, beamsCol(projectId, buildingId, targetFloorId), 'elevation'),
+    copyOne(nonDuplicateSlabs, slabsCol(projectId, buildingId, targetFloorId)),
+    copyOne(nonDuplicateFootings, subCol(projectId, buildingId, targetFloorId, 'footings')),
+    copyOne(remappedOpenings, openingsCol(projectId, buildingId, targetFloorId)),
+    copyOne(nonDuplicateStairs, subCol(projectId, buildingId, targetFloorId, 'stairs')),
+    copyOne(dimensions, subCol(projectId, buildingId, targetFloorId, 'dimensions')),
+    copyOne(notes, subCol(projectId, buildingId, targetFloorId, 'notes')),
+  ]);
 
   return {
     walls: { copied: wallIdMap.size, skipped: walls.length - wallIdMap.size },
@@ -1012,6 +1043,10 @@ export async function copyFloorElements(
     // duplicate-geometry guard of its own beyond that.
     openings: { copied: openingsResult.copied, skipped: openings.length - remappedOpenings.length },
     stairs: { copied: stairsResult.copied, skipped: stairs.length - nonDuplicateStairs.length },
+    // No duplicate-geometry guard for dimensions/notes (see function
+    // docstring) — every source item is copied, so skipped is always 0.
+    dimensions: { copied: dimensionsResult.copied, skipped: 0 },
+    notes: { copied: notesResult.copied, skipped: 0 },
   };
 }
 export const rampCrud = makeElementCrud<Ramp>('ramps');

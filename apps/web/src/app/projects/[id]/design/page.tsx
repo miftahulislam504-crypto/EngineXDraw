@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import clsx from 'clsx';
 import { Button } from '@archibim/shared-ui';
@@ -202,6 +202,7 @@ function describeUnsupportedCorners(failed: { index: number; distanceMeters: num
 export default function DesignStudioPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const projectId = params.id;
   const { user } = useAuthStore();
 
@@ -606,6 +607,32 @@ export default function DesignStudioPage() {
       setFloorId((current) => current ?? fs[0]?.id ?? null);
     });
   }, [projectId, buildingId]);
+
+  // Deep-link support — dashboard/tools/find-element পেজ থেকে "Draw-এ
+  // খুলুন" লিংক ধরে আসলে (?floorId=...&selectKind=...&selectId=...)
+  // সঠিক floor-এ সুইচ করে element-টা সিলেক্ট করে দেয়, যাতে Structural
+  // App-এর Model Checker error-এ দেখানো raw elementId কে ইঞ্জিনিয়ারকে
+  // নিজে scroll/zoom করে খুঁজতে না হয়। floors লোড হওয়ার আগে floorId
+  // param থাকলেও সেট করা যাবে না (উপরের floors-subscribe effect তখনও
+  // ওই floorId-টা বৈধ কিনা জানে না) — তাই floors.length নির্ভর করে,
+  // floors আসার সাথে সাথেই এই effect আবার রান হয়ে param প্রয়োগ করবে।
+  // params পড়ার পর মুছে ফেলা হয় না (router.replace করা হয়নি) —
+  // ইচ্ছাকৃতভাবে সরল রাখা হলো যাতে পেজ রিফ্রেশ/ব্যাক-বাটনেও একই
+  // element আবার সিলেক্ট থাকে; প্রয়োজনে ভবিষ্যতে router.replace দিয়ে
+  // URL পরিষ্কার করা যাবে।
+  useEffect(() => {
+    if (floors.length === 0) return;
+    const paramFloorId = searchParams.get('floorId');
+    const selectKind = searchParams.get('selectKind') as SelectionKind | null;
+    const selectId = searchParams.get('selectId');
+
+    if (paramFloorId && floors.some((f) => f.id === paramFloorId)) {
+      setFloorId(paramFloorId);
+    }
+    if (selectKind && selectId) {
+      setSelection({ kind: selectKind, id: selectId });
+    }
+  }, [floors, searchParams, setSelection]);
 
   useEffect(() => {
     if (!buildingId) return;

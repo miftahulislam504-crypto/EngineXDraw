@@ -42,7 +42,7 @@ import { Button, Input, LengthInput } from '@archibim/shared-ui';
 import { useDesignStudioStore, type SelectionKind } from '@/lib/design-studio-store';
 import { useI18nStore, formatTemplate } from '@/lib/i18n';
 import type { Translations } from '@/lib/i18n/translations';
-import { getGridLineAutoLabel, getSectionLineAutoLabel } from '@/lib/floors';
+import { getGridLineAutoLabel, getSectionLineAutoLabel, getStructuralAutoLabel, getShearWallAutoLabel } from '@/lib/floors';
 
 export interface PropertiesPanelProps {
   walls: Wall[];
@@ -257,6 +257,23 @@ export function PropertiesPanel({
   const curtainWall =
     selection.kind === 'curtainWall' ? curtainWalls.find((c) => c.id === selection.id) : undefined;
   const parapet = selection.kind === 'parapet' ? parapets.find((p) => p.id === selection.id) : undefined;
+
+  // Structural App-এ (Model Checker/Validation) দেখানো একই "C3"/"B12"
+  // স্টাইল label এখানে echo করা — শুধু ৭টা category-র জন্য যেগুলো
+  // আদৌ Structural-এ StructuralElement হয়ে পৌঁছায় (getStructuralAutoLabel
+  // এর ফাইল-হেডার কমেন্ট দেখুন, lib/floors.ts)। বাকি সব category
+  // (door/window/room/roof/ceiling/... ইত্যাদি) এর জন্য undefined —
+  // সেগুলোর Structural-এ কোনো counterpart label নেই, তাই দেখানোর
+  // কিছু নেই।
+  const structuralAutoLabel =
+    column ? getStructuralAutoLabel('column', column.id, columns)
+    : beam ? getStructuralAutoLabel('beam', beam.id, beams)
+    : slab ? getStructuralAutoLabel('slab', slab.id, slabs)
+    : footing ? getStructuralAutoLabel('footing', footing.id, footings)
+    : stair ? getStructuralAutoLabel('stair', stair.id, stairs)
+    : parapet ? getStructuralAutoLabel('parapet', parapet.id, parapets)
+    : wall ? getShearWallAutoLabel(wall.id, walls)
+    : null;
   const gutter = selection.kind === 'gutter' ? gutters.find((g) => g.id === selection.id) : undefined;
   const skylight =
     selection.kind === 'skylight' ? skylights.find((s) => s.id === selection.id) : undefined;
@@ -314,6 +331,15 @@ export function PropertiesPanel({
           ✕
         </button>
       </div>
+
+      {structuralAutoLabel && (
+        <div className="mb-3 -mt-1 flex items-center gap-1.5">
+          <span className="rounded bg-ink/5 px-1.5 py-0.5 font-mono text-xs font-medium text-ink">
+            {structuralAutoLabel}
+          </span>
+          <span className="text-[10px] text-ink-faint">Structural App label</span>
+        </div>
+      )}
 
       {wall && (
         <div className="flex flex-col gap-3">

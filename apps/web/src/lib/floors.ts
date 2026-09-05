@@ -1105,6 +1105,87 @@ export function getGridLineAutoLabel(line: GridLine, allLines: GridLine[]): stri
   return numberToLetters(n);
 }
 
+/**
+ * Structural App-এর Model Checker label ("Column C3 (Level 2)")
+ * এই Draw-এর PropertiesPanel-এও echo করার জন্য — Miftahul,
+ * ২০২৬-০৯-০৫ ("element এর উপর click করলে প্রোপার্টি panel এ যেনো
+ * দেখা যায় label/tag")।
+ *
+ * Structural-এর hub-geometry-parser.ts এর CATEGORY_TAGS + LabelCounter
+ * এর হুবহু mirror — category tag প্রিফিক্স এবং "একই (category, floor)
+ * জোড়ায় ১ থেকে শুরু ক্রমিক সংখ্যা" নিয়ম দুই কোডবেসেই অভিন্ন রাখা
+ * হয়েছে ইচ্ছাকৃতভাবে, যাতে এখানে দেখানো "C3" ঠিক Structural-এর
+ * "Column C3 (Level 2)"-এর সেই C3-ই বোঝায়।
+ *
+ * কেন এই কাউন্ট মেলে (কোনো নতুন write/fetch ছাড়াই): Structural-এর
+ * LabelCounter ওই একই BuildingElementRef[] array iterate করে যেটা
+ * hub-write.ts এর floorElements() বানায় — আর সেই array একই
+ * getColumnsOnce/getBeamsOnce/getSlabsOnce/footingCrud.getOnce/
+ * stairCrud.getOnce/parapetCrud.getOnce/getWallsOnce কল থেকে আসে যা
+ * Draw নিজেই subscribeToColumns/subscribeToBeams/... দিয়ে নিজের
+ * PropertiesPanel state-এ রাখে (কোনো sort/reorder এর মাঝে হয় না) —
+ * অর্থাৎ Draw-এর নিজের `columns`/`beams`/... array-টাই সেই একই
+ * array, তাই "এই array-তে আমার নিজের index" গুনলেই Structural-এর
+ * counter-এর সাথে মিলবে। allOfCategory প্যারামিটার হিসেবে সেই
+ * floor-scoped array-টাই (columns/beams/slabs/footings/stairs/
+ * parapets/shear-wall-flagged walls) সরাসরি পাস করতে হবে —
+ * PropertiesPanel এ এগুলো এমনিতেই props হিসেবে আছে।
+ *
+ * একটা গুরুত্বপূর্ণ ব্যতিক্রম: Firestore-এর array order কড়াভাবে
+ * guaranteed stable না (কোনো orderBy নেই কোনো getXOnce/subscribeToX
+ * কলে) — তাই কোনো element delete+recreate হলে বা খুবই কদাচিৎ backend
+ * reorder এ এই label এক-দুই সংখ্যা শিফট হতে পারে। এটা শুধু একটা
+ * display convenience label (Structural-এর নিজের comment এও এই একই
+ * trade-off স্বীকার করা আছে — buildDisplayLabel() এর "permanent
+ * numbering scheme হিসেবে নির্ভর করা উচিত না" নোট দেখুন), raw
+ * elementId-ই একমাত্র নির্ভরযোগ্য identity — সেটাই আসল "same element"
+ * নিশ্চয়তা দেয়, এই label শুধু চোখে-দেখে-দ্রুত-মেলানোর সুবিধার জন্য।
+ *
+ * shear-wall/core-wall এর জন্য আলাদা কোনো Draw collection নেই (ordinary
+ * Wall-এরই isShearWall flag), তাই ওই ট্যাগ getShearWallAutoLabel() এ
+ * আলাদাভাবে হ্যান্ডল করা হলো (নিচে) — এই ফাংশনটা বাকি ৬টা category-র
+ * জন্য (Column/Beam/Slab/Footing/Stair/Parapet), যাদের প্রতিটাই তার
+ * নিজের collection-এর পুরো array-ই "same category" ধরে (কোনো
+ * sub-filtering লাগে না)।
+ */
+const STRUCTURAL_CATEGORY_TAGS = {
+  column: 'C',
+  beam: 'B',
+  slab: 'S',
+  footing: 'F',
+  stair: 'ST',
+  parapet: 'P',
+} as const;
+
+type StructuralCategory = keyof typeof STRUCTURAL_CATEGORY_TAGS;
+
+export function getStructuralAutoLabel(
+  category: StructuralCategory,
+  elementId: string,
+  allOfCategory: { id: string }[],
+): string {
+  const index = allOfCategory.findIndex((e) => e.id === elementId);
+  const n = index < 0 ? allOfCategory.length : index;
+  return `${STRUCTURAL_CATEGORY_TAGS[category]}${n + 1}`;
+}
+
+/**
+ * Shear Wall-এর জন্য আলাদা ট্যাগ ("SW1", "SW2"...) — Structural-এর
+ * mapWall()/CATEGORY_TAGS["shear-wall"]="SW" এর সাথে মিলিয়ে। ordinary
+ * (non-shear) wall Structural-এ কোনো tagged element হয় না (শুধু
+ * self-weight source), তাই তার জন্য কোনো label নেই — allWalls থেকে
+ * প্রথমে isShearWall দিয়ে ফিল্টার করে, তারপর সেই sub-array-তে নিজের
+ * index বের করা হয় (Structural-এর নিজস্ব for-loop এও ঠিক এই একই
+ * ক্রমে শুধু isShearWall wall-গুলোর জন্য LabelCounter.next("shear-wall",
+ * ...) কল হয়, non-shear wall কখনো ওই counter ছোঁয়ই না)।
+ */
+export function getShearWallAutoLabel(wallId: string, allWalls: Wall[]): string | null {
+  const shearWalls = allWalls.filter((w) => w.isShearWall);
+  const index = shearWalls.findIndex((w) => w.id === wallId);
+  if (index < 0) return null; // এই wall shear wall না — Structural এ কোনো tagged label নেই
+  return `SW${index + 1}`;
+}
+
 /** Turns one GridSystem axis array's own bay spacings into absolute
  * meter positions via a running cumulative sum — the single place this
  * conversion happens (see Building.gridSystem's doc comment) so every
